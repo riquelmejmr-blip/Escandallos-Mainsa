@@ -43,73 +43,104 @@ def obtener_mermas(n):
     return 120, 170
 
 st.set_page_config(page_title="PLV Pro Calc", layout="wide")
-st.title("🛠 Calculadora PLV con Desglose de Partidas")
+st.title("🛠 Calculadora PLV - Escalado y Desglose")
 
 # --- SIDEBAR ---
 with st.sidebar:
     st.header("⚙️ Ajustes Globales")
-    cants_str = st.text_input("Cantidades (ej: 100, 500, 1000)", "200, 500")
-    lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
+    cants_input = st.text_input("Cantidades (separadas por comas)", "200, 500, 1000")
+    lista_cants = [int(x.strip()) for x in cants_input.split(",") if x.strip().isdigit()]
     
     st.divider()
     min_manip = st.number_input("Minutos Manipulación / Mueble", value=15)
-    dificultad = st.selectbox("Dificultad Unitaria", [0.02, 0.061, 0.091], format_func=lambda x: f"{x} €")
-    mult = st.number_input("Multiplicador Comercial", value=2.2)
+    dificultad_val = st.selectbox("Dificultad Unitaria", [0.02, 0.061, 0.091], format_func=lambda x: f"{x} €")
+    multiplicador = st.number_input("Multiplicador Comercial", value=2.2)
 
 # --- PIEZAS ---
-if 'piezas' not in st.session_state: st.session_state.piezas = []
-if st.button("➕ Añadir Nueva Pieza"): st.session_state.piezas.append({})
+if 'num_piezas' not in st.session_state: st.session_state.num_piezas = 1
+
+col_btn1, col_btn2 = st.columns([1, 5])
+if col_btn1.button("➕ Añadir Pieza"): st.session_state.num_piezas += 1
+if col_btn2.button("🗑 Reiniciar"): st.session_state.num_piezas = 1
 
 datos_piezas = []
-for i, _ in enumerate(st.session_state.piezas):
+for i in range(st.session_state.num_piezas):
     with st.expander(f"Configuración Pieza #{i+1}", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            p_m = st.number_input(f"Pliegos/Mueble #{i+1}", value=1, key=f"pm{i}")
-            anc = st.number_input(f"Ancho mm #{i+1}", value=700, key=f"an{i}")
-            lar = st.number_input(f"Largo mm #{i+1}", value=1000, key=f"la{i}")
+            pm = st.number_input(f"Pliegos/Mueble", value=1, key=f"pm{i}")
+            an = st.number_input(f"Ancho (mm)", value=700, key=f"an{i}")
+            la = st.number_input(f"Largo (mm)", value=1000, key=f"la{i}")
         with c2:
-            p_f = st.selectbox(f"Cartoncillo Frontal #{i+1}", list(PRECIOS["cartoncillo"].keys()), index=1, key=f"pf{i}")
-            g_f = st.number_input(f"Gramaje Frontal #{i+1}", value=PRECIOS["cartoncillo"][p_f]["gramaje"], key=f"gf{i}")
-            pla = st.selectbox(f"Plancha Base #{i+1}", list(PRECIOS["planchas"].keys()), key=f"pl{i}")
-            acab_pl = st.selectbox(f"Calidad Plancha #{i+1}", ["C/C", "B/C", "B/B"], key=f"ap{i}") if pla != "Ninguna" and "AC" not in pla else "C/C"
-            p_d = st.selectbox(f"Cartoncillo Dorso #{i+1}", list(PRECIOS["cartoncillo"].keys()), key=f"pd{i}")
-            g_d = st.number_input(f"Gramaje Dorso #{i+1}", value=PRECIOS["cartoncillo"][p_d]["gramaje"], key=f"gd{i}")
+            pf = st.selectbox(f"Cartoncillo Frontal", list(PRECIOS["cartoncillo"].keys()), index=1, key=f"pf{i}")
+            gf = st.number_input(f"Gramaje Frontal", value=PRECIOS["cartoncillo"][pf]["gramaje"], key=f"gf{i}")
+            pl = st.selectbox(f"Plancha Base", list(PRECIOS["planchas"].keys()), key=f"pl{i}")
+            ap = st.selectbox(f"Calidad Plancha", ["C/C", "B/C", "B/B"], key=f"ap{i}") if pl != "Ninguna" and "AC" not in pl else "C/C"
+            pd_sel = st.selectbox(f"Cartoncillo Dorso", list(PRECIOS["cartoncillo"].keys()), key=f"pd{i}")
+            gd = st.number_input(f"Gramaje Dorso", value=PRECIOS["cartoncillo"][pd_sel]["gramaje"], key=f"gd{i}")
         with c3:
-            imp = st.selectbox(f"Impresión #{i+1}", ["Digital", "Offset", "No"], key=f"im{i}")
-            n_t = st.number_input(f"Tintas", 1, 6, 4, key=f"nt{i}") if imp == "Offset" else 0
-            bar = st.checkbox(f"Barniz", key=f"ba{i}") if imp == "Offset" else False
-            pel = st.selectbox(f"Peliculado #{i+1}", list(PRECIOS["peliculado"].keys()), key=f"pe{i}")
-            cor = st.selectbox(f"Corte #{i+1}", ["Troquelado", "Plotter"], key=f"co{i}")
+            im = st.selectbox(f"Impresión", ["Digital", "Offset", "No"], key=f"im{i}")
+            nt = st.number_input(f"Tintas", 1, 6, 4, key=f"nt{i}") if im == "Offset" else 0
+            ba = st.checkbox(f"Barniz", key=f"ba{i}") if im == "Offset" else False
+            pe = st.selectbox(f"Peliculado", list(PRECIOS["peliculado"].keys()), key=f"pe{i}")
+            co = st.selectbox(f"Corte", ["Troquelado", "Plotter"], key=f"co{i}")
         
-        datos_piezas.append({"p": p_m, "w": anc, "h": lar, "pf": p_f, "gf": g_f, "pla": pla, "acab": acab_pl, "pd": p_d, "gd": g_d, "imp": imp, "nt": n_t, "bar": bar, "pel": pel, "cor": cor})
+        datos_piezas.append({"p": pm, "w": an, "h": la, "pf": pf, "gf": gf, "pla": pl, "acab": ap, "pd": pd_sel, "gd": gd, "imp": im, "nt": nt, "bar": ba, "pel": pe, "cor": co})
 
 # --- EXTRAS ---
 st.divider()
 extras_sel = st.multiselect("Accesorios de Manipulación", list(PRECIOS["extras"].keys()))
 datos_extras = []
 if extras_sel:
-    cols = st.columns(len(extras_sel))
-    for idx, ex in enumerate(extras_sel):
-        cant_ex = cols[idx].number_input(f"Uds {ex}/mueble", value=1.0, key=f"ex{idx}")
-        datos_extras.append({"n": ex, "q": cant_ex})
+    cols_ex = st.columns(len(extras_sel))
+    for idx, ex_name in enumerate(extras_sel):
+        q_ex = cols_ex[idx].number_input(f"Cant. {ex_name}/ud", value=1.0, key=f"ex{idx}")
+        datos_extras.append({"nombre": ex_name, "cantidad": q_ex})
 
-# --- CÁLCULOS Y RESUMEN PARTIDAS ---
-resultados_escalado = []
-desgloses_por_cantidad = {}
+# --- CÁLCULOS ---
+res_final = []
+desgloses = {}
 
 for q_f in lista_cants:
-    partidas = {"Materiales": 0.0, "Impresión": 0.0, "Acabado": 0.0, "Corte": 0.0, "Manipulación": 0.0}
+    det = {"Materiales": 0.0, "Impresión": 0.0, "Acabado": 0.0, "Corte": 0.0, "Manipulación": 0.0}
     
     for pz in datos_piezas:
-        n_b = q_f * pz["p"]
-        m_n, m_i = obtener_mermas(n_b)
-        h_pap = n_b + m_n + m_i
-        h_pro = n_b + m_n
-        m2_u = (pz["w"] * pz["h"]) / 1_000_000
+        nb = q_f * pz["p"]
+        mn, mi = obtener_mermas(nb)
+        h_pap = nb + mn + mi
+        h_pro = nb + mn
+        m2 = (pz["w"] * pz["h"]) / 1_000_000
         
-        # Partida Materiales
-        c_p1 = h_pap * m2_u * (pz["gf"]/1000) * PRECIOS["cartoncillo"][pz["pf"]]["precio_kg"]
-        c_p2 = h_pap * m2_u * (pz["gd"]/1000) * PRECIOS["cartoncillo"][pz["pd"]]["precio_kg"]
-        c_pla = (h_pro * m2_u * PRECIOS["planchas"][pz["pla"]][pz["acab"]]) if pz["pla"] != "Ninguna" else 0
-        pasadas = (1 if pz["pf"] != "Ninguno" else 0) + (
+        # 1. Materiales
+        cp1 = h_pap * m2 * (pz["gf"]/1000) * PRECIOS["cartoncillo"][pz["pf"]]["precio_kg"]
+        cp2 = h_pap * m2 * (pz["gd"]/1000) * PRECIOS["cartoncillo"][pz["pd"]]["precio_kg"]
+        cpl = (h_pro * m2 * PRECIOS["planchas"][pz["pla"]][pz["acab"]]) if pz["pla"] != "Ninguna" else 0
+        pasa = (1 if pz["pf"] != "Ninguno" else 0) + (1 if pz["pd"] != "Ninguno" else 0)
+        ccn = (h_pro * m2 * PRECIOS["planchas"][pz["pla"]]["peg"] * pasa) if pz["pla"] != "Ninguna" else 0
+        det["Materiales"] += (cp1 + cp2 + cpl + ccn)
+        
+        # 2. Impresión
+        if pz["imp"] == "Digital": det["Impresión"] += (h_pap * m2 * 6.5)
+        elif pz["imp"] == "Offset":
+            base = 60 if h_pap < 100 else (60 + 0.15*(h_pap-100) if h_pap < 500 else (120 if h_pap <= 2000 else 120 + 0.015*(h_pap-2000)))
+            det["Impresión"] += (base * (pz["nt"] + (1 if pz["bar"] else 0)))
+            
+        # 3. Acabado
+        det["Acabado"] += (h_pro * m2 * PRECIOS["peliculado"][pz["pel"]])
+        
+        # 4. Corte
+        if pz["cor"] == "Troquelado":
+            ft = 107.7 if (pz["h"] > 1000 or pz["w"] > 700) else (80.77 if (pz["h"] == 1000 and pz["w"] == 700) else 48.19)
+            vt = 0.135 if (pz["h"] > 1000 or pz["w"] > 700) else (0.09 if (pz["h"] == 1000 and pz["w"] == 700) else 0.06)
+            det["Corte"] += (ft + h_pro * vt)
+        else: det["Corte"] += (h_pro * 1.5)
+
+    # 5. Manipulación y Extras
+    cex = sum(PRECIOS["extras"][e["nombre"]] * e["cantidad"] * q_f for e in datos_extras)
+    det["Manipulación"] = ((min_manip/60)*18*q_f) + (q_f*dificultad_val) + cex
+    
+    coste_f = sum(det.values())
+    desgloses[q_f] = det
+    res_final.append({"Cantidad": q_f, "Coste Fab": f"{coste_f:.2f}€", "PV Total": f"{coste_f*multiplicador:.2f}€", "Unidad": f"{(coste_f*multiplicador/q_f):.2f}€"})
+
+# --- TABLA Y DESGL
