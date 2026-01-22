@@ -143,4 +143,13 @@ for q_f in lista_cants:
     desgloses[q_f] = det
     res_final.append({"Cantidad": q_f, "Coste Fab": f"{coste_f:.2f}€", "PV Total": f"{coste_f*multiplicador:.2f}€", "Unidad": f"{(coste_f*multiplicador/q_f):.2f}€"})
 
-# --- TABLA Y DESGL
+# --- TABLA Y DESGLOSE ---
+st.header("📊 Escalado de Precios")
+st.table(pd.DataFrame(res_final))
+
+st.header("🔍 Desglose por Partidas")
+for q, d in desgloses.items():
+    with st.expander(f"Ver detalle: {q} unidades"):
+        df_d = pd.DataFrame(list(d.items()), columns=["Partida", "Coste (€)"])
+        st.table(df_d)
+        st.write(f"**Beneficio Bruto Estimado:** {(sum(d.values())*(multiplicador-1)):.2f} €")
