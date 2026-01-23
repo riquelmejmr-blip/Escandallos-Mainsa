@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# --- 1. CONFIGURACIÓN DE PRECIOS Y GRAMAJES ---
+# --- 1. CONFIGURACIÓN DE PRECIOS ---
 PRECIOS = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0, "gramaje": 0},
@@ -40,16 +40,17 @@ def calcular_mermas(n, es_digital=False):
 # --- 2. INICIALIZACIÓN DE SESIÓN ---
 st.set_page_config(page_title="MAINSA PLV - PRO", layout="wide")
 
-PIEZA_MAESTRA = {
-    "nombre": "Parte", "pliegos": 1.0, "w": 700, "h": 1000, 
-    "pf": "Zenith", "gf": 350, "pl": "Ninguna", "ap": "C/C", 
-    "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, 
-    "im_d": "No", "nt_d": 1, "ba_d": False, "pel": "Sin Peliculado", 
-    "pel_d": "Sin Peliculado", "ld": False, "ld_d": False, "cor": "Troquelado"
-}
+def crear_forma_vacia(index):
+    return {
+        "nombre": f"Forma {index + 1}", "pliegos": 1.0, "w": 0, "h": 0, 
+        "pf": "Ninguno", "gf": 0, "pl": "Ninguna", "ap": "C/C", 
+        "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, 
+        "im_d": "No", "nt_d": 1, "ba_d": False, "pel": "Sin Peliculado", 
+        "pel_d": "Sin Peliculado", "ld": False, "ld_d": False, "cor": "Troquelado"
+    }
 
 if 'piezas_dict' not in st.session_state:
-    st.session_state.piezas_dict = {0: PIEZA_MAESTRA.copy()}
+    st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
 if 'lista_extras' not in st.session_state:
     st.session_state.lista_extras = []
 
@@ -75,37 +76,34 @@ with st.sidebar:
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
 
-# --- 4. GESTIÓN DE DATOS ---
+# --- 4. GESTIÓN DE FORMAS ---
 if not modo_comercial:
     c1, c2 = st.columns([1, 5])
     if c1.button("➕ Añadir Forma"):
         nid = max(st.session_state.piezas_dict.keys()) + 1 if st.session_state.piezas_dict else 0
-        st.session_state.piezas_dict[nid] = PIEZA_MAESTRA.copy()
+        st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
         st.rerun()
     if c2.button("🗑 Reiniciar"):
-        st.session_state.piezas_dict = {0: PIEZA_MAESTRA.copy()}
+        st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
         st.session_state.lista_extras = []
         st.rerun()
 
     for p_id in list(st.session_state.piezas_dict.keys()):
         p = st.session_state.piezas_dict[p_id]
-        for k, v in PIEZA_MAESTRA.items():
-            if k not in p: p[k] = v
-            
-        with st.expander(f"🛠 Configuración: {p['nombre']}", expanded=True):
+        with st.expander(f"🛠 {p['nombre']}", expanded=True):
             col1, col2, col3 = st.columns(3)
             with col1:
-                p['nombre'] = st.text_input("Nombre", p['nombre'], key=f"n_{p_id}")
+                p['nombre'] = st.text_input("Etiqueta", p['nombre'], key=f"n_{p_id}")
                 p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p['pliegos']), step=0.1, key=f"p_{p_id}")
-                p['w'], p['h'] = st.number_input("Ancho mm", 1, 5000, int(p['w']), key=f"w_{p_id}"), st.number_input("Largo mm", 1, 5000, int(p['h']), key=f"h_{p_id}")
+                p['w'], p['h'] = st.number_input("Ancho mm", 0, 5000, int(p['w']), key=f"w_{p_id}"), st.number_input("Largo mm", 0, 5000, int(p['h']), key=f"h_{p_id}")
                 st.markdown("**Impresión Cara**")
                 p['im'] = st.selectbox("Sistema Cara", ["Offset", "Digital", "No"], ["Offset", "Digital", "No"].index(p['im']), key=f"im_{p_id}")
                 if p['im'] == "Offset":
-                    p['nt'] = st.number_input("Tintas F.", 1, 6, max(1, int(p['nt'])), key=f"nt_{p_id}")
-                    p['ba'] = st.checkbox("Barniz F.", p['ba'], key=f"ba_{p_id}")
+                    p['nt'] = st.number_input("Tintas F.", 1, 6, max(1, int(p.get('nt',4))), key=f"nt_{p_id}")
+                    p['ba'] = st.checkbox("Barniz F.", p.get('ba',False), key=f"ba_{p_id}")
                 elif p['im'] == "Digital":
-                    p['ld'] = st.checkbox("Laminado Digital F.", p['ld'], key=f"ld_{p_id}")
-                p['pel'] = st.selectbox("Peliculado Cara", list(PRECIOS["peliculado"].keys()), list(PRECIOS["peliculado"].keys()).index(p['pel']), key=f"pel_{p_id}")
+                    p['ld'] = st.checkbox("Laminado Digital F.", p.get('ld',False), key=f"ld_{p_id}")
+                p['pel'] = st.selectbox("Peliculado Cara", list(PRECIOS["peliculado"].keys()), list(PRECIOS["peliculado"].keys()).index(p.get('pel','Sin Peliculado')), key=f"pel_{p_id}")
 
             with col2:
                 st.markdown("**Materia Prima**")
@@ -125,38 +123,16 @@ if not modo_comercial:
             with col3:
                 p['cor'] = st.selectbox("Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
                 if p['pd'] != "Ninguno":
-                    st.markdown("**Impresión y Acabado Dorso**")
-                    p['im_d'] = st.selectbox("Sistema Dorso", ["Offset", "Digital", "No"], ["Offset", "Digital", "No"].index(p['im_d']), key=f"imd_{p_id}")
+                    st.markdown("**Dorso: Impresión y Acabado**")
+                    p['im_d'] = st.selectbox("Sistema Dorso", ["Offset", "Digital", "No"], ["Offset", "Digital", "No"].index(p.get('im_d','No')), key=f"imd_{p_id}")
                     if p['im_d'] == "Offset":
-                        p['nt_d'] = st.number_input("Tintas D.", 1, 6, max(1, int(p['nt_d'])), key=f"ntd_{p_id}")
-                        p['ba_d'] = st.checkbox("Barniz D.", p['ba_d'], key=f"bad_{p_id}")
+                        p['nt_d'] = st.number_input("Tintas D.", 1, 6, max(1, int(p.get('nt_d',1))), key=f"ntd_{p_id}")
+                        p['ba_d'] = st.checkbox("Barniz D.", p.get('ba_d',False), key=f"bad_{p_id}")
                     elif p['im_d'] == "Digital":
-                        p['ld_d'] = st.checkbox("Laminado Digital D.", p['ld_d'], key=f"ldd_{p_id}")
-                    p['pel_d'] = st.selectbox("Peliculado Dorso", list(PRECIOS["peliculado"].keys()), list(PRECIOS["peliculado"].keys()).index(p['pel_d']), key=f"peld_{p_id}")
+                        p['ld_d'] = st.checkbox("Laminado Digital D.", p.get('ld_d',False), key=f"ldd_{p_id}")
+                    p['pel_d'] = st.selectbox("Peliculado Dorso", list(PRECIOS["peliculado"].keys()), list(PRECIOS["peliculado"].keys()).index(p.get('pel_d','Sin Peliculado')), key=f"peld_{p_id}")
 
                 if st.button("🗑 Eliminar", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
-
-    st.divider()
-    st.subheader("📦 Accesorios y Extras")
-    cex1, cex2 = st.columns(2)
-    with cex1:
-        ex_list_sel = st.selectbox("De la lista:", ["---"] + list(PRECIOS["extras_base"].keys()))
-        ex_q = st.number_input("Uds/mueble:", 1.0, 100.0, 1.0, key="q_ex_list")
-        if st.button("➕ Añadir Lista") and ex_list_sel != "---":
-            st.session_state.lista_extras.append({"n": ex_list_sel, "c": PRECIOS["extras_base"][ex_list_sel], "q": ex_q})
-            st.rerun()
-    with cex2:
-        en = st.text_input("Extra Manual:", key="ex_m_n")
-        ec = st.number_input("Coste Ud:", 0.0, 50.0, key="ex_m_c")
-        eq = st.number_input("Uds/mueble manual:", 1.0, 100.0, 1.0, key="ex_m_q")
-        if st.button("➕ Manual") and en:
-            st.session_state.lista_extras.append({"n": en, "c": ec, "q": eq})
-            st.rerun()
-    
-    for i, ex in enumerate(st.session_state.lista_extras):
-        ca, cb, cc, cd = st.columns([3, 2, 2, 1])
-        ca.write(f"**{ex['n']}**"); cb.write(f"{ex['c']}€/ud"); cc.write(f"x{ex['q']} uds")
-        if cd.button("🗑", key=f"del_ex_list_{i}"): st.session_state.lista_extras.pop(i); st.rerun()
 
 # --- 5. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
@@ -215,7 +191,6 @@ if modo_comercial:
             <tr style="background:#1E88E5;color:white;"><th>Cantidad</th><th>PVP Total</th><th>PVP Unidad</th></tr>
             {f_h}
         </table>
-        <p style="font-size:0.8em;color:gray;margin-top:30px;">* Precios sin IVA. Validez: 15 días.</p>
     </div>""", unsafe_allow_html=True)
 else:
     if res_final:
