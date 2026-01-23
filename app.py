@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# --- CONFIGURACIÓN Y PRECIOS ---
+# --- CONFIGURACIÓN DE PRECIOS ---
 PRECIOS = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0, "gramaje": 0},
@@ -43,10 +43,10 @@ def obtener_mermas(n):
 st.set_page_config(page_title="Escandallos MAINSA PLV", layout="wide")
 st.title("📦 Escandallos MAINSA PLV")
 
-# --- SIDEBAR ---
+# --- PANEL LATERAL ---
 with st.sidebar:
     st.header("⚙️ Ajustes Globales")
-    cants_raw = st.text_input("Cantidades (ej: 200, 500, 1000)", "200")
+    cants_raw = st.text_input("Cantidades (ej: 200, 500)", "200")
     lista_cants = []
     for x in cants_raw.split(","):
         try: lista_cants.append(int(float(x.strip())))
@@ -57,11 +57,11 @@ with st.sidebar:
     dif_ud = st.selectbox("Dificultad Unitaria", [0.02, 0.061, 0.091], index=2, format_func=lambda x: f"{x}€ (Difícil)" if x==0.091 else f"{x}€")
     margen_com = st.number_input("Multiplicador Comercial", value=2.2)
 
-# --- GESTIÓN DE PIEZAS ---
+# --- CONFIGURACIÓN DE PIEZAS ---
 if 'npz' not in st.session_state: st.session_state.npz = 1
-col_btn1, col_btn2 = st.columns([1, 6])
-if col_btn1.button("➕ Pieza"): st.session_state.npz += 1
-if col_btn2.button("🗑 Reset"): st.session_state.npz = 1
+c_btn1, c_btn2 = st.columns([1, 6])
+if c_btn1.button("➕ Pieza"): st.session_state.npz += 1
+if c_btn2.button("🗑 Reset"): st.session_state.npz = 1
 
 datos_escandallo = []
 for i in range(st.session_state.npz):
@@ -69,8 +69,8 @@ for i in range(st.session_state.npz):
         c1, c2, c3 = st.columns(3)
         with c1:
             pz_m = st.number_input(f"Pliegos/Mueble #{i+1}", 1, key=f"pm{i}")
-            w_mm = st.number_input(f"Ancho (mm) #{i+1}", min_value=1, value=700, key=f"w{i}")
-            h_mm = st.number_input(f"Largo (mm) #{i+1}", min_value=1, value=1000, key=f"h{i}")
+            w_mm = st.number_input(f"Ancho (mm) #{i+1}", 1, 3000, 700, key=f"w{i}")
+            h_mm = st.number_input(f"Largo (mm) #{i+1}", 1, 3000, 1000, key=f"h{i}")
         with c2:
             pf = st.selectbox(f"C. Frontal #{i+1}", list(PRECIOS["cartoncillo"].keys()), 1, key=f"pf{i}")
             gf = st.number_input(f"Gramaje F. #{i+1}", PRECIOS["cartoncillo"][pf]["gramaje"], key=f"gf{i}") if pf != "Ninguno" else 0
@@ -106,9 +106,9 @@ if acc_sel:
 # --- MOTOR DE CÁLCULO ---
 res_t = []; desc_t = {}
 for q_obj in lista_cants:
-    # NUEVO: Calculamos merma del manipulado (basado en el total de muebles)
+    # APLICAMOS MERMA AL MANIPULADO
     mn_mueble, _ = obtener_mermas(q_obj)
-    q_proceso_manip = q_obj + mn_mueble
+    q_proceso_mueble = q_obj + mn_mueble
     
     coste_formas = 0.0; det_f = []
     for idx, pz in enumerate(datos_escandallo):
@@ -147,22 +147,26 @@ for q_obj in lista_cants:
         coste_formas += s_pz
         det_f.append({"Pieza": idx+1, "Mat": c_mat, "Imp": c_imp, "Acab": c_ac, "Corte": c_co, "Total": s_pz})
 
-    # Manipulación con MERMA (q_proceso_manip)
-    c_man = ((segundos_mueble / 3600) * 18 * q_proceso_manip) + (q_proceso_manip * dif_ud)
-    c_ex = sum(PRECIOS["extras"][e["n"]] * e["q"] * q_proceso_manip for e in l_ext)
+    # Manipulación sobre UNIDADES DE PROCESO
+    c_man = ((segundos_mueble / 3600) * 18 * q_proceso_mueble) + (q_proceso_mueble * dif_ud)
+    c_ex = sum(PRECIOS["extras"][e["n"]] * e["q"] * q_proceso_mueble for e in l_ext)
     
     c_fab = coste_formas + c_man + c_ex
     pvp = c_fab * margen_com
-    desc_t[q_obj] = {"det": det_f, "man": c_man + c_ex, "total": c_fab, "q_proc": q_proceso_manip}
-    res_t.append({"Cantidad": q_obj, "Uds. Proceso": q_proceso_manip, "C. Fab": f"{c_fab:.2f}€", "PVP Proyecto": f"{pvp:.2f}€", "PVP Unidad": f"{(pvp/q_obj):.2f}€"})
+    desc_t[q_obj] = {"det": det_f, "man": c_man + c_ex, "total": c_fab, "q_proc": q_proceso_mueble}
+    res_t.append({"Cantidad": q_obj, "Uds. Proceso": q_proceso_mueble, "C. Fab": f"{c_fab:.2f}€", "PVP Proyecto": f"{pvp:.2f}€", "PVP Unidad": f"{(pvp/q_obj):.2f}€"})
 
-# --- SALIDA ---
-if res_t:
+# --- SALIDA DE DATOS ---
+if len(res_t) > 0:
     st.header("📊 Resumen del Escandallo")
-    st.dataframe(pd.DataFrame(res_t), use_container_width=True)
+    df_res = pd.DataFrame(res_t)
+    st.dataframe(df_res, use_container_width=True)
+    
     for q, info in desc_t.items():
         with st.expander(f"Ver detalle: {q} uds (Procesando {info['q_proc']} por mermas)"):
             st.table(pd.DataFrame(info["det"]).style.format("{:.2f}€", subset=["Mat", "Imp", "Acab", "Corte", "Total"]))
             st.write(f"**Mano de Obra y Accesorios (sobre {info['q_proc']} uds):** {info['man']:.2f} €")
             st.write(f"**COSTE TOTAL FABRICACIÓN:** {info['total']:.2f} €")
             st.write(f"**PVP FINAL (x{margen_com}): {(info['total']*margen_com):.2f} €**")
+else:
+    st.info("Introduce una cantidad en el menú lateral para calcular.")
