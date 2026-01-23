@@ -57,9 +57,9 @@ if 'lista_extras' not in st.session_state:
 st.markdown("""<style>
     .comercial-box { background-color: white; padding: 30px; border: 2px solid #1E88E5; border-radius: 10px; color: #333; font-family: sans-serif; }
     .comercial-header { color: #1E88E5; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-    .comercial-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    .comercial-table th { background-color: #1E88E5; color: white; padding: 12px; }
-    .comercial-table td { padding: 12px; border: 1px solid #ddd; text-align: center; }
+    .comercial-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 0.9em; }
+    .comercial-table th { background-color: #1E88E5; color: white; padding: 10px; }
+    .comercial-table td { padding: 10px; border: 1px solid #ddd; text-align: center; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📦 Escandallos Profesionales MAINSA PLV")
@@ -67,10 +67,18 @@ st.title("📦 Escandallos Profesionales MAINSA PLV")
 # --- 3. PANEL LATERAL ---
 with st.sidebar:
     st.header("⚙️ Ajustes Globales")
-    cants_str = st.text_input("Cantidades", "200, 500, 1000")
+    # Cantidad inicial en 0
+    cants_str = st.text_input("Cantidades (ej: 200, 500)", "0")
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
+    
     st.divider()
-    seg_man = st.number_input("Segundos Manipulación / Ud", value=300)
+    # Selector de unidad de tiempo y tiempo inicial en 0
+    unidad_tiempo = st.radio("Unidad de manipulación:", ["Segundos", "Minutos"], horizontal=True)
+    tiempo_input = st.number_input(f"Tiempo de montaje ({unidad_tiempo})", value=0)
+    
+    # Conversión interna a segundos para el motor de cálculo
+    seg_man_total = tiempo_input * 60 if unidad_tiempo == "Minutos" else tiempo_input
+    
     dif_ud = st.selectbox("Dificultad Unitaria", [0.02, 0.061, 0.091], index=2)
     margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1)
     st.divider()
@@ -136,7 +144,7 @@ if not modo_comercial:
 
 # --- 5. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
-if lista_cants and st.session_state.piezas_dict:
+if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
         tiene_dig = any(pz["im"] == "Digital" or pz.get("im_d") == "Digital" for pz in st.session_state.piezas_dict.values())
         mn_m, _ = calcular_mermas(q_n, es_digital=tiene_dig)
@@ -169,7 +177,8 @@ if lista_cants and st.session_state.piezas_dict:
             det_f.append({"Pieza": p["nombre"], "Cart": c_cart, "Plan": c_pla, "Imp": c_imp, "Acab": c_acab, "Corte": c_trq, "Total": sub})
 
         c_ext = sum(e["c"] * e["q"] * qp_taller for e in st.session_state.lista_extras)
-        c_man = ((seg_man/3600)*18*qp_taller) + (qp_taller*dif_ud) + c_ext
+        # Uso del tiempo total convertido
+        c_man = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud) + c_ext
         t_fab = coste_f + c_man
         desc_full[q_n] = {"det": det_f, "man": c_man, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
@@ -185,7 +194,7 @@ if modo_comercial:
             <h4>1. Especificaciones</h4><ul>{p_h}</ul>
         </div>
         <div style="margin-top:20px;">
-            <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido.</li></ul>
+            <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido ({tiempo_input} {unidad_tiempo.lower()}/ud).</li></ul>
         </div>
         <table style="width:100%;border-collapse:collapse;margin-top:20px;text-align:center;">
             <tr style="background:#1E88E5;color:white;"><th>Cantidad</th><th>PVP Total</th><th>PVP Unidad</th></tr>
@@ -199,3 +208,5 @@ else:
         for q, info in desc_full.items():
             with st.expander(f"🔍 Desglose {q} uds (Taller: {info['qp']} uds)"):
                 st.table(pd.DataFrame(info["det"])); st.write(f"**Montaje y Extras:** {info['man']:.2f}€")
+    elif sum(lista_cants) == 0:
+        st.info("Introduce una cantidad mayor a 0 para ver los resultados.")
