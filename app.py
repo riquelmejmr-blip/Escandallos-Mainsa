@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from fpdf2 import FPDF2
+from fpdf import FPDF
 import io
 
 # --- PRECIOS Y PARÁMETROS ---
