@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# --- 1. CONFIGURACIÓN DE PRECIOS ---
+# --- 1. BASE DE DATOS DE PRECIOS ---
 PRECIOS = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0, "gramaje": 0},
@@ -51,15 +51,15 @@ def crear_forma_vacia(index):
 
 if 'piezas_dict' not in st.session_state:
     st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
-if 'lista_extras' not in st.session_state:
-    st.session_state.lista_extras = []
+if 'lista_extras_grabados' not in st.session_state:
+    st.session_state.lista_extras_grabados = []
 
 st.markdown("""<style>
     .comercial-box { background-color: white; padding: 30px; border: 2px solid #1E88E5; border-radius: 10px; color: #333; font-family: sans-serif; }
     .comercial-header { color: #1E88E5; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-    .comercial-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    .comercial-table th { background-color: #1E88E5; color: white; padding: 12px; }
-    .comercial-table td { padding: 12px; border: 1px solid #ddd; text-align: center; }
+    .comercial-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 0.9em; }
+    .comercial-table th { background-color: #1E88E5; color: white; padding: 10px; }
+    .comercial-table td { padding: 10px; border: 1px solid #ddd; text-align: center; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📦 Escandallos Profesionales MAINSA PLV")
@@ -67,25 +67,29 @@ st.title("📦 Escandallos Profesionales MAINSA PLV")
 # --- 3. PANEL LATERAL ---
 with st.sidebar:
     st.header("⚙️ Ajustes Globales")
-    cants_str = st.text_input("Cantidades", "200, 500, 1000")
+    cants_str = st.text_input("Cantidades (ej: 200, 500)", "0")
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
+    
     st.divider()
-    seg_man = st.number_input("Segundos Manipulación / Ud", value=300)
+    unidad_tiempo = st.radio("Unidad de manipulación:", ["Segundos", "Minutos"], horizontal=True)
+    tiempo_input = st.number_input(f"Tiempo de montaje ({unidad_tiempo})", value=0)
+    seg_man_total = tiempo_input * 60 if unidad_tiempo == "Minutos" else tiempo_input
+    
     dif_ud = st.selectbox("Dificultad Unitaria", [0.02, 0.061, 0.091], index=2)
     margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1)
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
 
-# --- 4. GESTIÓN DE FORMAS ---
+# --- 4. GESTIÓN DE FORMAS Y EXTRAS ---
 if not modo_comercial:
     c1, c2 = st.columns([1, 5])
     if c1.button("➕ Añadir Forma"):
         nid = max(st.session_state.piezas_dict.keys()) + 1 if st.session_state.piezas_dict else 0
         st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
         st.rerun()
-    if c2.button("🗑 Reiniciar"):
+    if c2.button("🗑 Reiniciar Todo"):
         st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
-        st.session_state.lista_extras = []
+        st.session_state.lista_extras_grabados = []
         st.rerun()
 
     for p_id in list(st.session_state.piezas_dict.keys()):
@@ -134,9 +138,34 @@ if not modo_comercial:
 
                 if st.button("🗑 Eliminar", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
 
+    # --- SECCIÓN DE EXTRAS (RESTAURADA) ---
+    st.divider()
+    st.subheader("📦 Almacén de Accesorios y Extras")
+    col_e1, col_e2 = st.columns(2)
+    with col_e1:
+        ex_sel = st.selectbox("Añadir de la lista:", ["---"] + list(PRECIOS["extras_base"].keys()))
+        q_sel = st.number_input("Uds/mueble:", 1.0, 100.0, 1.0, key="q_base_extra")
+        if st.button("➕ Añadir Accesorio") and ex_sel != "---":
+            st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": PRECIOS["extras_base"][ex_sel], "cantidad": q_sel})
+            st.rerun()
+    with col_e2:
+        en = st.text_input("Nombre Extra Manual:", key="ex_man_n")
+        ec = st.number_input("Coste Unitario (€):", 0.0, 100.0, 0.0, key="ex_man_c")
+        eq = st.number_input("Cant/mueble manual:", 1.0, 100.0, 1.0, key="ex_man_q")
+        if st.button("➕ Añadir Manual") and en:
+            st.session_state.lista_extras_grabados.append({"nombre": en, "coste": ec, "cantidad": eq})
+            st.rerun()
+
+    if st.session_state.lista_extras_grabados:
+        st.markdown("### 📋 Listado de Extras Añadidos:")
+        for i, ex in enumerate(st.session_state.lista_extras_grabados):
+            ca, cb, cc, cd = st.columns([3, 2, 2, 1])
+            ca.write(f"**{ex['nombre']}**"); cb.write(f"{ex['coste']}€/ud"); cc.write(f"x{ex['cantidad']} uds")
+            if cd.button("🗑", key=f"del_gr_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
+
 # --- 5. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
-if lista_cants and st.session_state.piezas_dict:
+if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
         tiene_dig = any(pz["im"] == "Digital" or pz.get("im_d") == "Digital" for pz in st.session_state.piezas_dict.values())
         mn_m, _ = calcular_mermas(q_n, es_digital=tiene_dig)
@@ -168,29 +197,22 @@ if lista_cants and st.session_state.piezas_dict:
             coste_f += sub
             det_f.append({"Pieza": p["nombre"], "Cart": c_cart, "Plan": c_pla, "Imp": c_imp, "Acab": c_acab, "Corte": c_trq, "Total": sub})
 
-        c_ext = sum(e["c"] * e["q"] * qp_taller for e in st.session_state.lista_extras)
-        c_man = ((seg_man/3600)*18*qp_taller) + (qp_taller*dif_ud) + c_ext
+        c_ext_total = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
+        c_man = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud) + c_ext_total
         t_fab = coste_f + c_man
         desc_full[q_n] = {"det": det_f, "man": c_man, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
 # --- 6. SALIDA VISUAL ---
-if modo_comercial:
+if modo_comercial and res_final:
     p_h = "".join([f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm - F:{p['im']} / D:{p['im_d']}</li>" for p in st.session_state.piezas_dict.values()])
-    ex_h = "".join([f"<li>{e['n']} (x{e['q']})</li>" for e in st.session_state.lista_extras])
+    ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']})</li>" for e in st.session_state.lista_extras_grabados])
     f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
     st.markdown(f"""<div class="comercial-box">
         <h2 class="comercial-header">OFERTA COMERCIAL - MAINSA PLV</h2>
-        <div style="margin-top:20px;">
-            <h4>1. Especificaciones</h4><ul>{p_h}</ul>
-        </div>
-        <div style="margin-top:20px;">
-            <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido.</li></ul>
-        </div>
-        <table style="width:100%;border-collapse:collapse;margin-top:20px;text-align:center;">
-            <tr style="background:#1E88E5;color:white;"><th>Cantidad</th><th>PVP Total</th><th>PVP Unidad</th></tr>
-            {f_h}
-        </table>
+        <h4>1. Especificaciones</h4><ul>{p_h}</ul>
+        <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido ({tiempo_input} {unidad_tiempo.lower()}/ud).</li></ul>
+        <table class="comercial-table"><tr><th>Cantidad</th><th>PVP Total</th><th>PVP Unidad</th></tr>{f_h}</table>
     </div>""", unsafe_allow_html=True)
 else:
     if res_final:
@@ -199,3 +221,5 @@ else:
         for q, info in desc_full.items():
             with st.expander(f"🔍 Desglose {q} uds (Taller: {info['qp']} uds)"):
                 st.table(pd.DataFrame(info["det"])); st.write(f"**Montaje y Extras:** {info['man']:.2f}€")
+    elif sum(lista_cants) == 0:
+        st.info("💡 Introduce una cantidad mayor a 0 en el panel lateral para ver los resultados.")
