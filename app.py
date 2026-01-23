@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# --- 1. CONFIGURACIÓN DE PRECIOS ---
+# --- 1. CONFIGURACIÓN DE PRECIOS Y GRAMAJES ESTÁNDAR ---
 PRECIOS = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0, "gramaje": 0},
@@ -29,7 +29,7 @@ PRECIOS = {
 }
 
 def calcular_mermas(n, es_digital=False):
-    if es_digital: return n * 0.10, 0 # Merma 10% fija Digital
+    if es_digital: return n * 0.10, 0 
     if n < 100: return 15, 135
     if n < 200: return 30, 150
     if n < 600: return 40, 160
@@ -40,7 +40,7 @@ def calcular_mermas(n, es_digital=False):
 # --- 2. GESTIÓN DE SESIÓN ---
 st.set_page_config(page_title="MAINSA PLV - PRO", layout="wide")
 
-# Plantilla maestra de pieza para evitar KeyError
+# Plantilla para inicializar y reparar piezas
 PIEZA_MAESTRA = {
     "nombre": "Parte", "pliegos": 1.0, "w": 700, "h": 1000, 
     "pf": "Zenith", "gf": 350, "pl": "Ninguna", "ap": "C/C", 
@@ -51,16 +51,15 @@ PIEZA_MAESTRA = {
 
 if 'piezas_dict' not in st.session_state:
     st.session_state.piezas_dict = {0: PIEZA_MAESTRA.copy()}
-
 if 'lista_extras_grabados' not in st.session_state:
     st.session_state.lista_extras_grabados = []
 
 st.markdown("""<style>
     .comercial-box { background-color: white; padding: 30px; border: 2px solid #1E88E5; border-radius: 10px; color: #333; font-family: sans-serif; }
     .comercial-header { color: #1E88E5; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 10px; }
-    .comercial-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-    .comercial-table th { background-color: #1E88E5; color: white; padding: 12px; }
-    .comercial-table td { padding: 12px; border: 1px solid #ddd; text-align: center; }
+    .comercial-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-size: 0.9em; }
+    .comercial-table th { background-color: #1E88E5; color: white; padding: 10px; }
+    .comercial-table td { padding: 10px; border: 1px solid #ddd; text-align: center; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📦 Escandallos Profesionales MAINSA PLV")
@@ -68,7 +67,7 @@ st.title("📦 Escandallos Profesionales MAINSA PLV")
 # --- 3. PANEL LATERAL ---
 with st.sidebar:
     st.header("⚙️ Ajustes Globales")
-    cants_str = st.text_input("Cantidades", "200, 500, 1000")
+    cants_str = st.text_input("Cantidades (separadas por comas)", "200, 500, 1000")
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
     st.divider()
     seg_man = st.number_input("Segundos Manipulación / Ud", value=300)
@@ -81,8 +80,8 @@ with st.sidebar:
 if not modo_comercial:
     c1, c2 = st.columns([1, 5])
     if c1.button("➕ Añadir Forma"):
-        new_id = max(st.session_state.piezas_dict.keys()) + 1 if st.session_state.piezas_dict else 0
-        st.session_state.piezas_dict[new_id] = PIEZA_MAESTRA.copy()
+        nid = max(st.session_state.piezas_dict.keys()) + 1 if st.session_state.piezas_dict else 0
+        st.session_state.piezas_dict[nid] = PIEZA_MAESTRA.copy()
         st.rerun()
     if c2.button("🗑 Reiniciar"):
         st.session_state.piezas_dict = {0: PIEZA_MAESTRA.copy()}
@@ -91,8 +90,7 @@ if not modo_comercial:
 
     for p_id in list(st.session_state.piezas_dict.keys()):
         p = st.session_state.piezas_dict[p_id]
-        
-        # Inyectar llaves faltantes para evitar KeyError
+        # Reparación de llaves para evitar KeyError
         for k, v in PIEZA_MAESTRA.items():
             if k not in p: p[k] = v
             
@@ -108,17 +106,31 @@ if not modo_comercial:
                     p['nt'] = st.number_input("Tintas F.", 1, 6, int(p['nt']), key=f"nt_{p_id}")
                     p['ba'] = st.checkbox("Barniz F.", p['ba'], key=f"ba_{p_id}")
                 elif p['im'] == "Digital":
-                    p['ld'] = st.checkbox("Laminado Digital F. (3.5€)", p['ld'], key=f"ld_{p_id}")
+                    p['ld'] = st.checkbox("Laminado Digital F.", p['ld'], key=f"ld_{p_id}")
                 p['pel'] = st.selectbox("Peliculado Cara", list(PRECIOS["peliculado"].keys()), list(PRECIOS["peliculado"].keys()).index(p['pel']), key=f"pel_{p_id}")
 
             with col2:
                 st.markdown("**Materia Prima**")
+                # Selección de cartoncillo frontal con gramaje automático
+                pf_prev = p['pf']
                 p['pf'] = st.selectbox("C. Frontal", list(PRECIOS["cartoncillo"].keys()), list(PRECIOS["cartoncillo"].keys()).index(p['pf']), key=f"pf_{p_id}")
-                if p['pf'] != "Ninguno": p['gf'] = st.number_input("Gramaje F.", int(p['gf']), key=f"gf_{p_id}")
-                p['pl'] = st.selectbox("Plancha", list(PRECIOS["planchas"].keys()), list(PRECIOS["planchas"].keys()).index(p['pl']), key=f"pl_{p_id}")
+                if p['pf'] != pf_prev: # Si cambia el material, forzamos gramaje estándar
+                    p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
+                
+                if p['pf'] != "Ninguno": 
+                    p['gf'] = st.number_input("Gramaje F.", value=int(p['gf']), key=f"gf_{p_id}")
+                
+                p['pl'] = st.selectbox("Plancha Base", list(PRECIOS["planchas"].keys()), list(PRECIOS["planchas"].keys()).index(p['pl']), key=f"pl_{p_id}")
                 p['ap'] = st.selectbox("Calidad", ["C/C", "B/C", "B/B"], key=f"ap_{p_id}") if p['pl'] != "Ninguna" else "C/C"
+                
+                # Selección de cartoncillo dorso con gramaje automático
+                pd_prev = p['pd']
                 p['pd'] = st.selectbox("C. Dorso", list(PRECIOS["cartoncillo"].keys()), list(PRECIOS["cartoncillo"].keys()).index(p['pd']), key=f"pd_{p_id}")
-                if p['pd'] != "Ninguno": p['gd'] = st.number_input("Gramaje D.", int(p['gd']), key=f"gd_{p_id}")
+                if p['pd'] != pd_prev:
+                    p['gd'] = PRECIOS["cartoncillo"][p['pd']]["gramaje"]
+                
+                if p['pd'] != "Ninguno": 
+                    p['gd'] = st.number_input("Gramaje D.", value=int(p['gd']), key=f"gd_{p_id}")
 
             with col3:
                 p['cor'] = st.selectbox("Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
@@ -129,7 +141,7 @@ if not modo_comercial:
                         p['nt_d'] = st.number_input("Tintas D.", 1, 6, int(p['nt_d']), key=f"ntd_{p_id}")
                         p['ba_d'] = st.checkbox("Barniz D.", p['ba_d'], key=f"bad_{p_id}")
                     elif p['im_d'] == "Digital":
-                        p['ld_d'] = st.checkbox("Laminado Digital D. (3.5€)", p['ld_d'], key=f"ldd_{p_id}")
+                        p['ld_d'] = st.checkbox("Laminado Digital D.", p['ld_d'], key=f"ldd_{p_id}")
                     p['pel_d'] = st.selectbox("Peliculado Dorso", list(PRECIOS["peliculado"].keys()), list(PRECIOS["peliculado"].keys()).index(p['pel_d']), key=f"peld_{p_id}")
 
                 if st.button("🗑 Eliminar", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
@@ -141,12 +153,14 @@ if not modo_comercial:
     with ce1:
         ex_s = st.selectbox("De la lista:", ["---"] + list(PRECIOS["extras_base"].keys()))
         q_s = st.number_input("Uds/ud:", 1.0, 100.0, 1.0, key="q_ex")
-        if st.button("➕ Lista"):
+        if st.button("➕ Añadir"):
             if ex_s != "---":
                 st.session_state.lista_extras_grabados.append({"nombre": ex_s, "coste": PRECIOS["extras_base"][ex_s], "cantidad": q_s})
                 st.rerun()
     with ce2:
-        en, ec, eq = st.text_input("Nombre Manual:"), st.number_input("Coste Ud:", 0.0, 50.0), st.number_input("Uds/ud manual:", 1.0, 100.0)
+        en = st.text_input("Nombre Manual:", key="ex_m_n")
+        ec = st.number_input("Coste Ud:", 0.0, 50.0, key="ex_m_c")
+        eq = st.number_input("Cant/ud:", 1.0, 100.0, key="ex_m_q")
         if st.button("➕ Manual") and en:
             st.session_state.lista_extras_grabados.append({"nombre": en, "coste": ec, "cantidad": eq})
             st.rerun()
@@ -196,7 +210,7 @@ if lista_cants and st.session_state.piezas_dict:
         desc_full[q_n] = {"det": det_f, "man": c_man, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
-# --- 6. SALIDA VISUAL ---
+# --- 6. VISTA COMERCIAL ---
 if modo_comercial:
     p_h = "".join([f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm - Cara: {p['im']} / Dorso: {p.get('im_d', 'No')}</li>" for p in st.session_state.piezas_dict.values()])
     ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']})</li>" for e in st.session_state.lista_extras_grabados])
