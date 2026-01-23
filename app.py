@@ -29,7 +29,7 @@ PRECIOS = {
 }
 
 def calcular_mermas(n, es_digital=False):
-    if es_digital: return n * 0.10, 0
+    if es_digital: return n * 0.10, 0 # Merma 10% fija Digital
     if n < 100: return 15, 135
     if n < 200: return 30, 150
     if n < 600: return 40, 160
@@ -37,19 +37,21 @@ def calcular_mermas(n, es_digital=False):
     if n < 2000: return 60, 170
     return 120, 170
 
-# --- 2. INICIALIZACIÓN DE ESTADO ---
+# --- 2. INICIALIZACIÓN ---
 st.set_page_config(page_title="Escandallos MAINSA PLV", layout="wide")
 
 if 'piezas_dict' not in st.session_state:
-    st.session_state.piezas_dict = {0: {"nombre": "Parte 1", "pliegos": 1.0, "w": 700, "h": 1000, "pf": "Reverso Gris", "gf": 220, "pl": "Ninguna", "ap": "C/C", "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, "ld": False, "pel": "Polipropileno", "cor": "Troquelado"}}
+    st.session_state.piezas_dict = {0: {"nombre": "Parte 1", "pliegos": 1.0, "w": 700, "h": 1000, "pf": "Zenith", "gf": 350, "pl": "Microcanal / Canal 3", "ap": "B/C", "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, "im_d": "No", "nt_d": 0, "ba_d": False, "ld": False, "pel": "Polipropileno", "cor": "Troquelado"}}
 
-# Lista única persistente para todos los extras (predeterminados y manuales)
 if 'lista_extras_grabados' not in st.session_state:
     st.session_state.lista_extras_grabados = []
 
 st.markdown("""<style>
-    .comercial-box { background-color: white; padding: 30px; border: 2px solid #1E88E5; border-radius: 10px; color: #333; }
+    .comercial-box { background-color: white; padding: 30px; border: 2px solid #1E88E5; border-radius: 10px; color: #333; font-family: sans-serif; }
     .comercial-header { color: #1E88E5; text-align: center; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+    .comercial-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    .comercial-table th { background-color: #1E88E5; color: white; padding: 12px; }
+    .comercial-table td { padding: 12px; border: 1px solid #ddd; text-align: center; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📦 Escandallos Profesionales MAINSA PLV")
@@ -66,16 +68,16 @@ with st.sidebar:
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
 
-# --- 4. GESTIÓN DE DATOS (Solo en modo edición) ---
+# --- 4. GESTIÓN DE DATOS ---
 if not modo_comercial:
-    # Gestión de Formas
+    # Formas
     c1, c2 = st.columns([1, 5])
     if c1.button("➕ Añadir Forma"):
         new_id = max(st.session_state.piezas_dict.keys()) + 1 if st.session_state.piezas_dict else 0
-        st.session_state.piezas_dict[new_id] = {"nombre": f"Parte {new_id+1}", "pliegos": 1.0, "w": 700, "h": 1000, "pf": "Reverso Gris", "gf": 220, "pl": "Ninguna", "ap": "C/C", "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, "ld": False, "pel": "Polipropileno", "cor": "Troquelado"}
+        st.session_state.piezas_dict[new_id] = {"nombre": f"Parte {new_id+1}", "pliegos": 1.0, "w": 700, "h": 1000, "pf": "Zenith", "gf": 350, "pl": "Microcanal / Canal 3", "ap": "B/C", "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, "im_d": "No", "nt_d": 0, "ba_d": False, "ld": False, "pel": "Polipropileno", "cor": "Troquelado"}
         st.rerun()
     if c2.button("🗑 Reiniciar Todo"):
-        st.session_state.piezas_dict = {0: {"nombre": "Parte 1", "pliegos": 1.0, "w": 700, "h": 1000, "pf": "Reverso Gris", "gf": 220, "pl": "Ninguna", "ap": "C/C", "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, "ld": False, "pel": "Polipropileno", "cor": "Troquelado"}}
+        st.session_state.piezas_dict = {0: {"nombre": "Parte 1", "pliegos": 1.0, "w": 700, "h": 1000, "pf": "Zenith", "gf": 350, "pl": "Microcanal / Canal 3", "ap": "B/C", "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, "im_d": "No", "nt_d": 0, "ba_d": False, "ld": False, "pel": "Polipropileno", "cor": "Troquelado"}}
         st.session_state.lista_extras_grabados = []
         st.rerun()
 
@@ -86,101 +88,120 @@ if not modo_comercial:
             with col1:
                 p['nombre'] = st.text_input("Nombre", p['nombre'], key=f"n_{p_id}")
                 p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p['pliegos']), step=0.1, key=f"p_{p_id}")
-                p['w'], p['h'] = st.number_input("Ancho", 1, 5000, int(p['w']), key=f"w_{p_id}"), st.number_input("Largo", 1, 5000, int(p['h']), key=f"h_{p_id}")
+                p['w'], p['h'] = st.number_input("Ancho mm", 1, 5000, int(p['w']), key=f"w_{p_id}"), st.number_input("Largo mm", 1, 5000, int(p['h']), key=f"h_{p_id}")
+                st.markdown("**Impresión Frontal**")
+                p['im'] = st.selectbox("Sistema", ["Offset", "Digital", "No"], list(["Offset", "Digital", "No"]).index(p['im']), key=f"im_{p_id}")
+                if p['im'] == "Offset":
+                    p['nt'] = st.number_input("Tintas", 1, 6, int(p['nt']), key=f"nt_{p_id}")
+                    p['ba'] = st.checkbox("Barniz", value=p['ba'], key=f"ba_{p_id}")
+                elif p['im'] == "Digital":
+                    p['ld'] = st.checkbox("Laminado Digital (3.5€)", value=p['ld'], key=f"ld_{p_id}")
+
             with col2:
-                p['pf'] = st.selectbox("C. Frontal", list(PRECIOS["cartoncillo"].keys()), list(PRECIOS["cartoncillo"].keys()).index(p['pf']), key=f"pf_{p_id}")
-                p['pl'] = st.selectbox("Plancha", list(PRECIOS["planchas"].keys()), list(PRECIOS["planchas"].keys()).index(p['pl']), key=f"pl_{p_id}")
-                p['ap'] = st.selectbox("Calidad", ["C/C", "B/C", "B/B"], 1, key=f"ap_{p_id}") if p['pl'] != "Ninguna" else "C/C"
+                st.markdown("**Materia Prima**")
+                p['pf'] = st.selectbox("Cartoncillo Frontal", list(PRECIOS["cartoncillo"].keys()), list(PRECIOS["cartoncillo"].keys()).index(p['pf']), key=f"pf_{p_id}")
+                if p['pf'] != "Ninguno":
+                    p['gf'] = st.number_input("Gramaje Frontal", int(p.get('gf', 220)), key=f"gf_{p_id}")
+                
+                p['pl'] = st.selectbox("Plancha Base", list(PRECIOS["planchas"].keys()), list(PRECIOS["planchas"].keys()).index(p['pl']), key=f"pl_{p_id}")
+                p['ap'] = st.selectbox("Calidad", ["C/C", "B/C", "B/B"], key=f"ap_{p_id}") if p['pl'] != "Ninguna" else "C/C"
+                
+                p['pd'] = st.selectbox("Cartoncillo Dorso", list(PRECIOS["cartoncillo"].keys()), list(PRECIOS["cartoncillo"].keys()).index(p['pd']), key=f"pd_{p_id}")
+                if p['pd'] != "Ninguno":
+                    p['gd'] = st.number_input("Gramaje Dorso", int(p.get('gd', 0)), key=f"gd_{p_id}")
+
             with col3:
-                p['im'] = st.selectbox("Impresión", ["Offset", "Digital", "No"], list(["Offset", "Digital", "No"]).index(p['im']), key=f"im_{p_id}")
-                p['ld'] = st.checkbox("Laminado Digital", value=p['ld'], key=f"ld_{p_id}") if p['im'] == "Digital" else False
+                st.markdown("**Acabado y Dorso**")
+                p['pel'] = st.selectbox("Peliculado", list(PRECIOS["peliculado"].keys()), index=(0 if p['im']=="Digital" else 1), key=f"pel_{p_id}")
                 p['cor'] = st.selectbox("Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
-                if st.button("🗑 Borrar", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
+                
+                if p['pd'] != "Ninguno":
+                    st.markdown("**Impresión Dorso**")
+                    p['im_d'] = st.selectbox("Sistema Dorso", ["Offset", "Digital", "No"], list(["Offset", "Digital", "No"]).index(p['im_d']), key=f"imd_{p_id}")
+                    if p['im_d'] == "Offset":
+                        p['nt_d'] = st.number_input("Tintas D.", 1, 6, int(p.get('nt_d', 0)), key=f"ntd_{p_id}")
+                        p['ba_d'] = st.checkbox("Barniz D.", value=p.get('ba_d', False), key=f"bad_{p_id}")
 
-    # --- SECCIÓN DE EXTRAS PERSISTENTE ---
+                if st.button("🗑 Eliminar pieza", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
+
+    # --- EXTRAS PERSISTENTES ---
     st.divider()
-    st.subheader("📦 Almacén de Accesorios y Extras")
-    
-    col_ex1, col_ex2 = st.columns(2)
-    with col_ex1:
-        st.markdown("**Añadir desde la lista:**")
-        ex_sel = st.selectbox("Selecciona accesorio:", ["---"] + list(PRECIOS["extras_base"].keys()))
-        cant_sel = st.number_input("Cantidad por mueble:", 1.0, 1000.0, 1.0, key="q_ex_base")
-        if st.button("➕ Añadir Accesorio"):
+    st.subheader("📦 Almacén de Accesorios")
+    c_ex1, c_ex2 = st.columns(2)
+    with c_ex1:
+        ex_sel = st.selectbox("Añadir de la lista:", ["---"] + list(PRECIOS["extras_base"].keys()))
+        q_sel = st.number_input("Uds/mueble:", 1.0, 100.0, 1.0, key="q_base")
+        if st.button("➕ Añadir Lista"):
             if ex_sel != "---":
-                st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": PRECIOS["extras_base"][ex_sel], "cantidad": cant_sel})
+                st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": PRECIOS["extras_base"][ex_sel], "cantidad": q_sel})
                 st.rerun()
-    
-    with col_ex2:
-        st.markdown("**Añadir Extra Manual:**")
-        e_nom = st.text_input("Nombre (ej: Bolsa)", key="ex_man_n")
-        e_cost = st.number_input("Coste Unitario (€)", 0.0, 100.0, 0.0, key="ex_man_c")
-        e_q = st.number_input("Cantidad por mueble:", 1.0, 1000.0, 1.0, key="ex_man_q")
+    with c_ex2:
+        e_n = st.text_input("Nombre Manual:", key="ex_m_n")
+        e_c = st.number_input("Coste Ud:", 0.0, 50.0, 0.0, key="ex_m_c")
+        e_q = st.number_input("Uds/mueble manual:", 1.0, 100.0, 1.0, key="ex_m_q")
         if st.button("➕ Añadir Manual"):
-            if e_nom:
-                st.session_state.lista_extras_grabados.append({"nombre": e_nom, "coste": e_cost, "cantidad": e_q})
-                st.rerun()
+            if e_n: st.session_state.lista_extras_grabados.append({"nombre": e_n, "coste": e_c, "cantidad": e_q}); st.rerun()
 
-    # --- LISTADO DE EXTRAS AÑADIDOS ---
     if st.session_state.lista_extras_grabados:
-        st.markdown("### 📋 Extras añadidos actualmente:")
-        for i, extra in enumerate(st.session_state.lista_extras_grabados):
-            c_a, c_b, c_c, c_d = st.columns([3, 2, 2, 1])
-            c_a.write(f"**{extra['nombre']}**")
-            c_b.write(f"{extra['coste']}€/ud")
-            c_c.write(f"x{extra['cantidad']} uds/mueble")
-            if c_d.button("🗑", key=f"del_gr_{i}"):
-                st.session_state.lista_extras_grabados.pop(i)
-                st.rerun()
+        for i, ex in enumerate(st.session_state.lista_extras_grabados):
+            ca, cb, cc, cd = st.columns([3, 2, 2, 1])
+            ca.write(f"**{ex['nombre']}**"); cb.write(f"{ex['coste']}€/ud"); cc.write(f"x{ex['cantidad']} uds")
+            if cd.button("🗑", key=f"del_gr_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-# --- 5. MOTOR DE CÁLCULO (Usa session_state siempre) ---
+# --- 5. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
 if lista_cants and st.session_state.piezas_dict:
     for q_n in lista_cants:
-        tiene_dig = any(pz["im"] == "Digital" for pz in st.session_state.piezas_dict.values())
+        tiene_dig = any(pz["im"] == "Digital" or pz["im_d"] == "Digital" for pz in st.session_state.piezas_dict.values())
         mn_m, _ = calcular_mermas(q_n, es_digital=tiene_dig)
         qp_taller = q_n + mn_m
         
         coste_f, det_f = 0.0, []
         for p_id, p in st.session_state.piezas_dict.items():
             nb = q_n * p["pliegos"]
-            mn, mi = calcular_mermas(nb, es_digital=(p["im"]=="Digital"))
+            mn, mi = calcular_mermas(nb, es_digital=(p["im"]=="Digital" or p["im_d"]=="Digital"))
             hc, hp = nb+mn+mi, nb+mn
             m2 = (p["w"]*p["h"])/1_000_000
-            c_mat = (hc*m2*(p.get('gf',220)/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
-            c_pla = (hp*m2*PRECIOS["planchas"][p["pl"]][p["ap"]]) if p["pl"] != "Ninguna" else 0
-            c_imp = (nb*m2*6.5) if p["im"] == "Digital" else (0.0 if p["im"]=="No" else (120 if nb>500 else 60)*4)
-            c_acab = (hp*m2*3.5 if p.get('ld',False) else hp*m2*0.26)
-            c_trq = 107.7 + (hp*0.135) if p["cor"]=="Troquelado" else hp*1.5
-            coste_f += (c_mat + c_pla + c_imp + c_acab + c_trq)
-            det_f.append({"Pieza": p["nombre"], "Mat": c_mat, "Plancha": c_pla, "Imp": c_imp, "Acab": c_acab, "Corte": c_trq, "Total": c_mat+c_pla+c_imp+c_acab+c_trq})
+            
+            # Materia Prima
+            c_cart = (hc*m2*(p.get('gf',0)/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"]) + (hc*m2*(p.get('gd',0)/1000)*PRECIOS["cartoncillo"][p["pd"]]["precio_kg"])
+            c_pla, c_con = 0.0, 0.0
+            if p["pl"] != "Ninguna":
+                c_pla = hp * m2 * PRECIOS["planchas"][p["pl"]][p["ap"]]
+                pas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p["pd"]!="Ninguno" else 0)
+                c_con = hp * m2 * PRECIOS["planchas"][p["pl"]]["peg"] * pas
+            
+            # Impresión
+            def f_off(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
+            c_imp = 0.0
+            if p["im"] == "Digital": c_imp += nb*m2*6.5
+            elif p["im"] == "Offset": c_imp += f_off(nb) * (p.get('nt',1) + (1 if p.get('ba',False) else 0))
+            if p["im_d"] == "Digital": c_imp += nb*m2*6.5
+            elif p["im_d"] == "Offset": c_imp += f_off(nb) * (p.get('nt_d',1) + (1 if p.get('ba_d',False) else 0))
+            
+            c_acab = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*3.5 if p.get('ld',False) else 0)
+            c_trq = (107.7 if (p['h']>1000 or p['w']>700) else 48.19) + (hp*(0.135 if (p['h']>1000 or p['w']>700) else 0.09)) if p["cor"]=="Troquelado" else hp*1.5
+            
+            total_pz = c_cart + c_pla + c_con + c_imp + c_acab + c_trq
+            coste_f += total_pz
+            det_f.append({"Pieza": p["nombre"], "Carton": c_cart, "Plancha": c_pla, "Contra": c_con, "Imp": c_imp, "Acab": c_acab, "Corte": c_trq, "Total": total_pz})
 
-        # Cálculo de todos los extras grabados en session_state
-        c_extras_total = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
-        
-        c_man = ((seg_man/3600)*18*qp_taller) + (qp_taller*dif_ud) + c_extras_total
+        c_ext = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
+        c_man = ((seg_man/3600)*18*qp_taller) + (qp_taller*dif_ud) + c_ext
         t_fab = coste_f + c_man
         desc_full[q_n] = {"det": det_f, "man": c_man, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Ud": f"{(t_fab*margen/q_n):.2f}€", "Total": f"{(t_fab*margen):.2f}€"})
 
 # --- 6. VISTA COMERCIAL ---
 if modo_comercial:
-    p_html = "".join([f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm - {p['im']}</li>" for p in st.session_state.piezas_dict.values()])
-    # Recuperamos extras de la lista grabada
-    ex_nombres = [f"{e['nombre']} (x{e['cantidad']})" for e in st.session_state.lista_extras_grabados]
-    ex_html = f"<li><b>Accesorios:</b> {', '.join(ex_nombres)}</li>" if ex_nombres else ""
-    filas_html = "".join([f"<tr><td style='border:1px solid #ddd;padding:10px;'>{r['Cant']} uds</td><td style='border:1px solid #ddd;padding:10px;'>{r['Total']}</td><td style='border:1px solid #ddd;padding:10px;'><b>{r['Ud']}</b></td></tr>" for r in res_final])
-    
+    p_h = "".join([f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm - F:{p['im']} / D:{p['im_d']}</li>" for p in st.session_state.piezas_dict.values()])
+    ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']})</li>" for e in st.session_state.lista_extras_grabados])
+    f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
     st.markdown(f"""<div class="comercial-box">
         <h2 class="comercial-header">OFERTA COMERCIAL - MAINSA PLV</h2>
-        <div style="margin-top:20px;">
-            <h4>1. Especificaciones</h4>
-            <ul>{p_html}{ex_html}<li><b>Montaje:</b> Incluido ({seg_man} seg/ud).</li></ul>
-        </div>
-        <table style="width:100%;border-collapse:collapse;margin-top:20px;text-align:center;">
-            <tr style="background:#1E88E5;color:white;"><th>Cantidad</th><th>PVP Total</th><th>PVP Unitario</th></tr>
-            {filas_html}
-        </table>
+        <h4>1. Especificaciones</h4><ul>{p_h}</ul>
+        <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido.</li></ul>
+        <table class="comercial-table"><tr><th>Cantidad</th><th>PVP Total</th><th>PVP Unitario</th></tr>{f_h}</table>
     </div>""", unsafe_allow_html=True)
 else:
     if res_final:
@@ -188,5 +209,4 @@ else:
         st.dataframe(pd.DataFrame(res_final), use_container_width=True)
         for q, info in desc_full.items():
             with st.expander(f"🔍 Desglose {q} uds"):
-                st.table(pd.DataFrame(info["det"]))
-                st.write(f"**Montaje y Extras Totales:** {info['man']:.2f}€ | **Total Fab:** {info['total']:.2f}€")
+                st.table(pd.DataFrame(info["det"])); st.write(f"**Manipulación y Extras:** {info['man']:.2f}€")
