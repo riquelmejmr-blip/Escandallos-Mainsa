@@ -29,7 +29,7 @@ PRECIOS = {
 }
 
 def calcular_mermas(n, es_digital=False):
-    if es_digital: return n * 0.10, 0 # 10% fijo para digital
+    if es_digital: return n * 0.10, 0 # Merma 10% fija Digital
     if n < 100: return 15, 135
     if n < 200: return 30, 150
     if n < 600: return 40, 160
@@ -37,11 +37,20 @@ def calcular_mermas(n, es_digital=False):
     if n < 2000: return 60, 170
     return 120, 170
 
-# --- 2. CONFIGURACIÓN E INICIALIZACIÓN ---
+# --- 2. INICIALIZACIÓN DE PIEZA MAESTRA ---
+def crear_nueva_pieza(nombre="Parte"):
+    return {
+        "nombre": nombre, "pliegos": 1.0, "w": 700, "h": 1000, 
+        "pf": "Reverso Gris", "gf": 220, "pl": "Ninguna", 
+        "ap": "C/C", "pd": "Ninguno", "gd": 0, 
+        "im": "Offset", "nt": 4, "ba": False, 
+        "ld": False, "pel": "Polipropileno", "cor": "Troquelado"
+    }
+
 st.set_page_config(page_title="Escandallos MAINSA PLV", layout="wide")
 
 if 'piezas_dict' not in st.session_state:
-    st.session_state.piezas_dict = {0: {"nombre": "Parte 1", "pliegos": 1.0, "w": 700, "h": 1000, "pf": "Reverso Gris", "gf": 220, "pl": "Ninguna", "ap": "C/C", "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, "ld": False, "pel": "Polipropileno", "cor": "Troquelado"}}
+    st.session_state.piezas_dict = {0: crear_nueva_pieza("Parte 1")}
 
 # Estilos CSS
 st.markdown("""<style>
@@ -52,7 +61,7 @@ st.markdown("""<style>
     .comercial-table td { padding: 12px; border: 1px solid #ddd; text-align: center; }
 </style>""", unsafe_allow_html=True)
 
-st.title("📦 Escandallos Profesionales MAINSA PLV")
+st.title("📦 Escandallos MAINSA PLV")
 
 # --- 3. PANEL LATERAL ---
 with st.sidebar:
@@ -66,24 +75,30 @@ with st.sidebar:
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
 
-# --- 4. GESTIÓN DE PIEZAS (Persistente) ---
+# --- 4. GESTIÓN DE PIEZAS (Persistente y Segura) ---
 if not modo_comercial:
     c1, c2 = st.columns([1, 5])
     if c1.button("➕ Añadir Forma"):
         new_id = max(st.session_state.piezas_dict.keys()) + 1 if st.session_state.piezas_dict else 0
-        st.session_state.piezas_dict[new_id] = {"nombre": f"Parte {new_id+1}", "pliegos": 1.0, "w": 700, "h": 1000, "pf": "Reverso Gris", "gf": 220, "pl": "Ninguna", "ap": "C/C", "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, "ld": False, "pel": "Polipropileno", "cor": "Troquelado"}
+        st.session_state.piezas_dict[new_id] = crear_nueva_pieza(f"Parte {new_id+1}")
         st.rerun()
     if c2.button("🗑 Reiniciar Todo"):
-        st.session_state.piezas_dict = {0: {"nombre": "Parte 1", "pliegos": 1.0, "w": 700, "h": 1000, "pf": "Reverso Gris", "gf": 220, "pl": "Ninguna", "ap": "C/C", "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, "ld": False, "pel": "Polipropileno", "cor": "Troquelado"}}
+        st.session_state.piezas_dict = {0: crear_nueva_pieza("Parte 1")}
         st.rerun()
 
     ids_a_borrar = []
     for p_id in list(st.session_state.piezas_dict.keys()):
         p = st.session_state.piezas_dict[p_id]
+        
+        # Blindaje contra KeyError: Asegura que todas las llaves existan
+        default_p = crear_nueva_pieza()
+        for key in default_p:
+            if key not in p: p[key] = default_p[key]
+            
         with st.expander(f"🛠 Configuración: {p['nombre']}", expanded=True):
             col1, col2, col3 = st.columns(3)
             with col1:
-                p['nombre'] = st.text_input("Nombre", p['nombre'], key=f"n_{p_id}")
+                p['nombre'] = st.text_input("Nombre Pieza", p['nombre'], key=f"n_{p_id}")
                 p['pliegos'] = st.number_input("Pliegos/Mueble", 0.0, 100.0, float(p['pliegos']), step=0.1, key=f"p_{p_id}")
                 p['w'] = st.number_input("Ancho (mm)", 1, 5000, int(p['w']), key=f"w_{p_id}")
                 p['h'] = st.number_input("Largo (mm)", 1, 5000, int(p['h']), key=f"h_{p_id}")
@@ -107,7 +122,7 @@ if not modo_comercial:
         del st.session_state.piezas_dict[b_id]
         st.rerun()
 
-# --- 5. MOTOR DE CÁLCULO (Siempre usa los datos reales) ---
+# --- 5. MOTOR DE CÁLCULO (Basado en datos reales de sesión) ---
 res_final = []; desc_full = {}
 if lista_cants and st.session_state.piezas_dict:
     for q_n in lista_cants:
@@ -123,13 +138,12 @@ if lista_cants and st.session_state.piezas_dict:
             hc, hp = nb+mn+mi, nb+mn
             m2 = (p["w"]*p["h"])/1_000_000
             
-            # Costes
             c_cart = (hc*m2*(p["gf"]/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"]) + (hc*m2*(p["gd"]/1000)*PRECIOS["cartoncillo"][p["pd"]]["precio_kg"])
             c_plan, c_con = 0.0, 0.0
             if p["pl"] != "Ninguna":
                 c_plan = hp * m2 * PRECIOS["planchas"][p["pl"]][p["ap"]]
-                pasadas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p["pd"]!="Ninguno" else 0)
-                c_con = hp * m2 * PRECIOS["planchas"][p["pl"]]["peg"] * pasadas
+                pas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p["pd"]!="Ninguno" else 0)
+                c_con = hp * m2 * PRECIOS["planchas"][p["pl"]]["peg"] * pas
             
             c_imp = (nb*m2*6.5) if p["im"] == "Digital" else (0.0 if p["im"] == "No" else (60 if nb<100 else (60+0.15*(nb-100) if nb<500 else (120 if nb<=2000 else 120+0.015*(nb-2000)))) * (p["nt"] + (1 if p["ba"] else 0)))
             c_acab = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*PRECIOS["laminado_digital"] if p["ld"] else 0)
@@ -148,21 +162,20 @@ if lista_cants and st.session_state.piezas_dict:
 
 # --- 6. SALIDA VISUAL ---
 if modo_comercial:
-    # Generamos el HTML dinámico con datos REALES
-    piezas_html = "".join([f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm - {p['im']}</li>" for p in st.session_state.piezas_dict.values()])
-    filas_html = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
+    p_html = "".join([f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm - {p['im']}</li>" for p in st.session_state.piezas_dict.values()])
+    f_html = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
     
     st.markdown(f"""<div class="comercial-box">
         <h2 class="comercial-header">OFERTA COMERCIAL - MAINSA PLV</h2>
         <div style="margin-top:20px;">
             <h4>1. Especificaciones Técnicas</h4>
-            <ul>{piezas_html}</ul>
+            <ul>{p_html}</ul>
         </div>
         <div style="margin-top:20px;">
             <h4>2. Escala de Precios</h4>
             <table class="comercial-table">
                 <tr><th>Cantidad</th><th>PVP Total</th><th>PVP Unitario</th></tr>
-                {filas_html}
+                {f_html}
             </table>
         </div>
         <p style="font-size:0.8em; color:gray; margin-top:30px;">* Precios sin IVA. Validez: 15 días.</p>
