@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from fpdf import FPDF
+from fpdf import FPDF  # Esta línea requiere que 'fpdf2' esté en el requirements.txt
 import io
 
 # --- BASE DE DATOS DE PRECIOS ---
