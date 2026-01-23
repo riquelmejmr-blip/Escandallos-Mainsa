@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 
-# --- CONFIGURACIÓN Y PRECIOS ACTUALIZADOS ---
+# --- CONFIGURACIÓN Y PRECIOS ---
 PRECIOS = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0, "gramaje": 0},
@@ -59,9 +59,8 @@ with st.sidebar:
 
 # --- GESTIÓN DE PIEZAS ---
 if 'npz' not in st.session_state: st.session_state.npz = 1
-
 col_btn1, col_btn2 = st.columns([1, 6])
-if col_btn1.button("➕ Añadir Pieza"): st.session_state.npz += 1
+if col_btn1.button("➕ Pieza"): st.session_state.npz += 1
 if col_btn2.button("🗑 Reset"): st.session_state.npz = 1
 
 datos_escandallo = []
@@ -69,120 +68,101 @@ for i in range(st.session_state.npz):
     with st.expander(f"Forma #{i+1}", expanded=True):
         c1, c2, c3 = st.columns(3)
         with c1:
-            pz_m = st.number_input(f"Pliegos por Mueble #{i+1}", 1, key=f"pm{i}")
+            pz_m = st.number_input(f"Pliegos/Mueble #{i+1}", 1, key=f"pm{i}")
             w_mm = st.number_input(f"Ancho (mm) #{i+1}", min_value=1, value=700, key=f"w{i}")
             h_mm = st.number_input(f"Largo (mm) #{i+1}", min_value=1, value=1000, key=f"h{i}")
-        
         with c2:
-            pf = st.selectbox(f"C. Frontal #{i+1}", list(PRECIOS["cartoncillo"].keys()), index=1, key=f"pf{i}")
-            gf = st.number_input(f"Gramaje Frontal #{i+1}", PRECIOS["cartoncillo"][pf]["gramaje"], key=f"gf{i}") if pf != "Ninguno" else 0
+            pf = st.selectbox(f"C. Frontal #{i+1}", list(PRECIOS["cartoncillo"].keys()), 1, key=f"pf{i}")
+            gf = st.number_input(f"Gramaje F. #{i+1}", PRECIOS["cartoncillo"][pf]["gramaje"], key=f"gf{i}") if pf != "Ninguno" else 0
             pl = st.selectbox(f"Plancha #{i+1}", list(PRECIOS["planchas"].keys()), key=f"pl{i}")
-            ap = st.selectbox(f"Calidad Plancha #{i+1}", ["C/C", "B/C", "B/B"], index=1, key=f"ap{i}") if pl != "Ninguna" and "AC" not in pl else "C/C"
-            pd_sel = st.selectbox(f"C. Dorso #{i+1}", list(PRECIOS["cartoncillo"].keys()), index=0, key=f"pd{i}")
-            gd = st.number_input(f"Gramaje Dorso #{i+1}", PRECIOS["cartoncillo"][pd_sel]["gramaje"], key=f"gd{i}") if pd_sel != "Ninguno" else 0
-        
+            ap = st.selectbox(f"Calidad #{i+1}", ["C/C", "B/C", "B/B"], 1, key=f"ap{i}") if pl != "Ninguna" and "AC" not in pl else "C/C"
+            pd = st.selectbox(f"C. Dorso #{i+1}", list(PRECIOS["cartoncillo"].keys()), 0, key=f"pd{i}")
+            gd = st.number_input(f"Gramaje D. #{i+1}", PRECIOS["cartoncillo"][pd]["gramaje"], key=f"gd{i}") if pd != "Ninguno" else 0
         with c3:
-            im_sel = st.selectbox(f"Sistema Frontal #{i+1}", ["Offset", "Digital", "No"], index=0, key=f"im{i}")
-            nt_val = st.number_input(f"Tintas F. #{i+1}", 1, 6, 4, key=f"nt{i}") if im_sel == "Offset" else 0
-            ba_val = st.checkbox(f"Barniz F. #{i+1}", key=f"ba{i}") if im_sel == "Offset" else False
-            
-            im_dorso_sel = "No"
-            nt_dorso = 0
-            ba_dorso = False
-            if pd_sel != "Ninguno":
-                im_dorso_sel = st.selectbox(f"Sistema Dorso #{i+1}", ["Offset", "Digital", "No"], index=2, key=f"imd{i}")
-                if im_dorso_sel == "Offset":
-                    nt_dorso = st.number_input(f"Tintas D. #{i+1}", 1, 6, 1, key=f"ntd{i}")
-                    ba_dorso = st.checkbox(f"Barniz D. #{i+1}", key=f"bad{i}")
-
-            pe_sel = st.selectbox(f"Peliculado #{i+1}", list(PRECIOS["peliculado"].keys()), index=1, key=f"pe{i}")
-            lam_dig = st.checkbox(f"Laminado Digital #{i+1}", key=f"ld{i}") if (im_sel == "Digital" or im_dorso_sel == "Digital") else False
-            co_sel = st.selectbox(f"Corte #{i+1}", ["Troquelado", "Plotter"], index=0, key=f"co{i}")
-        
-        datos_escandallo.append({
-            "p":pz_m, "w":w_mm, "h":h_mm, "pf":pf, "gf":gf, "pl":pl, "ap":ap, "pd":pd_sel, "gd":gd, 
-            "im_f":im_sel, "nt_f":nt_val, "ba_f":ba_val, "im_d":im_dorso_sel, "nt_d":nt_dorso, 
-            "ba_d":ba_dorso, "pe":pe_sel, "ld":lam_dig, "co":co_sel
-        })
+            im_f = st.selectbox(f"Impresión F. #{i+1}", ["Offset", "Digital", "No"], key=f"im{i}")
+            nt_f = st.number_input(f"Tintas F. #{i+1}", 1, 6, 4, key=f"nt{i}") if im_f == "Offset" else 0
+            ba_f = st.checkbox(f"Barniz F. #{i+1}", key=f"ba{i}") if im_f == "Offset" else False
+            im_d = "No"; nt_d = 0; ba_d = False
+            if pd != "Ninguno":
+                im_d = st.selectbox(f"Sistema D. #{i+1}", ["Offset", "Digital", "No"], 2, key=f"imd{i}")
+                if im_d == "Offset":
+                    nt_d = st.number_input(f"Tintas D. #{i+1}", 1, 6, 1, key=f"ntd{i}")
+                    ba_d = st.checkbox(f"Barniz D. #{i+1}", key=f"bad{i}")
+            pe = st.selectbox(f"Peliculado #{i+1}", list(PRECIOS["peliculado"].keys()), 1, key=f"pe{i}")
+            ld = st.checkbox(f"Laminado Digital #{i+1}", key=f"ld{i}") if (im_f=="Digital" or im_d=="Digital") else False
+            co = st.selectbox(f"Corte #{i+1}", ["Troquelado", "Plotter"], 0, key=f"co{i}")
+        datos_escandallo.append({"p":pz_m,"w":w_mm,"h":h_mm,"pf":pf,"gf":gf,"pl":pl,"ap":ap,"pd":pd,"gd":gd,"im_f":im_f,"nt_f":nt_f,"ba_f":ba_f,"im_d":im_d,"nt_d":nt_d,"ba_d":ba_d,"pe":pe,"ld":ld,"co":co})
 
 # --- ACCESORIOS ---
 st.divider()
-acc_seleccionados = st.multiselect("Accesorios / Extras", list(PRECIOS["extras"].keys()))
-lista_extras = []
-if acc_seleccionados:
-    cols_acc = st.columns(len(acc_seleccionados))
-    for j, name in enumerate(acc_seleccionados):
-        q_acc = cols_acc[j].number_input(f"Uds {name}/mueble", 1.0, key=f"acc{j}")
-        lista_extras.append({"n": name, "q": q_acc})
+acc_sel = st.multiselect("Accesorios / Extras", list(PRECIOS["extras"].keys()))
+l_ext = []
+if acc_sel:
+    cx = st.columns(len(acc_sel))
+    for j, n in enumerate(acc_sel):
+        q = cx[j].number_input(f"Uds {n}/ud", 1.0, key=f"acc{j}")
+        l_ext.append({"n": n, "q": q})
 
 # --- MOTOR DE CÁLCULO ---
-res_tabla = []
-desgloses_tecnicos = {}
-
-for cant_objetivo in lista_cants:
-    coste_total_formas = 0.0
-    detalles_formas = []
-    for idx, pieza in enumerate(datos_escandallo):
-        netas_pieza = cant_objetivo * pieza["p"]
-        mn, mi = obtener_mermas(netas_pieza)
-        h_compra = netas_pieza + mn + mi
-        h_proceso = netas_pieza + mn
-        m2_pieza = (pieza["w"] * pieza["h"]) / 1_000_000
-        
-        # Mats
-        coste_mats = (h_compra * m2_pieza * (pieza["gf"]/1000) * PRECIOS["cartoncillo"][pieza["pf"]]["precio_kg"]) + \
-                     (h_compra * m2_pieza * (pieza["gd"]/1000) * PRECIOS["cartoncillo"][pieza["pd"]]["precio_kg"])
-        if pieza["pl"] != "Ninguna":
-            coste_mats += (h_proceso * m2_pieza * PRECIOS["planchas"][pieza["pl"]][pieza["ap"]])
-            # CORRECCIÓN DE ERROR SINTAXIS CAPTURA
-            num_p = (1 if pieza["pf"] != "Ninguno" else 0) + (1 if pieza["pd"] != "Ninguno" else 0)
-            coste_mats += (h_proceso * m2_pieza * PRECIOS["planchas"][pieza["pl"]]["peg"] * num_p)
-            
-        # Imp (NETAS)
-        coste_imp = 0.0
-        # Frontal
-        if pieza["im_f"] == "Digital": coste_imp += (netas_pieza * m2_pieza * 6.5)
-        elif pieza["im_f"] == "Offset":
-            base_f = 60 if netas_pieza < 100 else (60 + 0.15*(netas_pieza-100) if netas_pieza < 500 else (120 if netas_pieza <= 2000 else 120 + 0.015*(netas_pieza-2000)))
-            coste_imp += base_f * (pieza["nt_f"] + (1 if pieza["ba_f"] else 0))
-        # Dorso
-        if pieza["im_d"] == "Digital": coste_imp += (netas_pieza * m2_pieza * 6.5)
-        elif pieza["im_d"] == "Offset":
-            base_d = 60 if netas_pieza < 100 else (60 + 0.15*(netas_pieza-100) if netas_pieza < 500 else (120 if netas_pieza <= 2000 else 120 + 0.015*(netas_pieza-2000)))
-            coste_imp += base_d * (pieza["nt_d"] + (1 if pieza["ba_d"] else 0))
-            
-        # Acab & Corte
-        coste_acab = h_proceso * m2_pieza * PRECIOS["peliculado"][pieza["pe"]]
-        if pieza["ld"]: coste_acab += (h_proceso * m2_pieza * 0.40) 
-        
-        if pieza["co"] == "Troquelado":
-            f_f = 107.7 if (pieza["h"] > 1000 or pieza["w"] > 700) else (80.77 if (pieza["h"] == 1000 and pieza["w"] == 700) else 48.19)
-            v_v = 0.135 if (pieza["h"] > 1000 or pieza["w"] > 700) else (0.09 if (pieza["h"] == 1000 and pieza["w"] == 700) else 0.06)
-            coste_cor = f_f + (h_proceso * v_v)
-        else: coste_cor = h_proceso * 1.5
-        
-        sub_pz = coste_mats + coste_imp + coste_acab + coste_cor
-        coste_total_formas += sub_pz
-        detalles_formas.append({"Pieza": idx+1, "Mat": coste_mats, "Imp": coste_imp, "Acab": coste_acab, "Corte": coste_cor, "Total": sub_pz})
-
-    # Manipulación (Segundos)
-    coste_man = ((segundos_mueble / 3600) * 18 * cant_objetivo) + (cant_objetivo * dif_ud)
-    coste_ext = sum(PRECIOS["extras"][e["n"]] * e["q"] * cant_objetivo for e in lista_extras)
+res_t = []; desc_t = {}
+for q_obj in lista_cants:
+    # NUEVO: Calculamos merma del manipulado (basado en el total de muebles)
+    mn_mueble, _ = obtener_mermas(q_obj)
+    q_proceso_manip = q_obj + mn_mueble
     
-    coste_total_fab = coste_total_formas + coste_man + coste_ext
-    pvp_total = coste_total_fab * margen_com
+    coste_formas = 0.0; det_f = []
+    for idx, pz in enumerate(datos_escandallo):
+        nb = q_obj * pz["p"]
+        mn_p, mi_p = obtener_mermas(nb)
+        hp = nb + mn_p + mi_p
+        hpro = nb + mn_p
+        m2 = (pz["w"] * pz["h"]) / 1_000_000
+        
+        c_mat = (hp * m2 * (pz["gf"]/1000) * PRECIOS["cartoncillo"][pz["pf"]]["precio_kg"]) + (hp * m2 * (pz["gd"]/1000) * PRECIOS["cartoncillo"][pz["pd"]]["precio_kg"])
+        if pz["pl"] != "Ninguna":
+            c_mat += (hpro * m2 * PRECIOS["planchas"][pz["pl"]][pz["ap"]])
+            num_p = (1 if pz["pf"] != "Ninguno" else 0) + (1 if pz["pd"] != "Ninguno" else 0)
+            c_mat += (hpro * m2 * PRECIOS["planchas"][pz["pl"]]["peg"] * num_p)
+            
+        c_imp = 0.0
+        if pz["im_f"] == "Digital": c_imp += (nb * m2 * 6.5)
+        elif pz["im_f"] == "Offset":
+            base_f = 60 if nb < 100 else (60 + 0.15*(nb-100) if nb < 500 else (120 if nb <= 2000 else 120 + 0.015*(nb-2000)))
+            c_imp += base_f * (pz["nt_f"] + (1 if pz["ba_f"] else 0))
+        if pz["im_d"] == "Digital": c_imp += (nb * m2 * 6.5)
+        elif pz["im_d"] == "Offset":
+            base_d = 60 if nb < 100 else (60 + 0.15*(nb-100) if nb < 500 else (120 if nb <= 2000 else 120 + 0.015*(nb-2000)))
+            c_imp += base_d * (pz["nt_d"] + (1 if pz["ba_d"] else 0))
+            
+        c_ac = hpro * m2 * PRECIOS["peliculado"][pz["pe"]]
+        if pz["ld"]: c_ac += (hpro * m2 * 0.40)
+        
+        if pz["co"] == "Troquelado":
+            ff = 107.7 if (pz["h"] > 1000 or pz["w"] > 700) else (80.77 if (pz["h"] == 1000 and pz["w"] == 700) else 48.19)
+            vv = 0.135 if (pz["h"] > 1000 or pz["w"] > 700) else (0.09 if (pz["h"] == 1000 and pz["w"] == 700) else 0.06)
+            c_co = ff + (hpro * vv)
+        else: c_co = hpro * 1.5
+        
+        s_pz = c_mat + c_imp + c_ac + c_co
+        coste_formas += s_pz
+        det_f.append({"Pieza": idx+1, "Mat": c_mat, "Imp": c_imp, "Acab": c_ac, "Corte": c_co, "Total": s_pz})
+
+    # Manipulación con MERMA (q_proceso_manip)
+    c_man = ((segundos_mueble / 3600) * 18 * q_proceso_manip) + (q_proceso_manip * dif_ud)
+    c_ex = sum(PRECIOS["extras"][e["n"]] * e["q"] * q_proceso_manip for e in l_ext)
     
-    desgloses_tecnicos[cant_objetivo] = {"detalles": detalles_formas, "man": coste_man + coste_ext, "total": coste_total_fab}
-    res_tabla.append({"Cantidad": cant_objetivo, "C. Fab Total": f"{coste_total_fab:.2f}€", "PVP Proyecto": f"{pvp_total:.2f}€", "PVP Unidad": f"{(pvp_total/cant_objetivo):.2f}€"})
+    c_fab = coste_formas + c_man + c_ex
+    pvp = c_fab * margen_com
+    desc_t[q_obj] = {"det": det_f, "man": c_man + c_ex, "total": c_fab, "q_proc": q_proceso_manip}
+    res_t.append({"Cantidad": q_obj, "Uds. Proceso": q_proceso_manip, "C. Fab": f"{c_fab:.2f}€", "PVP Proyecto": f"{pvp:.2f}€", "PVP Unidad": f"{(pvp/q_obj):.2f}€"})
 
 # --- SALIDA ---
-if res_tabla:
+if res_t:
     st.header("📊 Resumen del Escandallo")
-    st.dataframe(pd.DataFrame(res_tabla), use_container_width=True)
-    st.header("🔍 Desglose por Cantidad")
-    for q_uds, info in desgloses_tecnicos.items():
-        with st.expander(f"Ver detalle para {q_uds} unidades"):
-            st.table(pd.DataFrame(info["detalles"]).style.format("{:.2f}€", subset=["Mat", "Imp", "Acab", "Corte", "Total"]))
-            st.write(f"**Mano de Obra y Accesorios:** {info['man']:.2f} €")
+    st.dataframe(pd.DataFrame(res_t), use_container_width=True)
+    for q, info in desc_t.items():
+        with st.expander(f"Ver detalle: {q} uds (Procesando {info['q_proc']} por mermas)"):
+            st.table(pd.DataFrame(info["det"]).style.format("{:.2f}€", subset=["Mat", "Imp", "Acab", "Corte", "Total"]))
+            st.write(f"**Mano de Obra y Accesorios (sobre {info['q_proc']} uds):** {info['man']:.2f} €")
             st.write(f"**COSTE TOTAL FABRICACIÓN:** {info['total']:.2f} €")
             st.write(f"**PVP FINAL (x{margen_com}): {(info['total']*margen_com):.2f} €**")
