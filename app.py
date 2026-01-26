@@ -164,7 +164,7 @@ if not modo_comercial:
             ca.write(f"**{ex['nombre']}**"); cb.write(f"{ex['coste']}€/ud"); cc.write(f"x{ex['cantidad']} uds")
             if cd.button("🗑", key=f"del_gr_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-# --- 5. MOTOR DE CÁLCULO ---
+# --- 5. MOTOR DE CÁLCULO (ATOMIZADO PARA COMPRAS) ---
 res_final, desc_full = [], {}
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
@@ -178,18 +178,27 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             mn, mi = calcular_mermas(nb, es_digital=(p["im"]=="Digital" or p.get("im_d")=="Digital"))
             hc, hp = nb+mn+mi, nb+mn
             m2 = (p["w"]*p["h"])/1_000_000
-            c_cart = (hc*m2*(p.get('gf',0)/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"]) + (hc*m2*(p.get('gd',0)/1000)*PRECIOS["cartoncillo"][p["pd"]]["precio_kg"])
+            
+            # --- DESGLOSE DE MATERIAS PRIMAS ---
+            c_cart_f = (hc*m2*(p.get('gf',0)/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
+            c_cart_d = (hc*m2*(p.get('gd',0)/1000)*PRECIOS["cartoncillo"][p["pd"]]["precio_kg"])
             c_pla, c_con = 0.0, 0.0
             if p["pl"] != "Ninguna":
                 c_pla = hp * m2 * PRECIOS["planchas"][p["pl"]][p["ap"]]
+                # Contracolado (pegado): 1 pasada si solo hay cara, 2 si hay cara y dorso
                 pas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p["pd"]!="Ninguno" else 0)
                 c_con = hp * m2 * PRECIOS["planchas"][p["pl"]]["peg"] * pas
             
+            # --- DESGLOSE DE IMPRESIÓN ---
             def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
-            c_imp = (nb*m2*6.5 if p["im"]=="Digital" else (f_o(nb)*(p.get('nt',1)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
-            c_imp += (nb*m2*6.5 if p.get("im_d")=="Digital" else (f_o(nb)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get("im_d")=="Offset" else 0))
-            c_acab = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*PRECIOS["peliculado"][p.get("pel_d", "Sin Peliculado")])
-            c_acab += (hp*m2*3.5 if p.get("ld") else 0) + (hp*m2*3.5 if p.get("ld_d") else 0)
+            c_imp_f = (nb*m2*6.5 if p["im"]=="Digital" else (f_o(nb)*(p.get('nt',1)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
+            c_imp_d = (nb*m2*6.5 if p.get("im_d")=="Digital" else (f_o(nb)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get("im_d")=="Offset" else 0))
+            
+            # --- DESGLOSE DE ACABADOS ---
+            c_acab_f = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*3.5 if p.get("ld") else 0)
+            c_acab_d = (hp*m2*PRECIOS["peliculado"][p.get("pel_d", "Sin Peliculado")]) + (hp*m2*3.5 if p.get("ld_d") else 0)
+            
+            # --- DESGLOSE DE CORTE ---
             c_arr = 0.0
             if p["cor"] == "Troquelado":
                 if p.get('cobrar_arreglo', True):
@@ -197,35 +206,38 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 c_tir = (hp*(0.135 if (p['h']>1000 or p['w']>700) else 0.09))
             else: c_tir = hp * 1.5 
             
-            sub = c_cart+c_pla+c_con+c_imp+c_acab+c_arr+c_tir
+            sub = c_cart_f + c_cart_d + c_pla + c_con + c_imp_f + c_imp_d + c_acab_f + c_acab_d + c_arr + c_tir
             coste_f += sub
-            det_f.append({"Pieza": p["nombre"], "Arreglo": c_arr, "Tiraje": c_tir, "Total": sub})
+            det_f.append({
+                "Pieza": p["nombre"], 
+                "Cart. F": c_cart_f, "Cart. D": c_cart_d, 
+                "Plancha": c_pla, "Pegado": c_con,
+                "Imp. F": c_imp_f, "Imp. D": c_imp_d,
+                "Acab. F": c_acab_f, "Acab. D": c_acab_d,
+                "Arreglo": c_arr, "Tiraje": c_tir, 
+                "Subtotal": sub
+            })
 
         c_ext_total = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
-        c_man = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud) + c_ext_total
-        t_fab = coste_f + c_man
-        desc_full[q_n] = {"det": det_f, "man": c_man, "total": t_fab, "qp": qp_taller}
+        c_man_obra = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud)
+        
+        t_fab = coste_f + c_man_obra + c_ext_total
+        desc_full[q_n] = {"det": det_f, "man": c_man_obra, "extras": c_ext_total, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
-# --- 6. SALIDA VISUAL (OFERTA COMERCIAL) ---
+# --- 6. SALIDA VISUAL ---
 if modo_comercial and res_final:
+    # (El código del modo comercial se mantiene igual para respetar tu instrucción)
     p_lines = []
     for p in st.session_state.piezas_dict.values():
         line = f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm<br/>"
-        
-        # 1. Cara
         ac_c = []
         if p.get('pel') and p['pel'] != "Sin Peliculado": ac_c.append(p['pel'])
         if p['im'] == "Offset" and p.get('ba'): ac_c.append("Barniz")
         if p['im'] == "Digital" and p.get('ld'): ac_c.append("Laminado Digital")
         ac_c_str = " + ".join(ac_c) if ac_c else "Sin acabado"
         line += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p['gf']}g) | Imp: {p['im']} | Acabado: {ac_c_str}<br/>"
-        
-        # 2. Soporte Base (Ahora entre Cara y Dorso)
-        if p.get('pl') and p['pl'] != "Ninguna":
-            line += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
-        
-        # 3. Dorso
+        if p.get('pl') and p['pl'] != "Ninguna": line += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
         if p.get('pd') and p['pd'] != "Ninguno":
             ac_d = []
             if p.get('pel_d') and p['pel_d'] != "Sin Peliculado": ac_d.append(p['pel_d'])
@@ -233,14 +245,11 @@ if modo_comercial and res_final:
             if p.get('im_d') == "Digital" and p.get('ld_d'): ac_d.append("Laminado Digital")
             ac_d_str = " + ".join(ac_d) if ac_d else "Sin acabado"
             line += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p['gd']}g) | Imp: {p['im_d']} | Acabado: {ac_d_str}"
-        
         line += "</li>"
         p_lines.append(line)
-    
     p_h = "".join(p_lines)
     ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']})</li>" for e in st.session_state.lista_extras_grabados])
     f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
-    
     st.markdown(f"""<div class="comercial-box">
         <h2 class="comercial-header">OFERTA COMERCIAL - MAINSA PLV</h2>
         <h4>1. Especificaciones</h4><ul>{p_h}</ul>
@@ -249,10 +258,17 @@ if modo_comercial and res_final:
     </div>""", unsafe_allow_html=True)
 else:
     if res_final:
-        st.header("📊 Resultados")
+        st.header("📊 Resultados y Desglose de Compras")
         st.dataframe(pd.DataFrame(res_final), use_container_width=True)
         for q, info in desc_full.items():
-            with st.expander(f"🔍 Desglose {q} uds"):
-                st.table(pd.DataFrame(info["det"])); st.write(f"**Montaje y Extras:** {info['man']:.2f}€")
+            with st.expander(f"🔍 Auditoría de Costes: {q} uds (Taller: {info['qp']} uds)"):
+                # Tabla atomizada para Compras
+                df_det = pd.DataFrame(info["det"])
+                st.table(df_det.style.format("{:.2f}€", subset=df_det.columns[1:]))
+                
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Mano de Obra", f"{info['man']:.2f} €")
+                c2.metric("Total Accesorios", f"{info['extras']:.2f} €")
+                c3.metric("COSTE FABRICACIÓN", f"{info['total']:.2f} €")
     elif sum(lista_cants) == 0:
         st.info("💡 Introduce una cantidad mayor a 0 en el panel lateral.")
