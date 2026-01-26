@@ -51,6 +51,7 @@ def crear_forma_vacia(index):
         "cor": "Troquelado", "cobrar_arreglo": True
     }
 
+# Inicializar estados de memoria para persistencia
 if 'piezas_dict' not in st.session_state: st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
 if 'lista_extras_grabados' not in st.session_state: st.session_state.lista_extras_grabados = []
 if 'brf' not in st.session_state: st.session_state.brf = ""
@@ -66,47 +67,24 @@ st.markdown("""<style>
     .comercial-table th { background-color: #1E88E5; color: white; padding: 10px; }
     .comercial-table td { padding: 10px; border: 1px solid #ddd; text-align: center; }
     .header-info { display: flex; justify-content: space-around; background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
+    .config-block { background-color: #f1f3f6; padding: 20px; border-radius: 10px; border-left: 5px solid #1E88E5; margin-bottom: 25px; }
 </style>""", unsafe_allow_html=True)
 
 st.title("📦 Escandallos Profesionales MAINSA PLV")
 
-# --- 3. PANEL LATERAL (GESTIÓN DE ARCHIVOS) ---
+# --- 3. PANEL LATERAL (SOLO GESTIÓN Y VISTA) ---
 with st.sidebar:
-    st.header("⚙️ Ajustes Globales")
-    
-    st.session_state.brf = st.text_input("Nº de Briefing", st.session_state.brf)
-    st.session_state.cli = st.text_input("Cliente", st.session_state.cli)
-    st.session_state.com = st.text_input("Nº de Comercial", st.session_state.com)
-    st.session_state.ver = st.text_input("Versión", st.session_state.ver)
-    st.session_state.des = st.text_area("Descripción (opcional)", st.session_state.des)
+    st.header("🌟 Control")
+    modo_comercial = st.checkbox("VISTA OFERTA COMERCIAL", value=False)
     
     st.divider()
-    cants_str = st.text_input("Cantidades", "0")
-    lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
+    st.header("📂 Proyecto")
     
-    st.divider()
-    unidad_tiempo = st.radio("Unidad de manipulación:", ["Segundos", "Minutos"], horizontal=True)
-    tiempo_input = st.number_input(f"Tiempo de montaje ({unidad_tiempo})", value=0)
-    seg_man_total = tiempo_input * 60 if unidad_tiempo == "Minutos" else tiempo_input
-    
-    dif_ud = st.selectbox("Dificultad Unitaria", [0.02, 0.061, 0.091], index=2)
-    margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1)
-    
-    st.divider()
-    modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
-
-    st.divider()
-    st.header("📂 Gestión de Archivo")
-    
-    # Construcción dinámica del nombre del archivo según petición
-    # Se concatenan los campos separados por espacios, limpiando saltos de línea en descripción.
+    # Lógica de Exportación dinámica
     partes_nombre = [st.session_state.brf, st.session_state.com, st.session_state.ver]
     if st.session_state.des.strip():
-        # Limpiamos la descripción de posibles intros/saltos de línea para el nombre del archivo
         desc_limpia = st.session_state.des.strip().replace("\n", " ").replace("\r", "")
         partes_nombre.append(desc_limpia)
-    
-    # Filtramos elementos vacíos para evitar espacios dobles
     nombre_archivo_final = " ".join([str(p).strip() for p in partes_nombre if str(p).strip()]) + ".json"
 
     datos_exportar = {
@@ -115,34 +93,63 @@ with st.sidebar:
         "des": st.session_state.des,
         "piezas_dict": st.session_state.piezas_dict,
         "lista_extras": st.session_state.lista_extras_grabados,
-        "globales": {"unidad_tiempo": unidad_tiempo, "tiempo_input": tiempo_input, "dif_ud": dif_ud, "margen": margen}
+        "globales": {"unidad_tiempo": "Segundos", "tiempo_input": 0, "dif_ud": 0.091, "margen": 2.2} # Valores se actualizan abajo
     }
     json_str = json.dumps(datos_exportar, indent=4)
-    
-    # Botón con el nuevo nombre de archivo configurado
-    st.download_button(label="💾 Guardar Proyecto", data=json_str, file_name=nombre_archivo_final, mime="application/json")
+    st.download_button(label="💾 Guardar en Local", data=json_str, file_name=nombre_archivo_final, mime="application/json")
 
-    archivo_subido = st.file_uploader("📂 Importar Proyecto", type=["json"])
+    archivo_subido = st.file_uploader("📂 Importar archivo", type=["json"])
     if archivo_subido is not None:
         di = json.load(archivo_subido)
         st.session_state.brf = di.get("brf", ""); st.session_state.cli = di.get("cli", "")
         st.session_state.com = di.get("com", ""); st.session_state.ver = di.get("ver", "1.0")
         st.session_state.des = di.get("des", ""); st.session_state.lista_extras_grabados = di.get("lista_extras", [])
         st.session_state.piezas_dict = {int(k): v for k, v in di["piezas_dict"].items()}
-        st.success("Datos cargados.")
-        if st.button("🔄 Refrescar Aplicación"): st.rerun()
+        st.success("¡Importado! Pulsa Refrescar.")
+        if st.button("🔄 Refrescar"): st.rerun()
 
-# --- 4. GESTIÓN DE FORMAS Y EXTRAS ---
+# --- 4. CONFIGURACIÓN GLOBAL SUPERIOR (NUEVA UBICACIÓN) ---
 if not modo_comercial:
-    c1, c2 = st.columns([1, 5])
-    if c1.button("➕ Añadir Forma"):
+    with st.container():
+        st.markdown('<div class="config-block">', unsafe_allow_html=True)
+        
+        # Fila 1: Identidad
+        c_i1, c_i2, c_i3, c_i4 = st.columns(4)
+        st.session_state.brf = c_i1.text_input("Nº de Briefing", st.session_state.brf)
+        st.session_state.cli = c_i2.text_input("Cliente", st.session_state.cli)
+        st.session_state.com = c_i3.text_input("Nº de Comercial", st.session_state.com)
+        st.session_state.ver = c_i4.text_input("Versión", st.session_state.ver)
+        st.session_state.des = st.text_area("Descripción del Proyecto", st.session_state.des, height=68)
+        
+        st.divider()
+        
+        # Fila 2: Parámetros de Cálculo
+        c_c1, c_c2, c_c3, c_c4, c_c5 = st.columns([2, 2, 2, 2, 2])
+        cants_str = c_c1.text_input("Cantidades (ej: 500, 1000)", "0")
+        lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
+        
+        unidad_tiempo = c_c2.radio("Medida tiempo:", ["Seg", "Min"], horizontal=True)
+        tiempo_val = c_c3.number_input(f"Manipulado ({unidad_tiempo})", value=0)
+        seg_man_total = tiempo_val * 60 if unidad_tiempo == "Min" else tiempo_val
+        
+        dif_ud = c_c4.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2)
+        margen = c_c5.number_input("Mult. Comercial", value=2.2, step=0.1)
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+
+# --- 5. GESTIÓN DE FORMAS Y EXTRAS ---
+if not modo_comercial:
+    # Botones de control de formas
+    col_bt1, col_bt2 = st.columns([1, 5])
+    if col_bt1.button("➕ Añadir Forma"):
         nid = max(st.session_state.piezas_dict.keys()) + 1 if st.session_state.piezas_dict else 0
         st.session_state.piezas_dict[nid] = crear_forma_vacia(nid); st.rerun()
-    if c2.button("🗑 Reiniciar Todo"):
+    if col_bt2.button("🗑 Reiniciar Todo"):
         st.session_state.piezas_dict = {0: crear_forma_vacia(0)}; st.session_state.lista_extras_grabados = []
         st.session_state.brf = ""; st.session_state.cli = ""; st.session_state.com = ""; st.session_state.ver = "1.0"; st.session_state.des = ""
         st.rerun()
 
+    # Editores de piezas
     for p_id in list(st.session_state.piezas_dict.keys()):
         p = st.session_state.piezas_dict[p_id]
         with st.expander(f"🛠 {p['nombre']}", expanded=True):
@@ -187,11 +194,11 @@ if not modo_comercial:
                     p['pel_d'] = st.selectbox("Peliculado Dorso", list(PRECIOS["peliculado"].keys()), list(PRECIOS["peliculado"].keys()).index(p.get('pel_d','Sin Peliculado')), key=f"peld_{p_id}")
                 if st.button("🗑 Eliminar", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
 
-    # --- SECCIÓN DE EXTRAS ---
+    # Almacén de extras
     st.divider(); st.subheader("📦 Almacén de Accesorios")
     ce1, ce2 = st.columns(2)
     with ce1:
-        ex_s = st.selectbox("Añadir de la lista:", ["---"] + list(PRECIOS["extras_base"].keys()))
+        ex_s = st.selectbox("De la lista:", ["---"] + list(PRECIOS["extras_base"].keys()))
         q_s = st.number_input("Uds/mueble:", 1.0, 100.0, 1.0, key="q_ex_list")
         if st.button("➕ Añadir Lista") and ex_s != "---":
             st.session_state.lista_extras_grabados.append({"nombre": ex_s, "coste": PRECIOS["extras_base"][ex_s], "cantidad": q_s}); st.rerun()
@@ -205,7 +212,7 @@ if not modo_comercial:
             ca.write(f"**{ex['nombre']}**"); cb.write(f"{ex['coste']}€/ud"); cc.write(f"x{ex['cantidad']} uds")
             if cd.button("🗑", key=f"del_gr_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-# --- 5. MOTOR DE CÁLCULO ---
+# --- 6. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
@@ -244,15 +251,15 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         desc_full[q_n] = {"det": det_f, "man": c_man_obra, "extras": c_ext_total, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
-# --- 6. SALIDA VISUAL ---
+# --- 7. SALIDA VISUAL ---
 if modo_comercial and res_final:
     p_lines = []
     for p in st.session_state.piezas_dict.values():
+        line = f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm<br/>"
         ac_c = []
         if p.get('pel') and p['pel'] != "Sin Peliculado": ac_c.append(p['pel'])
         if p['im'] == "Offset" and p.get('ba'): ac_c.append("Barniz")
         if p['im'] == "Digital" and p.get('ld'): ac_c.append("Laminado Digital")
-        line = f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm<br/>"
         line += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p['gf']}g) | Imp: {p['im']} | Acabado: {' + '.join(ac_c) if ac_c else 'Sin acabado'}<br/>"
         if p.get('pl') and p['pl'] != "Ninguna": line += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
         if p.get('pd') and p['pd'] != "Ninguno":
@@ -274,7 +281,7 @@ if modo_comercial and res_final:
         </div>
         {f'{"<p><b>Descripción:</b> " + st.session_state.des + "</p>" if st.session_state.des else ""}'}
         <h4>1. Especificaciones</h4><ul>{"".join(p_lines)}</ul>
-        <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido ({tiempo_input} {unidad_tiempo.lower()}/ud).</li></ul>
+        <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido ({tiempo_val} {unidad_tiempo.lower()}/ud).</li></ul>
         <table class="comercial-table"><tr><th>Cantidad</th><th>PVP Total</th><th>PVP Unitario</th></tr>{f_h}</table>
     </div>""", unsafe_allow_html=True)
 else:
@@ -285,4 +292,4 @@ else:
             with st.expander(f"🔍 Auditoría Compras {q} uds"):
                 st.table(pd.DataFrame(info["det"]).style.format("{:.2f}€", subset=pd.DataFrame(info["det"]).columns[1:]))
                 st.write(f"**Mano Obra:** {info['man']:.2f}€ | **Extras:** {info['extras']:.2f}€")
-    elif sum(lista_cants) == 0: st.info("💡 Introduce una cantidad mayor a 0 en el panel lateral.")
+    elif sum(lista_cants) == 0: st.info("💡 Introduce una cantidad mayor a 0.")
