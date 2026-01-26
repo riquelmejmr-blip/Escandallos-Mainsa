@@ -47,7 +47,7 @@ def crear_forma_vacia(index):
         "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, 
         "im_d": "No", "nt_d": 1, "ba_d": False, "pel": "Sin Peliculado", 
         "pel_d": "Sin Peliculado", "ld": False, "ld_d": False, 
-        "cor": "Troquelado", "cobrar_arreglo": True # Nueva opción para arreglo compartido
+        "cor": "Troquelado", "cobrar_arreglo": True
     }
 
 if 'piezas_dict' not in st.session_state:
@@ -124,9 +124,8 @@ if not modo_comercial:
             with col3:
                 st.markdown("**Corte y Arreglo**")
                 p['cor'] = st.selectbox("Tipo de Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
-                # NUEVA OPCIÓN: Interruptor para compartir arreglo
                 if p['cor'] == "Troquelado":
-                    p['cobrar_arreglo'] = st.checkbox("¿Cobrar Arreglo Troquel?", value=p.get('cobrar_arreglo', True), key=f"arr_{p_id}", help="Desmarca esta casilla si esta forma usa un troquel que ya ha sido cobrado en otra pieza.")
+                    p['cobrar_arreglo'] = st.checkbox("¿Cobrar Arreglo Troquel?", value=p.get('cobrar_arreglo', True), key=f"arr_{p_id}")
                 
                 if p['pd'] != "Ninguno":
                     st.markdown("**Dorso: Impresión y Acabado**")
@@ -179,7 +178,6 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             mn, mi = calcular_mermas(nb, es_digital=(p["im"]=="Digital" or p.get("im_d")=="Digital"))
             hc, hp = nb+mn+mi, nb+mn
             m2 = (p["w"]*p["h"])/1_000_000
-            
             c_cart = (hc*m2*(p.get('gf',0)/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"]) + (hc*m2*(p.get('gd',0)/1000)*PRECIOS["cartoncillo"][p["pd"]]["precio_kg"])
             c_pla, c_con = 0.0, 0.0
             if p["pl"] != "Ninguna":
@@ -190,18 +188,14 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
             c_imp = (nb*m2*6.5 if p["im"]=="Digital" else (f_o(nb)*(p.get('nt',1)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
             c_imp += (nb*m2*6.5 if p.get("im_d")=="Digital" else (f_o(nb)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get("im_d")=="Offset" else 0))
-            
             c_acab = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*PRECIOS["peliculado"][p.get("pel_d", "Sin Peliculado")])
             c_acab += (hp*m2*3.5 if p.get("ld") else 0) + (hp*m2*3.5 if p.get("ld_d") else 0)
-            
-            # Lógica de Arreglo Compartido
             c_arr = 0.0
             if p["cor"] == "Troquelado":
                 if p.get('cobrar_arreglo', True):
                     c_arr = 107.7 if (p['h']>1000 or p['w']>700) else 48.19
                 c_tir = (hp*(0.135 if (p['h']>1000 or p['w']>700) else 0.09))
-            else:
-                c_tir = hp * 1.5 # Plotter no tiene arreglo, solo tiraje
+            else: c_tir = hp * 1.5 
             
             sub = c_cart+c_pla+c_con+c_imp+c_acab+c_arr+c_tir
             coste_f += sub
@@ -213,23 +207,48 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         desc_full[q_n] = {"det": det_f, "man": c_man, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
-# --- 6. SALIDA VISUAL ---
+# --- 6. SALIDA VISUAL (OFERTA COMERCIAL ACTUALIZADA) ---
 if modo_comercial and res_final:
-    p_h = "".join([f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm - Cara: {p['im']} / Dorso: {p['im_d']}</li>" for p in st.session_state.piezas_dict.values()])
+    p_lines = []
+    for p in st.session_state.piezas_dict.values():
+        # Lógica de Acabado Cara
+        ac_c = []
+        if p.get('pel') and p['pel'] != "Sin Peliculado": ac_c.append(p['pel'])
+        if p['im'] == "Offset" and p.get('ba'): ac_c.append("Barniz")
+        if p['im'] == "Digital" and p.get('ld'): ac_c.append("Laminado Digital")
+        ac_c_str = " + ".join(ac_c) if ac_c else "Sin acabado"
+        
+        line = f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm<br/>"
+        line += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p['gf']}g) | Imp: {p['im']} | Acabado: {ac_c_str}"
+        
+        # Lógica de Acabado Dorso
+        if p.get('pd') and p['pd'] != "Ninguno":
+            ac_d = []
+            if p.get('pel_d') and p['pel_d'] != "Sin Peliculado": ac_d.append(p['pel_d'])
+            if p.get('im_d') == "Offset" and p.get('ba_d'): ac_d.append("Barniz")
+            if p.get('im_d') == "Digital" and p.get('ld_d'): ac_d.append("Laminado Digital")
+            ac_d_str = " + ".join(ac_d) if ac_d else "Sin acabado"
+            line += f"<br/>&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p['gd']}g) | Imp: {p['im_d']} | Acabado: {ac_d_str}"
+        
+        line += "</li>"
+        p_lines.append(line)
+    
+    p_h = "".join(p_lines)
     ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']})</li>" for e in st.session_state.lista_extras_grabados])
     f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
+    
     st.markdown(f"""<div class="comercial-box">
         <h2 class="comercial-header">OFERTA COMERCIAL - MAINSA PLV</h2>
         <h4>1. Especificaciones</h4><ul>{p_h}</ul>
         <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido ({tiempo_input} {unidad_tiempo.lower()}/ud).</li></ul>
-        <table class="comercial-table"><tr><th>Cantidad</th><th>PVP Total</th><th>PVP Unidad</th></tr>{f_h}</table>
+        <table class="comercial-table"><tr><th>Cantidad</th><th>PVP Total</th><th>PVP Unitario</th></tr>{f_h}</table>
     </div>""", unsafe_allow_html=True)
 else:
     if res_final:
         st.header("📊 Resultados")
         st.dataframe(pd.DataFrame(res_final), use_container_width=True)
         for q, info in desc_full.items():
-            with st.expander(f"🔍 Desglose {q} uds (Taller: {info['qp']} uds)"):
+            with st.expander(f"🔍 Desglose {q} uds"):
                 st.table(pd.DataFrame(info["det"])); st.write(f"**Montaje y Extras:** {info['man']:.2f}€")
     elif sum(lista_cants) == 0:
-        st.info("💡 Introduce una cantidad mayor a 0 en el panel lateral para ver los resultados.")
+        st.info("💡 Introduce una cantidad mayor a 0 en el panel lateral.")
