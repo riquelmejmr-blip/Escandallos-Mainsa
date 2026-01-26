@@ -46,7 +46,8 @@ def crear_forma_vacia(index):
         "pf": "Ninguno", "gf": 0, "pl": "Ninguna", "ap": "C/C", 
         "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, 
         "im_d": "No", "nt_d": 1, "ba_d": False, "pel": "Sin Peliculado", 
-        "pel_d": "Sin Peliculado", "ld": False, "ld_d": False, "cor": "Troquelado"
+        "pel_d": "Sin Peliculado", "ld": False, "ld_d": False, 
+        "cor": "Troquelado", "cobrar_arreglo": True # Nueva opción para arreglo compartido
     }
 
 if 'piezas_dict' not in st.session_state:
@@ -69,12 +70,10 @@ with st.sidebar:
     st.header("⚙️ Ajustes Globales")
     cants_str = st.text_input("Cantidades (ej: 200, 500)", "0")
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
-    
     st.divider()
     unidad_tiempo = st.radio("Unidad de manipulación:", ["Segundos", "Minutos"], horizontal=True)
     tiempo_input = st.number_input(f"Tiempo de montaje ({unidad_tiempo})", value=0)
     seg_man_total = tiempo_input * 60 if unidad_tiempo == "Minutos" else tiempo_input
-    
     dif_ud = st.selectbox("Dificultad Unitaria", [0.02, 0.061, 0.091], index=2)
     margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1)
     st.divider()
@@ -115,17 +114,20 @@ if not modo_comercial:
                 p['pf'] = st.selectbox("C. Frontal", list(PRECIOS["cartoncillo"].keys()), list(PRECIOS["cartoncillo"].keys()).index(p['pf']), key=f"pf_{p_id}")
                 if p['pf'] != pf_prev: p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
                 if p['pf'] != "Ninguno": p['gf'] = st.number_input("Gramaje F.", value=int(p['gf']), key=f"gf_{p_id}")
-                
                 p['pl'] = st.selectbox("Plancha Base", list(PRECIOS["planchas"].keys()), list(PRECIOS["planchas"].keys()).index(p['pl']), key=f"pl_{p_id}")
                 p['ap'] = st.selectbox("Calidad", ["C/C", "B/C", "B/B"], key=f"ap_{p_id}") if p['pl'] != "Ninguna" else "C/C"
-                
                 pd_prev = p['pd']
                 p['pd'] = st.selectbox("C. Dorso", list(PRECIOS["cartoncillo"].keys()), list(PRECIOS["cartoncillo"].keys()).index(p['pd']), key=f"pd_{p_id}")
                 if p['pd'] != pd_prev: p['gd'] = PRECIOS["cartoncillo"][p['pd']]["gramaje"]
                 if p['pd'] != "Ninguno": p['gd'] = st.number_input("Gramaje D.", value=int(p['gd']), key=f"gd_{p_id}")
 
             with col3:
-                p['cor'] = st.selectbox("Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
+                st.markdown("**Corte y Arreglo**")
+                p['cor'] = st.selectbox("Tipo de Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
+                # NUEVA OPCIÓN: Interruptor para compartir arreglo
+                if p['cor'] == "Troquelado":
+                    p['cobrar_arreglo'] = st.checkbox("¿Cobrar Arreglo Troquel?", value=p.get('cobrar_arreglo', True), key=f"arr_{p_id}", help="Desmarca esta casilla si esta forma usa un troquel que ya ha sido cobrado en otra pieza.")
+                
                 if p['pd'] != "Ninguno":
                     st.markdown("**Dorso: Impresión y Acabado**")
                     p['im_d'] = st.selectbox("Sistema Dorso", ["Offset", "Digital", "No"], ["Offset", "Digital", "No"].index(p.get('im_d','No')), key=f"imd_{p_id}")
@@ -138,7 +140,7 @@ if not modo_comercial:
 
                 if st.button("🗑 Eliminar", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
 
-    # --- SECCIÓN DE EXTRAS (RESTAURADA) ---
+    # --- SECCIÓN DE EXTRAS ---
     st.divider()
     st.subheader("📦 Almacén de Accesorios y Extras")
     col_e1, col_e2 = st.columns(2)
@@ -191,11 +193,19 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             
             c_acab = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*PRECIOS["peliculado"][p.get("pel_d", "Sin Peliculado")])
             c_acab += (hp*m2*3.5 if p.get("ld") else 0) + (hp*m2*3.5 if p.get("ld_d") else 0)
-            c_trq = (107.7 if (p['h']>1000 or p['w']>700) else 48.19) + (hp*(0.135 if (p['h']>1000 or p['w']>700) else 0.09)) if p["cor"]=="Troquelado" else hp*1.5
             
-            sub = c_cart+c_pla+c_con+c_imp+c_acab+c_trq
+            # Lógica de Arreglo Compartido
+            c_arr = 0.0
+            if p["cor"] == "Troquelado":
+                if p.get('cobrar_arreglo', True):
+                    c_arr = 107.7 if (p['h']>1000 or p['w']>700) else 48.19
+                c_tir = (hp*(0.135 if (p['h']>1000 or p['w']>700) else 0.09))
+            else:
+                c_tir = hp * 1.5 # Plotter no tiene arreglo, solo tiraje
+            
+            sub = c_cart+c_pla+c_con+c_imp+c_acab+c_arr+c_tir
             coste_f += sub
-            det_f.append({"Pieza": p["nombre"], "Cart": c_cart, "Plan": c_pla, "Imp": c_imp, "Acab": c_acab, "Corte": c_trq, "Total": sub})
+            det_f.append({"Pieza": p["nombre"], "Arreglo": c_arr, "Tiraje": c_tir, "Total": sub})
 
         c_ext_total = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
         c_man = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud) + c_ext_total
@@ -205,7 +215,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
 
 # --- 6. SALIDA VISUAL ---
 if modo_comercial and res_final:
-    p_h = "".join([f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm - F:{p['im']} / D:{p['im_d']}</li>" for p in st.session_state.piezas_dict.values()])
+    p_h = "".join([f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm - Cara: {p['im']} / Dorso: {p['im_d']}</li>" for p in st.session_state.piezas_dict.values()])
     ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']})</li>" for e in st.session_state.lista_extras_grabados])
     f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
     st.markdown(f"""<div class="comercial-box">
