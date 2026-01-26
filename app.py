@@ -70,7 +70,7 @@ st.markdown("""<style>
 
 st.title("📦 Escandallos Profesionales MAINSA PLV")
 
-# --- 3. PANEL LATERAL (Ajustes Globales y Archivos) ---
+# --- 3. PANEL LATERAL ---
 with st.sidebar:
     st.header("⚙️ Ajustes Globales")
     st.session_state.brf = st.text_input("Nº de Briefing", st.session_state.brf)
@@ -96,7 +96,6 @@ with st.sidebar:
     st.divider()
     st.header("📂 Archivos")
     
-    # Nombre de archivo según Versión 26
     partes_nombre = [st.session_state.brf, st.session_state.com, st.session_state.ver]
     if st.session_state.des.strip(): partes_nombre.append(st.session_state.des.strip().replace("\n", " "))
     nombre_archivo_final = " ".join([str(p).strip() for p in partes_nombre if str(p).strip()]) + ".json"
@@ -177,7 +176,7 @@ if not modo_comercial:
         ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud", value=float(ex['coste']), key=f"exc_{i}"); ex['cantidad'] = cc.number_input("Cant", value=float(ex['cantidad']), key=f"exq_{i}")
         if cd.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-# --- 5. MOTOR DE CÁLCULO (Atomizado para Compras) ---
+# --- 5. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
@@ -211,17 +210,20 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         desc_full[q_n] = {"det": det_f, "man": c_mo, "extras": c_ext_tot, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
-# --- 6. SALIDA VISUAL (Oferta Comercial Sándwich) ---
+# --- 6. SALIDA VISUAL (Oferta Comercial Sándwich con Pliegos) ---
 if modo_comercial and res_final:
     p_html = ""
     for p in st.session_state.piezas_dict.values():
         ac_c = f"{p['pel']} + Laminado" if p.get('ld') else p['pel']
-        p_html += f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm<br/>"
+        # Inclusión de pliegos/ud en la cabecera de la forma
+        p_html += f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm ({p['pliegos']:g} pliegos/ud)<br/>"
         p_html += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p.get('gf',0)}g) | Imp: {p['im']} | Acabado: {ac_c}<br/>"
         if p.get('pl') != "Ninguna": p_html += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
-        if p.get('pd') != "Ninguno": p_html += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p.get('gd',0)}g) | Imp: {p.get('im_d', 'No')}</li>"
+        if p.get('pd') != "Ninguno":
+            ac_d = f"{p.get('pel_d', 'Sin Peliculado')} + Laminado" if p.get('ld_d') else p.get('pel_d', 'Sin Peliculado')
+            p_html += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p.get('gd',0)}g) | Imp: {p.get('im_d', 'No')} | Acabado: {ac_d}</li>"
     
-    ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']})</li>" for e in st.session_state.lista_extras_grabados])
+    ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']:g})</li>" for e in st.session_state.lista_extras_grabados])
     f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
     
     st.markdown(f"""<div class="comercial-box">
