@@ -207,21 +207,25 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         desc_full[q_n] = {"det": det_f, "man": c_man, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
-# --- 6. SALIDA VISUAL (OFERTA COMERCIAL ACTUALIZADA) ---
+# --- 6. SALIDA VISUAL (OFERTA COMERCIAL) ---
 if modo_comercial and res_final:
     p_lines = []
     for p in st.session_state.piezas_dict.values():
-        # Lógica de Acabado Cara
+        line = f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm<br/>"
+        
+        # Soporte Base (Plancha)
+        if p.get('pl') and p['pl'] != "Ninguna":
+            line += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
+        
+        # Cara
         ac_c = []
         if p.get('pel') and p['pel'] != "Sin Peliculado": ac_c.append(p['pel'])
         if p['im'] == "Offset" and p.get('ba'): ac_c.append("Barniz")
         if p['im'] == "Digital" and p.get('ld'): ac_c.append("Laminado Digital")
         ac_c_str = " + ".join(ac_c) if ac_c else "Sin acabado"
-        
-        line = f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm<br/>"
         line += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p['gf']}g) | Imp: {p['im']} | Acabado: {ac_c_str}"
         
-        # Lógica de Acabado Dorso
+        # Dorso
         if p.get('pd') and p['pd'] != "Ninguno":
             ac_d = []
             if p.get('pel_d') and p['pel_d'] != "Sin Peliculado": ac_d.append(p['pel_d'])
