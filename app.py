@@ -213,26 +213,26 @@ if modo_comercial and res_final:
     for p in st.session_state.piezas_dict.values():
         line = f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm<br/>"
         
-        # Soporte Base (Plancha)
-        if p.get('pl') and p['pl'] != "Ninguna":
-            line += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
-        
-        # Cara
+        # 1. Cara
         ac_c = []
         if p.get('pel') and p['pel'] != "Sin Peliculado": ac_c.append(p['pel'])
         if p['im'] == "Offset" and p.get('ba'): ac_c.append("Barniz")
         if p['im'] == "Digital" and p.get('ld'): ac_c.append("Laminado Digital")
         ac_c_str = " + ".join(ac_c) if ac_c else "Sin acabado"
-        line += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p['gf']}g) | Imp: {p['im']} | Acabado: {ac_c_str}"
+        line += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p['gf']}g) | Imp: {p['im']} | Acabado: {ac_c_str}<br/>"
         
-        # Dorso
+        # 2. Soporte Base (Ahora entre Cara y Dorso)
+        if p.get('pl') and p['pl'] != "Ninguna":
+            line += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
+        
+        # 3. Dorso
         if p.get('pd') and p['pd'] != "Ninguno":
             ac_d = []
             if p.get('pel_d') and p['pel_d'] != "Sin Peliculado": ac_d.append(p['pel_d'])
             if p.get('im_d') == "Offset" and p.get('ba_d'): ac_d.append("Barniz")
             if p.get('im_d') == "Digital" and p.get('ld_d'): ac_d.append("Laminado Digital")
             ac_d_str = " + ".join(ac_d) if ac_d else "Sin acabado"
-            line += f"<br/>&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p['gd']}g) | Imp: {p['im_d']} | Acabado: {ac_d_str}"
+            line += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p['gd']}g) | Imp: {p['im_d']} | Acabado: {ac_d_str}"
         
         line += "</li>"
         p_lines.append(line)
