@@ -51,7 +51,6 @@ def crear_forma_vacia(index):
         "cor": "Troquelado", "cobrar_arreglo": True
     }
 
-# Inicializar estados para persistencia en importación
 if 'piezas_dict' not in st.session_state: st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
 if 'lista_extras_grabados' not in st.session_state: st.session_state.lista_extras_grabados = []
 if 'brf' not in st.session_state: st.session_state.brf = ""
@@ -71,11 +70,10 @@ st.markdown("""<style>
 
 st.title("📦 Escandallos Profesionales MAINSA PLV")
 
-# --- 3. PANEL LATERAL (GESTIÓN DE PROYECTOS ACTUALIZADA) ---
+# --- 3. PANEL LATERAL (GESTIÓN DE ARCHIVOS) ---
 with st.sidebar:
     st.header("⚙️ Ajustes Globales")
     
-    # Nuevos parámetros de identificación
     st.session_state.brf = st.text_input("Nº de Briefing", st.session_state.brf)
     st.session_state.cli = st.text_input("Cliente", st.session_state.cli)
     st.session_state.com = st.text_input("Nº de Comercial", st.session_state.com)
@@ -100,7 +98,17 @@ with st.sidebar:
     st.divider()
     st.header("📂 Gestión de Archivo")
     
-    # Lógica de Exportación Completa
+    # Construcción dinámica del nombre del archivo según petición
+    # Se concatenan los campos separados por espacios, limpiando saltos de línea en descripción.
+    partes_nombre = [st.session_state.brf, st.session_state.com, st.session_state.ver]
+    if st.session_state.des.strip():
+        # Limpiamos la descripción de posibles intros/saltos de línea para el nombre del archivo
+        desc_limpia = st.session_state.des.strip().replace("\n", " ").replace("\r", "")
+        partes_nombre.append(desc_limpia)
+    
+    # Filtramos elementos vacíos para evitar espacios dobles
+    nombre_archivo_final = " ".join([str(p).strip() for p in partes_nombre if str(p).strip()]) + ".json"
+
     datos_exportar = {
         "brf": st.session_state.brf, "cli": st.session_state.cli,
         "com": st.session_state.com, "ver": st.session_state.ver,
@@ -110,9 +118,10 @@ with st.sidebar:
         "globales": {"unidad_tiempo": unidad_tiempo, "tiempo_input": tiempo_input, "dif_ud": dif_ud, "margen": margen}
     }
     json_str = json.dumps(datos_exportar, indent=4)
-    st.download_button(label="💾 Guardar Proyecto", data=json_str, file_name=f"{st.session_state.brf}_V{st.session_state.ver}.json", mime="application/json")
+    
+    # Botón con el nuevo nombre de archivo configurado
+    st.download_button(label="💾 Guardar Proyecto", data=json_str, file_name=nombre_archivo_final, mime="application/json")
 
-    # Lógica de Importación Completa
     archivo_subido = st.file_uploader("📂 Importar Proyecto", type=["json"])
     if archivo_subido is not None:
         di = json.load(archivo_subido)
@@ -120,7 +129,7 @@ with st.sidebar:
         st.session_state.com = di.get("com", ""); st.session_state.ver = di.get("ver", "1.0")
         st.session_state.des = di.get("des", ""); st.session_state.lista_extras_grabados = di.get("lista_extras", [])
         st.session_state.piezas_dict = {int(k): v for k, v in di["piezas_dict"].items()}
-        st.success("Datos cargados. Haz clic en el botón inferior.")
+        st.success("Datos cargados.")
         if st.button("🔄 Refrescar Aplicación"): st.rerun()
 
 # --- 4. GESTIÓN DE FORMAS Y EXTRAS ---
@@ -173,7 +182,8 @@ if not modo_comercial:
                     if p['im_d'] == "Offset":
                         p['nt_d'] = st.number_input("Tintas D.", 1, 6, max(1, int(p.get('nt_d',1))), key=f"ntd_{p_id}")
                         p['ba_d'] = st.checkbox("Barniz D.", p.get('ba_d',False), key=f"bad_{p_id}")
-                    elif p['im_d'] == "Digital": p['ld_d'] = st.checkbox("Laminado Digital D.", p.get('ld_d',False), key=f"ldd_{p_id}")
+                    elif p['im_d'] == "Digital":
+                        p['ld_d'] = st.checkbox("Laminado Digital D.", p.get('ld_d',False), key=f"ldd_{p_id}")
                     p['pel_d'] = st.selectbox("Peliculado Dorso", list(PRECIOS["peliculado"].keys()), list(PRECIOS["peliculado"].keys()).index(p.get('pel_d','Sin Peliculado')), key=f"peld_{p_id}")
                 if st.button("🗑 Eliminar", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
 
