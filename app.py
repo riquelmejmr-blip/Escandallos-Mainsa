@@ -210,12 +210,11 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         desc_full[q_n] = {"det": det_f, "man": c_mo, "extras": c_ext_tot, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
-# --- 6. SALIDA VISUAL (Oferta Comercial Sándwich con Pliegos) ---
+# --- 6. SALIDA VISUAL (Oferta Comercial Finalizada) ---
 if modo_comercial and res_final:
     p_html = ""
     for p in st.session_state.piezas_dict.values():
         ac_c = f"{p['pel']} + Laminado" if p.get('ld') else p['pel']
-        # Inclusión de pliegos/ud en la cabecera de la forma
         p_html += f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm ({p['pliegos']:g} pliegos/ud)<br/>"
         p_html += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p.get('gf',0)}g) | Imp: {p['im']} | Acabado: {ac_c}<br/>"
         if p.get('pl') != "Ninguna": p_html += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
@@ -223,7 +222,10 @@ if modo_comercial and res_final:
             ac_d = f"{p.get('pel_d', 'Sin Peliculado')} + Laminado" if p.get('ld_d') else p.get('pel_d', 'Sin Peliculado')
             p_html += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p.get('gd',0)}g) | Imp: {p.get('im_d', 'No')} | Acabado: {ac_d}</li>"
     
+    # Listado de accesorios dinámico
     ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']:g})</li>" for e in st.session_state.lista_extras_grabados])
+    if not ex_h: ex_h = "<li>Sin accesorios adicionales</li>"
+    
     f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
     
     st.markdown(f"""<div class="comercial-box">
@@ -233,7 +235,7 @@ if modo_comercial and res_final:
         </div>
         <p><b>Descripción:</b> {st.session_state.des}</p>
         <h4>1. Especificaciones</h4><ul>{p_html}</ul>
-        <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido.</li></ul>
+        <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li><b>Tiempo de manipulado:</b> {t_input} {unidad_t.lower()} / ud incluido.</li></ul>
         <table class="comercial-table"><tr><th>Cantidad</th><th>PVP Total</th><th>PVP Unitario</th></tr>{f_h}</table>
     </div>""", unsafe_allow_html=True)
 else:
