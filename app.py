@@ -1,5 +1,6 @@
 import streamlit as st
 import pandas as pd
+import json # Librería para gestionar el archivo de guardado
 
 # --- 1. BASE DE DATOS DE PRECIOS ---
 PRECIOS = {
@@ -65,19 +66,51 @@ st.markdown("""<style>
 
 st.title("📦 Escandallos Profesionales MAINSA PLV")
 
-# --- 3. PANEL LATERAL ---
+# --- 3. PANEL LATERAL (CON GESTIÓN DE ARCHIVOS) ---
 with st.sidebar:
     st.header("⚙️ Ajustes Globales")
-    cants_str = st.text_input("Cantidades (ej: 200, 500)", "0")
+    
+    # Identificación del proyecto
+    num_proy = st.text_input("Nº Proyecto", "PROY-001")
+    cliente = st.text_input("Cliente", "Nombre Cliente")
+    
+    st.divider()
+    cants_str = st.text_input("Cantidades", "0")
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
+    
     st.divider()
     unidad_tiempo = st.radio("Unidad de manipulación:", ["Segundos", "Minutos"], horizontal=True)
     tiempo_input = st.number_input(f"Tiempo de montaje ({unidad_tiempo})", value=0)
     seg_man_total = tiempo_input * 60 if unidad_tiempo == "Minutos" else tiempo_input
+    
     dif_ud = st.selectbox("Dificultad Unitaria", [0.02, 0.061, 0.091], index=2)
     margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1)
+    
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
+
+    st.divider()
+    st.header("📂 Gestión de Proyecto")
+    
+    # Lógica de Exportación (Guardar)
+    datos_exportar = {
+        "num_proy": num_proy, "cliente": cliente,
+        "piezas_dict": st.session_state.piezas_dict,
+        "lista_extras": st.session_state.lista_extras_grabados,
+        "globales": {"unidad_tiempo": unidad_tiempo, "tiempo_input": tiempo_input, "dif_ud": dif_ud, "margen": margen}
+    }
+    json_str = json.dumps(datos_exportar, indent=4)
+    st.download_button(label="💾 Descargar Proyecto (.json)", data=json_str, file_name=f"{num_proy}_{cliente}.json", mime="application/json")
+
+    # Lógica de Importación (Abrir)
+    archivo_subido = st.file_uploader("📂 Abrir Proyecto Existente", type=["json"])
+    if archivo_subido is not None:
+        datos_importados = json.load(archivo_subido)
+        # Forzar actualización de session_state
+        st.session_state.piezas_dict = {int(k): v for k, v in datos_importados["piezas_dict"].items()}
+        st.session_state.lista_extras_grabados = datos_importados["lista_extras"]
+        st.success("Proyecto cargado. La página se actualizará.")
+        st.button("Confirmar Carga") # Botón para disparar el rerun manualmente si el navegador no lo hace
 
 # --- 4. GESTIÓN DE FORMAS Y EXTRAS ---
 if not modo_comercial:
@@ -126,7 +159,6 @@ if not modo_comercial:
                 p['cor'] = st.selectbox("Tipo de Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
                 if p['cor'] == "Troquelado":
                     p['cobrar_arreglo'] = st.checkbox("¿Cobrar Arreglo Troquel?", value=p.get('cobrar_arreglo', True), key=f"arr_{p_id}")
-                
                 if p['pd'] != "Ninguno":
                     st.markdown("**Dorso: Impresión y Acabado**")
                     p['im_d'] = st.selectbox("Sistema Dorso", ["Offset", "Digital", "No"], ["Offset", "Digital", "No"].index(p.get('im_d','No')), key=f"imd_{p_id}")
@@ -164,7 +196,7 @@ if not modo_comercial:
             ca.write(f"**{ex['nombre']}**"); cb.write(f"{ex['coste']}€/ud"); cc.write(f"x{ex['cantidad']} uds")
             if cd.button("🗑", key=f"del_gr_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-# --- 5. MOTOR DE CÁLCULO (ATOMIZADO PARA COMPRAS) ---
+# --- 5. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
@@ -179,26 +211,20 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             hc, hp = nb+mn+mi, nb+mn
             m2 = (p["w"]*p["h"])/1_000_000
             
-            # --- DESGLOSE DE MATERIAS PRIMAS ---
             c_cart_f = (hc*m2*(p.get('gf',0)/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
             c_cart_d = (hc*m2*(p.get('gd',0)/1000)*PRECIOS["cartoncillo"][p["pd"]]["precio_kg"])
             c_pla, c_con = 0.0, 0.0
             if p["pl"] != "Ninguna":
                 c_pla = hp * m2 * PRECIOS["planchas"][p["pl"]][p["ap"]]
-                # Contracolado (pegado): 1 pasada si solo hay cara, 2 si hay cara y dorso
                 pas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p["pd"]!="Ninguno" else 0)
                 c_con = hp * m2 * PRECIOS["planchas"][p["pl"]]["peg"] * pas
             
-            # --- DESGLOSE DE IMPRESIÓN ---
             def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
             c_imp_f = (nb*m2*6.5 if p["im"]=="Digital" else (f_o(nb)*(p.get('nt',1)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
             c_imp_d = (nb*m2*6.5 if p.get("im_d")=="Digital" else (f_o(nb)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get("im_d")=="Offset" else 0))
-            
-            # --- DESGLOSE DE ACABADOS ---
             c_acab_f = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*3.5 if p.get("ld") else 0)
             c_acab_d = (hp*m2*PRECIOS["peliculado"][p.get("pel_d", "Sin Peliculado")]) + (hp*m2*3.5 if p.get("ld_d") else 0)
             
-            # --- DESGLOSE DE CORTE ---
             c_arr = 0.0
             if p["cor"] == "Troquelado":
                 if p.get('cobrar_arreglo', True):
@@ -208,26 +234,16 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             
             sub = c_cart_f + c_cart_d + c_pla + c_con + c_imp_f + c_imp_d + c_acab_f + c_acab_d + c_arr + c_tir
             coste_f += sub
-            det_f.append({
-                "Pieza": p["nombre"], 
-                "Cart. F": c_cart_f, "Cart. D": c_cart_d, 
-                "Plancha": c_pla, "Pegado": c_con,
-                "Imp. F": c_imp_f, "Imp. D": c_imp_d,
-                "Acab. F": c_acab_f, "Acab. D": c_acab_d,
-                "Arreglo": c_arr, "Tiraje": c_tir, 
-                "Subtotal": sub
-            })
+            det_f.append({"Pieza": p["nombre"], "Mat.F": c_cart_f, "Mat.D": c_cart_d, "Plan": c_pla, "Pegado": c_con, "Imp.F": c_imp_f, "Imp.D": c_imp_d, "Acab.F": c_acab_f, "Acab.D": c_acab_d, "Arr": c_arr, "Tir": c_tir, "Sub": sub})
 
         c_ext_total = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
         c_man_obra = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud)
-        
         t_fab = coste_f + c_man_obra + c_ext_total
         desc_full[q_n] = {"det": det_f, "man": c_man_obra, "extras": c_ext_total, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
 # --- 6. SALIDA VISUAL ---
 if modo_comercial and res_final:
-    # (El código del modo comercial se mantiene igual para respetar tu instrucción)
     p_lines = []
     for p in st.session_state.piezas_dict.values():
         line = f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm<br/>"
@@ -235,40 +251,32 @@ if modo_comercial and res_final:
         if p.get('pel') and p['pel'] != "Sin Peliculado": ac_c.append(p['pel'])
         if p['im'] == "Offset" and p.get('ba'): ac_c.append("Barniz")
         if p['im'] == "Digital" and p.get('ld'): ac_c.append("Laminado Digital")
-        ac_c_str = " + ".join(ac_c) if ac_c else "Sin acabado"
-        line += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p['gf']}g) | Imp: {p['im']} | Acabado: {ac_c_str}<br/>"
+        line += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p['gf']}g) | Imp: {p['im']} | Acabado: {' + '.join(ac_c) if ac_c else 'Sin acabado'}<br/>"
         if p.get('pl') and p['pl'] != "Ninguna": line += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
         if p.get('pd') and p['pd'] != "Ninguno":
             ac_d = []
             if p.get('pel_d') and p['pel_d'] != "Sin Peliculado": ac_d.append(p['pel_d'])
             if p.get('im_d') == "Offset" and p.get('ba_d'): ac_d.append("Barniz")
             if p.get('im_d') == "Digital" and p.get('ld_d'): ac_d.append("Laminado Digital")
-            ac_d_str = " + ".join(ac_d) if ac_d else "Sin acabado"
-            line += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p['gd']}g) | Imp: {p['im_d']} | Acabado: {ac_d_str}"
+            line += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p['gd']}g) | Imp: {p['im_d']} | Acabado: {' + '.join(ac_d) if ac_d else 'Sin acabado'}"
         line += "</li>"
         p_lines.append(line)
-    p_h = "".join(p_lines)
+    
     ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']})</li>" for e in st.session_state.lista_extras_grabados])
     f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
+    
     st.markdown(f"""<div class="comercial-box">
-        <h2 class="comercial-header">OFERTA COMERCIAL - MAINSA PLV</h2>
-        <h4>1. Especificaciones</h4><ul>{p_h}</ul>
+        <h2 class="comercial-header">OFERTA COMERCIAL - {num_proy}</h2>
+        <p style="text-align:center;"><b>Cliente:</b> {cliente}</p>
+        <h4>1. Especificaciones</h4><ul>{"".join(p_lines)}</ul>
         <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li>Manipulado especializado incluido ({tiempo_input} {unidad_tiempo.lower()}/ud).</li></ul>
         <table class="comercial-table"><tr><th>Cantidad</th><th>PVP Total</th><th>PVP Unitario</th></tr>{f_h}</table>
     </div>""", unsafe_allow_html=True)
 else:
     if res_final:
-        st.header("📊 Resultados y Desglose de Compras")
+        st.header(f"📊 Proyecto: {num_proy} - {cliente}")
         st.dataframe(pd.DataFrame(res_final), use_container_width=True)
         for q, info in desc_full.items():
-            with st.expander(f"🔍 Auditoría de Costes: {q} uds (Taller: {info['qp']} uds)"):
-                # Tabla atomizada para Compras
-                df_det = pd.DataFrame(info["det"])
-                st.table(df_det.style.format("{:.2f}€", subset=df_det.columns[1:]))
-                
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Mano de Obra", f"{info['man']:.2f} €")
-                c2.metric("Total Accesorios", f"{info['extras']:.2f} €")
-                c3.metric("COSTE FABRICACIÓN", f"{info['total']:.2f} €")
-    elif sum(lista_cants) == 0:
-        st.info("💡 Introduce una cantidad mayor a 0 en el panel lateral.")
+            with st.expander(f"🔍 Desglose Compras {q} uds"):
+                st.table(pd.DataFrame(info["det"]).style.format("{:.2f}€", subset=pd.DataFrame(info["det"]).columns[1:]))
+                st.write(f"**Mano Obra:** {info['man']:.2f}€ | **Extras:** {info['extras']:.2f}€")
