@@ -210,21 +210,36 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         desc_full[q_n] = {"det": det_f, "man": c_mo, "extras": c_ext_tot, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
-# --- 6. SALIDA VISUAL (Oferta Comercial Finalizada) ---
+# --- 6. SALIDA VISUAL (Oferta Comercial Finalizada con Barniz) ---
 if modo_comercial and res_final:
     p_html = ""
     for p in st.session_state.piezas_dict.values():
-        ac_c = f"{p['pel']} + Laminado" if p.get('ld') else p['pel']
+        # Lógica de acabados Cara (incluyendo Barniz)
+        ac_c_list = []
+        if p.get('pel') and p['pel'] != "Sin Peliculado": ac_c_list.append(p['pel'])
+        if p.get('ld'): ac_c_list.append("Laminado Digital")
+        if p.get('ba'): ac_c_list.append("Barniz")
+        ac_c_final = " + ".join(ac_c_list) if ac_c_list else "Sin acabado"
+
         p_html += f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm ({p['pliegos']:g} pliegos/ud)<br/>"
-        p_html += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p.get('gf',0)}g) | Imp: {p['im']} | Acabado: {ac_c}<br/>"
-        if p.get('pl') != "Ninguna": p_html += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
+        p_html += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p.get('gf',0)}g) | Imp: {p['im']} | Acabado: {ac_c_final}<br/>"
+        
+        if p.get('pl') != "Ninguna":
+            p_html += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
+        
         if p.get('pd') != "Ninguno":
-            ac_d = f"{p.get('pel_d', 'Sin Peliculado')} + Laminado" if p.get('ld_d') else p.get('pel_d', 'Sin Peliculado')
-            p_html += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p.get('gd',0)}g) | Imp: {p.get('im_d', 'No')} | Acabado: {ac_d}</li>"
-    
+            # Lógica de acabados Dorso (incluyendo Barniz)
+            ac_d_list = []
+            pel_d = p.get('pel_d', 'Sin Peliculado')
+            if pel_d != "Sin Peliculado": ac_d_list.append(pel_d)
+            if p.get('ld_d'): ac_d_list.append("Laminado Digital")
+            if p.get('ba_d'): ac_d_list.append("Barniz")
+            ac_d_final = " + ".join(ac_d_list) if ac_d_list else "Sin acabado"
+            p_html += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p.get('gd',0)}g) | Imp: {p.get('im_d', 'No')} | Acabado: {ac_d_final}</li>"
+
     # Listado de accesorios dinámico
-    ex_h = "".join([f"<li>{e['nombre']} (x{e['cantidad']:g})</li>" for e in st.session_state.lista_extras_grabados])
-    if not ex_h: ex_h = "<li>Sin accesorios adicionales</li>"
+    ex_h_list = [f"<li>{e['nombre']} (x{e['cantidad']:g})</li>" for e in st.session_state.lista_extras_grabados]
+    ex_h = "".join(ex_h_list) if ex_h_list else "<li>Sin accesorios adicionales</li>"
     
     f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
     
