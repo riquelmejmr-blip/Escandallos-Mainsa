@@ -1,8 +1,8 @@
 import streamlit as st
-import pandas as pd  # <--- CORREGIDO: Ahora sí cargará correctamente
+import pandas as pd
 import json
 
-# --- 1. BASE DE DATOS Y LÓGICA DE CAJAS ---
+# --- 1. BASE DE DATOS Y CONSTANTES ---
 PRECIOS = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0, "gramaje": 0},
@@ -28,17 +28,30 @@ PRECIOS = {
     }
 }
 
-def calcular_coste_caja_plano(largo, ancho, alto, q):
+# --- LÓGICA ESPECÍFICA CAJA CANAL 5 (MODELO PLANO) ---
+def calcular_coste_caja_canal5(m1, m2, m3, q):
     if q <= 0: return 0.0
-    dimensiones = sorted([largo, ancho, alto], reverse=True)
-    area_base = dimensiones[0] * dimensiones[1]
+    # Normalización
+    dimensiones = sorted([m1, m2, m3], reverse=True)
+    mayor, intermedia, menor = dimensiones[0], dimensiones[1], dimensiones[2]
+    
+    area_base = mayor * intermedia
     coste_250 = (0.00000091 * area_base) + 1.00
-    if q >= 250: return coste_250 * ((q / 250) ** -0.32)
-    elif q == 100: return 2.69
+    
+    if q >= 250:
+        # Curva de aprendizaje
+        coste_u = coste_250 * ((q / 250) ** -0.32)
+    elif q == 100:
+        coste_u = 2.69
     elif 100 < q < 250:
+        # Interpolación lineal
         progreso = (q - 100) / (250 - 100)
-        return 2.69 + progreso * (coste_250 - 2.69)
-    return 2.69
+        coste_u = 2.69 + progreso * (coste_250 - 2.69)
+    else:
+        # Para menos de 100, mantenemos el precio de 100 por seguridad industrial
+        coste_u = 2.69
+        
+    return coste_u
 
 def calcular_mermas(n, es_digital=False):
     if es_digital: return n * 0.10, 0 
@@ -52,110 +65,140 @@ def calcular_mermas(n, es_digital=False):
 # --- 2. INICIALIZACIÓN ---
 st.set_page_config(page_title="ESCANDALLO MAINSA", layout="wide")
 
-if 'piezas_dict' not in st.session_state: 
-    st.session_state.piezas_dict = {0: {"nombre": "Forma 1", "pliegos": 1.0, "w": 0, "h": 0, "pf": "Ninguno", "gf": 0, "pl": "Ninguna", "ap": "C/C", "im": "Offset", "cor": "Troquelado", "cobrar_arreglo": True}}
+def crear_forma_vacia(index):
+    return {
+        "nombre": f"Forma {index + 1}", "tipo_trabajo": "Escandallo Estándar",
+        "pliegos": 1.0, "w": 0, "h": 0, "alto": 0,
+        "pf": "Ninguno", "gf": 0, "pl": "Ninguna", "ap": "C/C", 
+        "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, 
+        "im_d": "No", "nt_d": 0, "ba_d": False, "pel": "Sin Peliculado", 
+        "pel_d": "Sin Peliculado", "ld": False, "ld_d": False, 
+        "cor": "Troquelado", "cobrar_arreglo": True
+    }
+
+if 'piezas_dict' not in st.session_state: st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
 if 'lista_extras_grabados' not in st.session_state: st.session_state.lista_extras_grabados = []
-if 'lista_cajas_grabadas' not in st.session_state: st.session_state.lista_cajas_grabadas = []
+for key in ['brf', 'com', 'ver', 'cli', 'des']:
+    if key not in st.session_state: st.session_state[key] = ""
+
+st.markdown("""<style>
+    .comercial-box { background-color: white; padding: 30px; border: 2px solid #1E88E5; border-radius: 10px; color: #333; }
+    .header-info { display: flex; justify-content: space-around; background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
+    .comercial-table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    .comercial-table th { background-color: #1E88E5; color: white; padding: 10px; }
+    .comercial-table td { padding: 10px; border: 1px solid #ddd; text-align: center; }
+</style>""", unsafe_allow_html=True)
+
+st.title("ESCANDALLO MAINSA")
 
 # --- 3. PANEL LATERAL ---
 with st.sidebar:
     st.header("⚙️ Ajustes Globales")
-    cants_str = st.text_input("Cantidades (ej: 500, 1000)", "0")
+    st.session_state.brf = st.text_input("Nº de Briefing", st.session_state.brf)
+    st.session_state.cli = st.text_input("Cliente", st.session_state.cli)
+    st.session_state.com = st.text_input("Nº de Comercial", st.session_state.com)
+    st.session_state.ver = st.text_input("Versión", st.session_state.ver)
+    st.session_state.des = st.text_area("Descripción", st.session_state.des)
+    st.divider()
+    cants_str = st.text_input("Cantidades (separadas por coma)", "0")
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
-    t_input = st.number_input("Tiempo Manipulado (min)", value=0)
-    seg_man_total = t_input * 60
+    unidad_t = st.radio("Manipulación en:", ["Segundos", "Minutos"], horizontal=True)
+    t_input = st.number_input(f"Tiempo ({unidad_t})", value=0)
+    seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
+    dif_ud = st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2)
+    imp_fijo = st.number_input("Importe Fijo por Trabajo (€)", value=500)
     margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1)
-    imp_fijo = st.number_input("Importe Fijo Trabajo (€)", value=500)
+    st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
-
-# --- 4. CUERPO PRINCIPAL ---
+    
+# --- 4. GESTIÓN DE FORMAS ---
 if not modo_comercial:
-    # SECCIÓN 1: FORMAS
-    st.header("1. Fabricación de Formas")
+    if st.button("➕ Añadir Nueva Forma"):
+        nid = max(st.session_state.piezas_dict.keys()) + 1
+        st.session_state.piezas_dict[nid] = crear_forma_vacia(nid); st.rerun()
+
     for p_id, p in st.session_state.piezas_dict.items():
         with st.expander(f"🛠 {p['nombre']}", expanded=True):
+            # Selector de tipo de cálculo
+            p['tipo_trabajo'] = st.selectbox("Tipo de Pieza", ["Escandallo Estándar", "Caja Canal 5 (Plano)", "En Volumen (Próximamente)", "Guainas (Próximamente)"], index=["Escandallo Estándar", "Caja Canal 5 (Plano)", "En Volumen (Próximamente)", "Guainas (Próximamente)"].index(p.get('tipo_trabajo', "Escandallo Estándar")), key=f"tipo_{p_id}")
+            
             col1, col2, col3 = st.columns(3)
             with col1:
                 p['nombre'] = st.text_input("Etiqueta", p['nombre'], key=f"n_{p_id}")
-                p['h'] = st.number_input("Largo mm", 0, 5000, int(p.get('h', 0)), key=f"h_{p_id}")
-                p['w'] = st.number_input("Ancho mm", 0, 5000, int(p.get('w', 0)), key=f"w_{p_id}")
-            with col2:
-                p['pf'] = st.selectbox("Material", list(PRECIOS["cartoncillo"].keys()), key=f"pf_{p_id}")
-                p['pl'] = st.selectbox("Plancha Base", list(PRECIOS["planchas"].keys()), key=f"pl_{p_id}")
-            with col3:
-                p['cor'] = st.selectbox("Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
-                p['cobrar_arreglo'] = st.checkbox("¿Arreglo?", value=p.get('cobrar_arreglo', True), key=f"arr_{p_id}")
+                p['h'] = st.number_input("Largo mm", 0, 5000, int(p['h']), key=f"h_{p_id}")
+                p['w'] = st.number_input("Ancho mm", 0, 5000, int(p['w']), key=f"w_{p_id}")
+                if p['tipo_trabajo'] == "Caja Canal 5 (Plano)":
+                    p['alto'] = st.number_input("Alto mm", 0, 5000, int(p.get('alto',0)), key=f"alt_{p_id}")
 
-    # SECCIÓN 2: MATERIALES EXTRA
-    st.divider()
-    st.header("2. Almacén de Accesorios")
-    col_e1, col_e2 = st.columns(2)
-    ex_sel = col_e1.selectbox("Añadir Extra:", ["---"] + list(PRECIOS["extras_base"].keys()))
-    if col_e1.button("➕ Añadir Extra") and ex_sel != "---":
-        st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": PRECIOS["extras_base"][ex_sel], "cantidad": 1.0})
-    
-    for i, ex in enumerate(st.session_state.lista_extras_grabados):
-        c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-        c1.write(f"**{ex['nombre']}**")
-        ex['coste'] = c2.number_input("€/ud", value=float(ex['coste']), key=f"exc_{i}")
-        ex['cantidad'] = c3.number_input("Cant/Ud", value=float(ex['cantidad']), key=f"exq_{i}")
-        if c4.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
+            if p['tipo_trabajo'] == "Escandallo Estándar":
+                with col1:
+                    p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p['pliegos']), key=f"p_{p_id}")
+                    p['im'] = st.selectbox("Sistema Cara", ["Offset", "Digital", "No"], key=f"im_{p_id}")
+                    p['pel'] = st.selectbox("Peliculado Cara", list(PRECIOS["peliculado"].keys()), key=f"pel_{p_id}")
+                with col2:
+                    p['pf'] = st.selectbox("C. Frontal", list(PRECIOS["cartoncillo"].keys()), key=f"pf_{p_id}")
+                    p['gf'] = st.number_input("Gramaje F.", value=int(p['gf']), key=f"gf_{p_id}")
+                    p['pl'] = st.selectbox("Plancha Base", list(PRECIOS["planchas"].keys()), key=f"pl_{p_id}")
+                    p['ap'] = st.selectbox("Calidad", ["C/C", "B/C", "B/B"], key=f"ap_{p_id}")
+                with col3:
+                    p['cor'] = st.selectbox("Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
+                    p['cobrar_arreglo'] = st.checkbox("¿Cobrar Arreglo?", value=p.get('cobrar_arreglo', True), key=f"arr_{p_id}")
+            else:
+                with col2:
+                    st.info(f"✨ Modelo Matemático: {p['tipo_trabajo']}")
+                    st.write("Cálculo basado en modelo industrial parametrizado.")
+            
+            if st.button("🗑 Borrar Forma", key=f"del_{p_id}"): 
+                del st.session_state.piezas_dict[p_id]; st.rerun()
 
-    # SECCIÓN 3: CÁLCULO DE CAJAS
-    st.divider()
-    st.header("3. Complemento de Cajas")
-    col_c1, col_c2 = st.columns(2)
-    tipo_caja = col_c1.selectbox("Tipo de Caja:", ["Plano (Canal 5)", "En Volumen", "Guainas"])
-    if col_c1.button("➕ Añadir Caja"):
-        st.session_state.lista_cajas_grabadas.append({"tipo": tipo_caja, "l": 0, "w": 0, "a": 0, "uds_por_producto": 1})
-
-    for i, caja in enumerate(st.session_state.lista_cajas_grabadas):
-        with st.info(f"📦 Caja {i+1}: {caja['tipo']}"):
-            cc1, cc2, cc3, cc4, cc5 = st.columns(5)
-            caja['l'] = cc1.number_input("Largo (mm)", value=caja['l'], key=f"cl_{i}")
-            caja['w'] = cc2.number_input("Ancho (mm)", value=caja['w'], key=f"cw_{i}")
-            caja['a'] = cc3.number_input("Alto (mm)", value=caja['a'], key=f"ca_{i}")
-            caja['uds_por_producto'] = cc4.number_input("Cajas/Ud", value=caja['uds_por_producto'], key=f"cu_{i}")
-            if cc5.button("🗑", key=f"cdel_{i}"): st.session_state.lista_cajas_grabadas.pop(i); st.rerun()
-
-# --- 5. MOTOR DE CÁLCULO ---
-res_final = []
-if lista_cants and sum(lista_cants) > 0:
+# --- 5. MOTOR DE CÁLCULO ACTUALIZADO ---
+res_final, desc_full = [], {}
+if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
-        coste_base = 0.0
-        # 1. Coste Formas
-        for p in st.session_state.piezas_dict.values():
-            m2 = (p['h'] * p['w']) / 1_000_000
-            
-            # Criterio de Medida Actualizado
-            l_p, w_p = p['h'], p['w']
-            if l_p > 1000 or w_p > 700: v_arr, v_tir = 107.80, 0.135
-            elif l_p < 1000 and w_p < 700: v_arr, v_tir = 48.19, 0.06
-            else: v_arr, v_tir = 80.77, 0.09
-            
-            c_arr = v_arr if p.get('cobrar_arreglo') else 0
-            coste_base += c_arr + (q_n * v_tir)
-            
-        # 2. Coste Extras
-        coste_extras = sum(e['coste'] * e['cantidad'] * q_n for e in st.session_state.lista_extras_grabados)
+        coste_f, det_f = 0.0, []
+        # Calcular mermas globales solo para piezas estándar
+        tiene_dig = any(pz["im"] == "Digital" for pz in st.session_state.piezas_dict.values() if pz['tipo_trabajo']=="Escandallo Estándar")
+        mn_m, _ = calcular_mermas(q_n, es_digital=tiene_dig); qp_taller = q_n + mn_m
         
-        # 3. Coste Cajas
-        coste_cajas = 0.0
-        for c in st.session_state.lista_cajas_grabadas:
-            cant_total_cajas = q_n * c['uds_por_producto']
-            if c['tipo'] == "Plano (Canal 5)":
-                coste_u = calcular_coste_caja_plano(c['l'], c['w'], c['a'], cant_total_cajas)
-                coste_cajas += coste_u * cant_total_cajas
+        for p_id, p in st.session_state.piezas_dict.items():
+            if p['tipo_trabajo'] == "Caja Canal 5 (Plano)":
+                # --- APLICAR PROMPT DE CAJAS ---
+                coste_u_caja = calcular_coste_caja_canal5(p['h'], p['w'], p['alto'], q_n)
+                sub = coste_u_caja * q_n
+                coste_f += sub
+                det_f.append({"Pieza": p["nombre"] + " (Caja)", "Subtotal": sub, "Nota": "Modelo Caja Canal 5"})
+            else:
+                # --- LÓGICA ESTÁNDAR ---
+                nb = q_n * p["pliegos"]
+                mn, mi = calcular_mermas(nb, p["im"]=="Digital")
+                hc, hp = nb+mn+mi, nb+mn; m2 = (p["w"]*p["h"])/1_000_000
+                c_cf = (hc*m2*(p.get('gf',0)/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
+                c_cd = (hc*m2*(p.get('gd',0)/1000)*PRECIOS["cartoncillo"][p["pd"]]["precio_kg"])
+                c_pla = hp * m2 * PRECIOS["planchas"][p["pl"]][p["ap"]] if p["pl"] != "Ninguna" else 0
+                
+                # Arreglo y tiraje con el criterio de 1000x700
+                if p['h'] > 1000 or p['w'] > 700: v_arr, v_tir = 107.80, 0.135
+                elif p['h'] < 1000 and p['w'] < 700: v_arr, v_tir = 48.19, 0.06
+                else: v_arr, v_tir = 80.77, 0.09
+                
+                c_arr = v_arr if (p["cor"]=="Troquelado" and p.get('cobrar_arreglo', True)) else 0
+                c_tir = (hp * v_tir) if p["cor"]=="Troquelado" else hp*1.5
+                
+                sub = c_cf + c_cd + c_pla + c_arr + c_tir
+                coste_f += sub
+                det_f.append({"Pieza": p["nombre"], "Subtotal": sub, "Nota": "Escandallo Estándar"})
 
-        t_fab = coste_base + coste_extras + coste_cajas + (seg_man_total/3600 * 18 * q_n) + imp_fijo
-        res_final.append({
-            "Cantidad": q_n, 
-            "Fabricación (€)": f"{t_fab:.2f}€",
-            "PVP TOTAL": f"{t_fab*margen:.2f}€", 
-            "PVP Unitario": f"{(t_fab*margen)/q_n:.2f}€"
-        })
+        c_ext_tot = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
+        c_mo = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud)
+        t_fab = coste_f + c_mo + c_ext_tot + imp_fijo
+        res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
-if res_final:
-    st.divider()
-    st.header("📊 Resultado Final")
-    st.dataframe(pd.DataFrame(res_final), use_container_width=True)
+# --- 6. SALIDA ---
+if modo_comercial:
+    # (Mantenemos la lógica de visualización de la oferta comercial de la v27)
+    st.subheader("Vista Comercial Generada")
+    st.table(res_final)
+else:
+    if res_final:
+        st.header(f"📊 Resultados: {st.session_state.cli}")
+        st.dataframe(pd.DataFrame(res_final), use_container_width=True)
