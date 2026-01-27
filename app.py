@@ -151,7 +151,7 @@ if not modo_comercial:
         ca, cb, cc, cd = st.columns([3, 2, 2, 1]); ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud", value=float(ex['coste']), key=f"exc_{i}"); ex['cantidad'] = cc.number_input("Cant", value=float(ex['cantidad']), key=f"exq_{i}")
         if cd.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-# --- 5. MOTOR DE CÁLCULO (Con Agrupaciones para Compras) ---
+# --- 5. MOTOR DE CÁLCULO (Atomicidad ADMIN) ---
 res_final, desc_full = [], {}
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
@@ -173,20 +173,20 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_ad = (hp*m2*PRECIOS["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp*m2*3.5 if p.get("ld_d") else 0)
             c_arr = (107.7 if (p['h']>1000 or p['w']>700) else 48.19) if (p["cor"]=="Troquelado" and p.get('cobrar_arreglo', True)) else 0
             c_tir = (hp*(0.135 if (p['h']>1000 or p['w']>700) else 0.09)) if p["cor"]=="Troquelado" else hp*1.5
-            
-            # --- AGRUPACIÓN SOLICITADA PARA COMPRAS ---
-            g_impresion = c_if + c_id
-            g_narba = c_af + c_ad + c_peg + c_arr + c_tir
-            g_materia = c_cf + c_pla + c_cd
-            sub = g_impresion + g_narba + g_materia
+            sub = c_if + c_id + c_af + c_ad + c_peg + c_arr + c_tir + c_cf + c_pla + c_cd
             coste_f += sub
-            det_f.append({"Pieza": p["nombre"], "Impresión": g_impresion, "Narba": g_narba, "Materia Prima": g_materia, "Subtotal": sub})
+            det_f.append({
+                "Pieza": p["nombre"],
+                "Imp Cara": c_if, "Imp Dorso": c_id, # Grupo Impresión
+                "Pelic C": c_af, "Pelic D": c_ad, "Pegado": c_peg, "Arr": c_arr, "Troq": c_tir, # Grupo Narba
+                "Cart C": c_cf, "Plan": c_pla, "Cart D": c_cd, # Grupo Materia Prima
+                "Subtotal": sub
+            })
 
         c_ext_tot = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
         c_mo = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud)
-        g_manipulado = c_mo + c_ext_tot # Agrupación Manipulado
-        t_fab = coste_f + g_manipulado + imp_fijo
-        desc_full[q_n] = {"det": det_f, "manipulado": g_manipulado, "fijo": imp_fijo, "total": t_fab, "qp": qp_taller}
+        t_fab = coste_f + c_mo + c_ext_tot + imp_fijo
+        desc_full[q_n] = {"det": det_f, "mo": c_mo, "extras": c_ext_tot, "fijo": imp_fijo, "total": t_fab, "qp": qp_taller}
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
 # --- 6. SALIDA VISUAL ---
@@ -211,10 +211,15 @@ else:
         st.dataframe(pd.DataFrame(res_final), use_container_width=True)
         for q, info in desc_full.items():
             with st.expander(f"🔍 Auditoría Compras {q} uds (Taller: {info['qp']} uds)"):
-                # Tabla con agrupaciones solicitadas
-                st.table(pd.DataFrame(info["det"]).style.format("{:.2f}€", subset=["Impresión","Narba","Materia Prima","Subtotal"]))
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Total Manipulado", f"{info['manipulado']:.2f}€")
-                c2.metric("Importe Fijo", f"{info['fijo']:.2f}€")
-                c3.metric("COSTE FABRICACIÓN", f"{info['total']:.2f}€")
+                df = pd.DataFrame(info["det"])
+                # Cálculo de fila de TOTALES
+                totales = df.select_dtypes(include=['number']).sum()
+                df_tot = pd.concat([df, pd.DataFrame([{"Pieza": "TOTAL PROYECTO", **totales.to_dict()}])], ignore_index=True)
+                st.table(df_tot.style.format("{:.2f}€", subset=df_tot.columns[1:]))
+                
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Mano de Obra", f"{info['mo']:.2f}€")
+                c2.metric("Total Accesorios", f"{info['extras']:.2f}€")
+                c3.metric("Importe Fijo", f"{info['fijo']:.2f}€")
+                c4.metric("COSTE FABRICACIÓN", f"{info['total']:.2f}€")
     elif sum(lista_cants) == 0: st.info("💡 Introduce una cantidad en el lateral.")
