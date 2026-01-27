@@ -1,5 +1,5 @@
 import streamlit as st
-import pandas as pd
+import pd
 import json
 
 # --- 1. BASE DE DATOS DE PRECIOS ---
@@ -115,7 +115,10 @@ if not modo_comercial:
             with col1:
                 p['nombre'] = st.text_input("Etiqueta", p['nombre'], key=f"n_{p_id}")
                 p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p['pliegos']), key=f"p_{p_id}")
-                p['w'], p['h'] = st.number_input("Ancho mm", 0, 5000, int(p['w']), key=f"w_{p_id}"), st.number_input("Largo mm", 0, 5000, int(p['h']), key=f"h_{p_id}")
+                # --- CAMBIO DE ORDEN: LARGO PRIMERO, ANCHO SEGUNDO ---
+                p['h'] = st.number_input("Largo mm", 0, 5000, int(p['h']), key=f"h_{p_id}")
+                p['w'] = st.number_input("Ancho mm", 0, 5000, int(p['w']), key=f"w_{p_id}")
+                # ----------------------------------------------------
                 p['im'] = st.selectbox("Sistema Cara", ["Offset", "Digital", "No"], ["Offset", "Digital", "No"].index(p['im']), key=f"im_{p_id}")
                 if p['im'] == "Offset":
                     p['nt'] = st.number_input("Tintas F.", 0, 6, max(0, int(p.get('nt',4))), key=f"nt_{p_id}")
@@ -173,7 +176,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_af = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*3.5 if p.get("ld") else 0)
             c_ad = (hp*m2*PRECIOS["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp*m2*3.5 if p.get("ld_d") else 0)
             
-            # --- NUEVA LÓGICA DE ARREGLO Y TIRAJE ---
+            # --- LÓGICA DE COSTES (GRANDE / PEQUEÑO / ESTÁNDAR) ---
             largo_p = p['h']
             ancho_p = p['w']
             
@@ -181,12 +184,12 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 v_arr, v_tir = 107.80, 0.135
             elif largo_p < 1000 and ancho_p < 700:
                 v_arr, v_tir = 48.19, 0.06
-            else: # Casos exactos 1000x700 o medidas límite combinadas
+            else: 
                 v_arr, v_tir = 80.77, 0.09
             
             c_arr = v_arr if (p["cor"]=="Troquelado" and p.get('cobrar_arreglo', True)) else 0
             c_tir = (hp * v_tir) if p["cor"]=="Troquelado" else hp*1.5
-            # ----------------------------------------
+            # ----------------------------------------------------
             
             s_imp = c_if + c_id
             s_narba = c_af + c_ad + c_peg + c_arr + c_tir
@@ -213,7 +216,8 @@ if modo_comercial and res_final:
     for p in st.session_state.piezas_dict.values():
         ac_c_l = [p['pel'] if p.get('pel')!="Sin Peliculado" else None, "Laminado Digital" if p.get('ld') else None, "Barniz" if p.get('ba') else None]
         ac_c_f = " + ".join([x for x in ac_c_l if x]) or "Sin acabado"
-        p_html += f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm ({p['pliegos']:g} pliegos/ud)<br/>&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p.get('gf',0)}g) | Imp: {p['im']} | Acabado: {ac_c_f}<br/>"
+        # Mostramos también Largo x Ancho en la oferta comercial
+        p_html += f"<li><b>{p['nombre']}:</b> {p['h']}x{p['w']} mm ({p['pliegos']:g} pliegos/ud)<br/>&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p.get('gf',0)}g) | Imp: {p['im']} | Acabado: {ac_c_f}<br/>"
         if p.get('pl') != "Ninguna": p_html += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
         if p.get('pd') != "Ninguno":
             ac_d_l = [p.get('pel_d') if p.get('pel_d')!="Sin Peliculado" else None, "Laminado Digital" if p.get('ld_d') else None, "Barniz" if p.get('ba_d') else None]
