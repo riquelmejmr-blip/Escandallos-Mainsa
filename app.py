@@ -151,7 +151,7 @@ if not modo_comercial:
         ca, cb, cc, cd = st.columns([3, 2, 2, 1]); ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud", value=float(ex['coste']), key=f"exc_{i}"); ex['cantidad'] = cc.number_input("Cant", value=float(ex['cantidad']), key=f"exq_{i}")
         if cd.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-# --- 5. MOTOR DE CÁLCULO (Atomicidad con Subtotales) ---
+# --- 5. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
@@ -166,15 +166,28 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             if p["pl"] != "Ninguna":
                 c_pla = hp * m2 * PRECIOS["planchas"][p["pl"]][p["ap"]]
                 pas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p["pd"]!="Ninguno" else 0); c_peg = hp * m2 * PRECIOS["planchas"][p["pl"]]["peg"] * pas
+            
             def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
             c_if = (nb*m2*6.5 if p["im"]=="Digital" else (f_o(nb)*(p.get('nt',0)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
             c_id = (nb*m2*6.5 if p.get("im_d")=="Digital" else (f_o(nb)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get("im_d")=="Offset" else 0))
             c_af = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*3.5 if p.get("ld") else 0)
             c_ad = (hp*m2*PRECIOS["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp*m2*3.5 if p.get("ld_d") else 0)
-            c_arr = (107.7 if (p['h']>1000 or p['w']>700) else 48.19) if (p["cor"]=="Troquelado" and p.get('cobrar_arreglo', True)) else 0
-            c_tir = (hp*(0.135 if (p['h']>1000 or p['w']>700) else 0.09)) if p["cor"]=="Troquelado" else hp*1.5
             
-            # Subtotales por Agrupación
+            # --- NUEVA LÓGICA DE ARREGLO Y TIRAJE ---
+            largo_p = p['h']
+            ancho_p = p['w']
+            
+            if largo_p > 1000 or ancho_p > 700:
+                v_arr, v_tir = 107.80, 0.135
+            elif largo_p < 1000 and ancho_p < 700:
+                v_arr, v_tir = 48.19, 0.06
+            else: # Casos exactos 1000x700 o medidas límite combinadas
+                v_arr, v_tir = 80.77, 0.09
+            
+            c_arr = v_arr if (p["cor"]=="Troquelado" and p.get('cobrar_arreglo', True)) else 0
+            c_tir = (hp * v_tir) if p["cor"]=="Troquelado" else hp*1.5
+            # ----------------------------------------
+            
             s_imp = c_if + c_id
             s_narba = c_af + c_ad + c_peg + c_arr + c_tir
             s_mat = c_cf + c_pla + c_cd
@@ -182,9 +195,9 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             coste_f += sub
             det_f.append({
                 "Pieza": p["nombre"],
-                "Imp C": c_if, "Imp D": c_id, "Total Imp": s_imp, # Agrupación Impresión
-                "Pelic": c_af + c_ad, "Pegado": c_peg, "Troq": c_arr + c_tir, "Total Narba": s_narba, # Agrupación Narba
-                "Papel": c_cf + c_cd, "Plancha": c_pla, "Total Mat": s_mat, # Agrupación Materia Prima
+                "Imp C": c_if, "Imp D": c_id, "Total Imp": s_imp,
+                "Pelic": c_af + c_ad, "Pegado": c_peg, "Troq": c_arr + c_tir, "Total Narba": s_narba,
+                "Papel": c_cf + c_cd, "Plancha": c_pla, "Total Mat": s_mat,
                 "Subtotal": sub
             })
 
@@ -217,13 +230,9 @@ else:
         for q, info in desc_full.items():
             with st.expander(f"🔍 Auditoría Compras {q} uds (Taller: {info['qp']} uds)"):
                 df = pd.DataFrame(info["det"])
-                # Fila de TOTALES Verticales
                 tots = df.select_dtypes(include=['number']).sum()
                 df_f = pd.concat([df, pd.DataFrame([{"Pieza": "TOTAL PROYECTO", **tots.to_dict()}])], ignore_index=True)
-                
-                # Formateo de tabla con columnas de subtotal resaltadas
                 st.table(df_f.style.format("{:.2f}€", subset=df_f.columns[1:]).set_properties(**{'background-color': '#f8f9fa', 'font-weight': 'bold'}, subset=["Total Imp","Total Narba","Total Mat","Subtotal"]))
-                
                 c1, c2, c3, c4 = st.columns(4)
                 c1.metric("Mano Obra", f"{info['mo']:.2f}€"); c2.metric("Accesorios", f"{info['extras']:.2f}€"); c3.metric("Imp. Fijo", f"{info['fijo']:.2f}€"); c4.metric("TOTAL FAB.", f"{info['total']:.2f}€")
     elif sum(lista_cants) == 0: st.info("💡 Introduce una cantidad en el lateral.")
