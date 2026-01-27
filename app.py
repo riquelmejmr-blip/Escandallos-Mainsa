@@ -1,5 +1,5 @@
 import streamlit as st
-import pd
+import pandas as pd
 import json
 
 # --- 1. BASE DE DATOS DE PRECIOS ---
