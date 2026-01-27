@@ -1,5 +1,5 @@
 import streamlit as st
-import pd
+import pandas as pd  # <--- CORREGIDO: Ahora sí cargará correctamente
 import json
 
 # --- 1. BASE DE DATOS Y LÓGICA DE CAJAS ---
@@ -52,7 +52,8 @@ def calcular_mermas(n, es_digital=False):
 # --- 2. INICIALIZACIÓN ---
 st.set_page_config(page_title="ESCANDALLO MAINSA", layout="wide")
 
-if 'piezas_dict' not in st.session_state: st.session_state.piezas_dict = {0: {"nombre": "Forma 1", "pliegos": 1.0, "w": 0, "h": 0, "pf": "Ninguno", "gf": 0, "pl": "Ninguna", "ap": "C/C", "im": "Offset", "cor": "Troquelado", "cobrar_arreglo": True}}
+if 'piezas_dict' not in st.session_state: 
+    st.session_state.piezas_dict = {0: {"nombre": "Forma 1", "pliegos": 1.0, "w": 0, "h": 0, "pf": "Ninguno", "gf": 0, "pl": "Ninguna", "ap": "C/C", "im": "Offset", "cor": "Troquelado", "cobrar_arreglo": True}}
 if 'lista_extras_grabados' not in st.session_state: st.session_state.lista_extras_grabados = []
 if 'lista_cajas_grabadas' not in st.session_state: st.session_state.lista_cajas_grabadas = []
 
@@ -83,7 +84,7 @@ if not modo_comercial:
                 p['pl'] = st.selectbox("Plancha Base", list(PRECIOS["planchas"].keys()), key=f"pl_{p_id}")
             with col3:
                 p['cor'] = st.selectbox("Corte", ["Troquelado", "Plotter"], key=f"cor_{p_id}")
-                p['cobrar_arreglo'] = st.checkbox("¿Arreglo?", value=True, key=f"arr_{p_id}")
+                p['cobrar_arreglo'] = st.checkbox("¿Arreglo?", value=p.get('cobrar_arreglo', True), key=f"arr_{p_id}")
 
     # SECCIÓN 2: MATERIALES EXTRA
     st.divider()
@@ -100,7 +101,7 @@ if not modo_comercial:
         ex['cantidad'] = c3.number_input("Cant/Ud", value=float(ex['cantidad']), key=f"exq_{i}")
         if c4.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-    # SECCIÓN 3: CÁLCULO DE CAJAS (DEBAJO DE EXTRAS)
+    # SECCIÓN 3: CÁLCULO DE CAJAS
     st.divider()
     st.header("3. Complemento de Cajas")
     col_c1, col_c2 = st.columns(2)
@@ -114,7 +115,7 @@ if not modo_comercial:
             caja['l'] = cc1.number_input("Largo (mm)", value=caja['l'], key=f"cl_{i}")
             caja['w'] = cc2.number_input("Ancho (mm)", value=caja['w'], key=f"cw_{i}")
             caja['a'] = cc3.number_input("Alto (mm)", value=caja['a'], key=f"ca_{i}")
-            caja['uds_por_producto'] = cc4.number_input("Cajas/Ud Producto", value=caja['uds_por_producto'], key=f"cu_{i}")
+            caja['uds_por_producto'] = cc4.number_input("Cajas/Ud", value=caja['uds_por_producto'], key=f"cu_{i}")
             if cc5.button("🗑", key=f"cdel_{i}"): st.session_state.lista_cajas_grabadas.pop(i); st.rerun()
 
 # --- 5. MOTOR DE CÁLCULO ---
@@ -125,9 +126,11 @@ if lista_cants and sum(lista_cants) > 0:
         # 1. Coste Formas
         for p in st.session_state.piezas_dict.values():
             m2 = (p['h'] * p['w']) / 1_000_000
-            # Criterio 1000x700
-            if p['h'] > 1000 or p['w'] > 700: v_arr, v_tir = 107.80, 0.135
-            elif p['h'] < 1000 and p['w'] < 700: v_arr, v_tir = 48.19, 0.06
+            
+            # Criterio de Medida Actualizado
+            l_p, w_p = p['h'], p['w']
+            if l_p > 1000 or w_p > 700: v_arr, v_tir = 107.80, 0.135
+            elif l_p < 1000 and w_p < 700: v_arr, v_tir = 48.19, 0.06
             else: v_arr, v_tir = 80.77, 0.09
             
             c_arr = v_arr if p.get('cobrar_arreglo') else 0
@@ -136,21 +139,23 @@ if lista_cants and sum(lista_cants) > 0:
         # 2. Coste Extras
         coste_extras = sum(e['coste'] * e['cantidad'] * q_n for e in st.session_state.lista_extras_grabados)
         
-        # 3. Coste Cajas (Complemento)
+        # 3. Coste Cajas
         coste_cajas = 0.0
         for c in st.session_state.lista_cajas_grabadas:
-            cant_cajas_total = q_n * c['uds_por_producto']
+            cant_total_cajas = q_n * c['uds_por_producto']
             if c['tipo'] == "Plano (Canal 5)":
-                coste_u_caja = calcular_coste_caja_plano(c['l'], c['w'], c['a'], cant_cajas_total)
-                coste_cajas += coste_u_caja * cant_cajas_total
-            else:
-                # Volumen y Guainas (Abierto a fórmulas)
-                coste_cajas += 0.0 
+                coste_u = calcular_coste_caja_plano(c['l'], c['w'], c['a'], cant_total_cajas)
+                coste_cajas += coste_u * cant_total_cajas
 
         t_fab = coste_base + coste_extras + coste_cajas + (seg_man_total/3600 * 18 * q_n) + imp_fijo
-        res_final.append({"Cant": q_n, "PVP Total": f"{t_fab*margen:.2f}€", "PVP Ud": f"{(t_fab*margen)/q_n:.2f}€"})
+        res_final.append({
+            "Cantidad": q_n, 
+            "Fabricación (€)": f"{t_fab:.2f}€",
+            "PVP TOTAL": f"{t_fab*margen:.2f}€", 
+            "PVP Unitario": f"{(t_fab*margen)/q_n:.2f}€"
+        })
 
 if res_final:
     st.divider()
-    st.subheader("📊 Resultado del Escandallo")
-    st.table(res_final)
+    st.header("📊 Resultado Final")
+    st.dataframe(pd.DataFrame(res_final), use_container_width=True)
