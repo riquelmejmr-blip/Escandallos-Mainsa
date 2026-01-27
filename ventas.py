@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 import json
 
-# --- 1. CONFIGURACIÓN INTERNA (TOTALMENTE OCULTA) ---
+# --- 1. CONFIGURACIÓN INTERNA (TOTALMENTE OCULTA AL COMERCIAL) ---
 MARGEN_COMERCIAL = 2.2
-IMPORTE_FIJO_TRABAJO = 500.0
+IMPORTE_FIJO_VENTA = 500.0  # Se suma directamente al PVP final
 COSTO_HORA_MANIPULACION = 18.0
 DIFICULTAD_ESTANDAR = 0.091
 
@@ -34,7 +34,7 @@ PRECIOS = {
     }
 }
 
-# --- 2. MOTORES DE CÁLCULO ---
+# --- 2. MOTORES TÉCNICOS ---
 
 def calcular_mermas(n, es_digital=False):
     if es_digital: return n * 0.10, 0 
@@ -49,7 +49,8 @@ def motor_embalajes(tipo, largo, ancho, alto, q):
     if q <= 0: return 0.0
     if tipo == "Plano (Canal 5)":
         dims = sorted([largo, ancho, alto], reverse=True)
-        area_base = dims[0] * dims[1]
+        mayor, intermedia = dims[0], dims[1]
+        area_base = mayor * intermedia
         coste_250 = (0.00000091 * area_base) + 1.00
         if q >= 250: return coste_250 * ((q / 250) ** -0.32)
         elif q == 100: return 2.69
@@ -86,12 +87,14 @@ st.markdown("""<style>
 
 st.title("💼 GESTOR COMERCIAL")
 
-# --- 4. PANEL LATERAL (SIDEBAR) ---
+# --- 4. PANEL LATERAL ---
 with st.sidebar:
-    st.header("📋 Información")
+    st.header("⚙️ Datos del Proyecto")
+    st.session_state.brf = st.text_input("Nº de Briefing", st.session_state.get('brf', ""))
     st.session_state.cli = st.text_input("Cliente", st.session_state.get('cli', ""))
-    st.session_state.brf = st.text_input("Nº Briefing", st.session_state.get('brf', ""))
     st.session_state.com = st.text_input("Comercial", st.session_state.get('com', ""))
+    st.session_state.ver = st.text_input("Versión", st.session_state.get('ver', "1.0"))
+    st.session_state.des = st.text_area("Descripción", st.session_state.get('des', ""))
     st.divider()
     cants_str = st.text_input("Cantidades (ej: 500, 1000)", "0")
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
@@ -120,8 +123,8 @@ with st.sidebar:
         st.session_state.lista_embalajes = di.get("embalajes", [])
         st.rerun()
 
-# --- 5. CUERPO PRINCIPAL ---
-c1, c2 = st.columns([1, 5])
+# --- 5. GESTIÓN DE PRODUCTO ---
+c1, c2 = st.columns([1, 4])
 if c1.button("➕ Forma"):
     nid = max(st.session_state.piezas_dict.keys()) + 1
     st.session_state.piezas_dict[nid] = crear_forma_vacia(nid); st.rerun()
@@ -134,7 +137,6 @@ for p_id, p in st.session_state.piezas_dict.items():
         with col1:
             p['nombre'] = st.text_input("Etiqueta", p['nombre'], key=f"n_{p_id}")
             p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p['pliegos']), key=f"p_{p_id}")
-            # --- ORDEN: LARGO PRIMERO ---
             p['h'] = st.number_input("Largo mm", 0, 5000, int(p['h']), key=f"h_{p_id}")
             p['w'] = st.number_input("Ancho mm", 0, 5000, int(p['w']), key=f"w_{p_id}")
             p['im'] = st.selectbox("Sistema Cara", ["Offset", "Digital", "No"], index=["Offset", "Digital", "No"].index(p['im']), key=f"im_{p_id}")
@@ -145,8 +147,7 @@ for p_id, p in st.session_state.piezas_dict.items():
             p['pel'] = st.selectbox("Peliculado Cara", list(PRECIOS["peliculado"].keys()), index=list(PRECIOS["peliculado"].keys()).index(p.get('pel', 'Sin Peliculado')), key=f"pel_{p_id}")
         
         with col2:
-            pf_prev = p['pf']
-            p['pf'] = st.selectbox("C. Frontal", list(PRECIOS["cartoncillo"].keys()), index=list(PRECIOS["cartoncillo"].keys()).index(p['pf']), key=f"pf_{p_id}")
+            pf_prev = p['pf']; p['pf'] = st.selectbox("C. Frontal", list(PRECIOS["cartoncillo"].keys()), index=list(PRECIOS["cartoncillo"].keys()).index(p['pf']), key=f"pf_{p_id}")
             if p['pf'] != pf_prev: p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
             if p['pf'] != "Ninguno": p['gf'] = st.number_input("Gramaje F.", value=int(p['gf']), key=f"gf_{p_id}")
             p['pl'] = st.selectbox("Soporte Base", list(PRECIOS["planchas"].keys()), index=list(PRECIOS["planchas"].keys()).index(p['pl']), key=f"pl_{p_id}")
@@ -166,32 +167,31 @@ for p_id, p in st.session_state.piezas_dict.items():
                 p['pel_d'] = st.selectbox("Peliculado Dorso", list(PRECIOS["peliculado"].keys()), index=list(PRECIOS["peliculado"].keys()).index(p.get('pel_d', 'Sin Peliculado')), key=f"peld_{p_id}")
             if st.button("🗑 Borrar Forma", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
 
-# SECCIÓN EXTRAS
-st.divider(); st.subheader("📦 Accesorios")
-ex_sel = st.selectbox("Añadir extra de la lista:", ["---"] + list(PRECIOS["extras_base"].keys()))
-if st.button("➕ Añadir Accesorio") and ex_sel != "---":
-    st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": PRECIOS["extras_base"][ex_sel], "cantidad": 1.0}); st.rerun()
-for i, ex in enumerate(st.session_state.lista_extras_grabados):
-    st.write(f"**{ex['nombre']}**")
-    ca, cb = st.columns([4, 1])
-    ex['cantidad'] = ca.number_input("Cant/Ud de producto", value=float(ex['cantidad']), key=f"exq_{i}")
-    if cb.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
+st.divider(); st.subheader("📦 Accesorios y Embalajes")
+col_acc, col_emb = st.columns(2)
 
-# SECCIÓN EMBALAJES (INTEGRADA)
-st.divider(); st.subheader("📦 Embalajes")
-col_em1, col_em2 = st.columns([2, 1])
-tipo_em = col_em1.selectbox("Tipo de Caja:", ["Plano (Canal 5)", "En Volumen", "Guainas"])
-if col_em2.button("➕ Añadir Embalaje"):
-    st.session_state.lista_embalajes.append({"tipo": tipo_em, "l": 0, "w": 0, "a": 0, "uds": 1}); st.rerun()
-for i, em in enumerate(st.session_state.lista_embalajes):
-    with st.info(f"Caja {i+1}: {em['tipo']}"):
-        ce1, ce2, ce3, ce4, ce5 = st.columns(5)
-        em['l'], em['w'], em['a'], em['uds'] = ce1.number_input("Largo", value=em['l'], key=f"el_{i}"), ce2.number_input("Ancho", value=em['w'], key=f"ew_{i}"), ce3.number_input("Alto", value=em['a'], key=f"ea_{i}"), ce4.number_input("C/U", value=em['uds'], key=f"eu_{i}")
-        if ce5.button("🗑", key=f"ed_{i}"): st.session_state.lista_embalajes.pop(i); st.rerun()
+with col_acc:
+    ex_sel = st.selectbox("Añadir extra:", ["---"] + list(PRECIOS["extras_base"].keys()))
+    if st.button("➕ Añadir Accesorio") and ex_sel != "---":
+        st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": PRECIOS["extras_base"][ex_sel], "cantidad": 1.0}); st.rerun()
+    for i, ex in enumerate(st.session_state.lista_extras_grabados):
+        ca, cb = st.columns([4, 1])
+        ex['cantidad'] = ca.number_input(f"{ex['nombre']} (Cant/Ud)", value=float(ex['cantidad']), key=f"exq_{i}")
+        if cb.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
+
+with col_emb:
+    tipo_em = st.selectbox("Tipo de Caja:", ["Plano (Canal 5)", "En Volumen", "Guainas"])
+    if st.button("➕ Añadir Embalaje"):
+        st.session_state.lista_embalajes.append({"tipo": tipo_em, "l": 0, "w": 0, "a": 0, "uds": 1}); st.rerun()
+    for i, em in enumerate(st.session_state.lista_embalajes):
+        with st.info(f"Embalaje {i+1}"):
+            ce1, ce2, ce3, ce4, ce5 = st.columns(5)
+            em['l'], em['w'], em['a'], em['uds'] = ce1.number_input("L", value=em['l'], key=f"el_{i}"), ce2.number_input("W", value=em['w'], key=f"ew_{i}"), ce3.number_input("A", value=em['a'], key=f"ea_{i}"), ce4.number_input("C/U", value=em['uds'], key=f"eu_{i}")
+            if ce5.button("🗑", key=f"ed_{i}"): st.session_state.lista_embalajes.pop(i); st.rerun()
 
 # --- 6. MOTOR DE CÁLCULO ---
 res_final = []
-if lista_cants and sum(lista_cants) > 0:
+if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
         tiene_dig = any(pz["im"] == "Digital" or pz.get("im_d") == "Digital" for pz in st.session_state.piezas_dict.values())
         mn_m, _ = calcular_mermas(q_n, es_digital=tiene_dig); qp_taller = q_n + mn_m; coste_f = 0.0
@@ -200,7 +200,6 @@ if lista_cants and sum(lista_cants) > 0:
             nb = q_n * p["pliegos"]; mn, mi = calcular_mermas(nb, p["im"]=="Digital")
             hc, hp = nb+mn+mi, nb+mn; m2 = (p["w"]*p["h"])/1_000_000
             
-            # Material
             c_mat = (hc*m2*(p.get('gf',0)/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
             c_mat += (hc*m2*(p.get('gd',0)/1000)*PRECIOS["cartoncillo"][p.get('pd','Ninguno')]["precio_kg"])
             if p["pl"] != "Ninguna":
@@ -208,14 +207,12 @@ if lista_cants and sum(lista_cants) > 0:
                 pas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p.get('pd','Ninguno')!="Ninguno" else 0)
                 c_mat += hp * m2 * PRECIOS["planchas"][p["pl"]]["peg"] * pas
             
-            # Impresión y Acabado
             def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
             c_imp = (nb*m2*6.5 if p["im"]=="Digital" else (f_o(nb)*(p.get('nt',4)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
             c_imp += (nb*m2*6.5 if p.get('im_d')=="Digital" else (f_o(nb)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get('im_d')=="Offset" else 0))
             c_aca = (hp*m2*PRECIOS["peliculado"][p.get('pel','Sin Peliculado')]) + (hp*m2*3.5 if p.get("ld") else 0)
             c_aca += (hp*m2*PRECIOS["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp*m2*3.5 if p.get("ld_d") else 0)
             
-            # ARREGLO Y TIRAJE
             l_p, w_p = p['h'], p['w']
             if l_p > 1000 or w_p > 700: v_arr, v_tir = 107.80, 0.135
             elif l_p < 1000 and w_p < 700: v_arr, v_tir = 48.19, 0.06
@@ -228,10 +225,13 @@ if lista_cants and sum(lista_cants) > 0:
         c_em_tot = sum(motor_embalajes(em['tipo'], em['l'], em['w'], em['a'], q_n*em['uds']) * (q_n*em['uds']) for em in st.session_state.lista_embalajes)
         c_mo = ((seg_man_total/3600)*COSTO_HORA_MANIPULACION*qp_taller) + (qp_taller*DIFICULTAD_ESTANDAR)
         
-        t_fab = coste_f + c_mo + c_ext_tot + c_em_tot + IMPORTE_FIJO_TRABAJO
-        res_final.append({"Cant": f"{q_n} uds", "PVP TOTAL": f"{(t_fab*MARGEN_COMERCIAL):.2f}€", "UNITARIO": f"{(t_fab*MARGEN_COMERCIAL/q_n):.2f}€"})
+        # --- NUEVA FÓRMULA PVP: (Costes * Margen) + 500 Fijos ---
+        total_costes_taller = coste_f + c_mo + c_ext_tot + c_em_tot
+        pvp_total = (total_costes_taller * MARGEN_COMERCIAL) + IMPORTE_FIJO_VENTA
+        
+        res_final.append({"Cant": f"{q_n} uds", "PVP TOTAL": f"{pvp_total:.2f}€", "UNITARIO": f"{pvp_total/q_n:.2f}€"})
 
-# --- 7. SALIDA VISUAL (OFERTA FINAL) ---
+# --- 7. SALIDA VISUAL ---
 if res_final:
     st.divider()
     st.markdown(f"""<div class="comercial-box">
@@ -240,5 +240,4 @@ if res_final:
             <tr><th>Cantidad</th><th>Precio de Venta</th><th>Precio Unitario</th></tr>
             {"".join([f"<tr><td>{r['Cant']}</td><td><b>{r['PVP TOTAL']}</b></td><td>{r['UNITARIO']}</td></tr>" for r in res_final])}
         </table>
-        <p style='margin-top:20px; font-size:0.8em; color:gray;'>* Precios calculados según especificaciones. IVA no incluido.</p>
     </div>""", unsafe_allow_html=True)
