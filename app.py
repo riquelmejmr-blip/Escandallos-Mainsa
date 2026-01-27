@@ -38,8 +38,8 @@ def calcular_mermas(n, es_digital=False):
     if n < 2000: return 60, 170
     return 120, 170
 
-# --- 2. INICIALIZACIÓN DE SESIÓN ---
-st.set_page_config(page_title="ESCANDALLO MAINSA", layout="wide") # Título de pestaña actualizado
+# --- 2. INICIALIZACIÓN ---
+st.set_page_config(page_title="ESCANDALLO MAINSA", layout="wide")
 
 def crear_forma_vacia(index):
     return {
@@ -68,7 +68,7 @@ st.markdown("""<style>
     .header-info { display: flex; justify-content: space-around; background: #f8f9fa; padding: 10px; border-radius: 5px; margin-bottom: 20px; }
 </style>""", unsafe_allow_html=True)
 
-st.title("ESCANDALLO MAINSA") # Título principal actualizado
+st.title("ESCANDALLO MAINSA")
 
 # --- 3. PANEL LATERAL ---
 with st.sidebar:
@@ -85,6 +85,8 @@ with st.sidebar:
     t_input = st.number_input(f"Tiempo ({unidad_t})", value=0)
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
     dif_ud = st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2)
+    # NUEVA OPCIÓN: Importe fijo
+    imp_fijo = st.number_input("Importe Fijo por Trabajo (€)", value=500)
     margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1)
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
@@ -93,7 +95,7 @@ with st.sidebar:
     partes_nombre = [st.session_state.brf, st.session_state.com, st.session_state.ver]
     if st.session_state.des.strip(): partes_nombre.append(st.session_state.des.strip().replace("\n", " "))
     nombre_archivo_final = " ".join([str(p).strip() for p in partes_nombre if str(p).strip()]) + ".json"
-    datos_exp = {"brf": st.session_state.brf, "cli": st.session_state.cli, "com": st.session_state.com, "ver": st.session_state.ver, "des": st.session_state.des, "piezas": st.session_state.piezas_dict, "extras": st.session_state.lista_extras_grabados}
+    datos_exp = {"brf": st.session_state.brf, "cli": st.session_state.cli, "com": st.session_state.com, "ver": st.session_state.ver, "des": st.session_state.des, "piezas": st.session_state.piezas_dict, "extras": st.session_state.lista_extras_grabados, "imp_fijo": imp_fijo}
     st.download_button("💾 Guardar Proyecto", json.dumps(datos_exp, indent=4), file_name=nombre_archivo_final)
     subida = st.file_uploader("📂 Importar JSON", type=["json"])
     if subida:
@@ -126,17 +128,14 @@ if not modo_comercial:
                     p['ba'] = st.checkbox("Barniz F.", p.get('ba',False), key=f"ba_{p_id}")
                 elif p['im'] == "Digital": p['ld'] = st.checkbox("Laminado Digital F.", p.get('ld',False), key=f"ld_{p_id}")
                 p['pel'] = st.selectbox("Peliculado Cara", list(PRECIOS["peliculado"].keys()), index=list(PRECIOS["peliculado"].keys()).index(p.get('pel', 'Sin Peliculado')), key=f"pel_{p_id}")
-
             with col2:
-                pf_prev = p['pf']
-                p['pf'] = st.selectbox("C. Frontal", list(PRECIOS["cartoncillo"].keys()), index=list(PRECIOS["cartoncillo"].keys()).index(p['pf']), key=f"pf_{p_id}")
+                pf_prev = p['pf']; p['pf'] = st.selectbox("C. Frontal", list(PRECIOS["cartoncillo"].keys()), index=list(PRECIOS["cartoncillo"].keys()).index(p['pf']), key=f"pf_{p_id}")
                 if p['pf'] != pf_prev: p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
                 if p['pf'] != "Ninguno": p['gf'] = st.number_input("Gramaje F.", value=int(p['gf']), key=f"gf_{p_id}")
                 p['pl'] = st.selectbox("Plancha Base", list(PRECIOS["planchas"].keys()), index=list(PRECIOS["planchas"].keys()).index(p['pl']), key=f"pl_{p_id}")
                 p['ap'] = st.selectbox("Calidad", ["C/C", "B/C", "B/B"], index=["C/C", "B/C", "B/B"].index(p.get('ap', 'C/C')), key=f"ap_{p_id}")
                 p['pd'] = st.selectbox("C. Dorso", list(PRECIOS["cartoncillo"].keys()), index=list(PRECIOS["cartoncillo"].keys()).index(p.get('pd', 'Ninguno')), key=f"pd_{p_id}")
                 if p['pd'] != "Ninguno": p['gd'] = st.number_input("Gramaje D.", value=int(p.get('gd',0)), key=f"gd_{p_id}")
-
             with col3:
                 p['cor'] = st.selectbox("Corte", ["Troquelado", "Plotter"], index=["Troquelado", "Plotter"].index(p.get('cor', 'Troquelado')), key=f"cor_{p_id}")
                 if p['cor'] == "Troquelado": p['cobrar_arreglo'] = st.checkbox("¿Cobrar Arreglo?", value=p.get('cobrar_arreglo', True), key=f"arr_{p_id}")
@@ -189,42 +188,33 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_ad = (hp*m2*PRECIOS["peliculado"].get(p.get("pel_d", "Sin Peliculado"), 0)) + (hp*m2*3.5 if p.get("ld_d") else 0)
             c_arr = (107.7 if (p['h']>1000 or p['w']>700) else 48.19) if (p["cor"]=="Troquelado" and p.get('cobrar_arreglo', True)) else 0
             c_tir = (hp*(0.135 if (p['h']>1000 or p['w']>700) else 0.09)) if p["cor"]=="Troquelado" else hp*1.5
-            sub = c_cf + c_cd + c_pla + c_peg + c_if + c_id + c_af + c_ad + c_arr + c_tir
-            coste_f += sub
-            det_f.append({"Pieza": p["nombre"], "C.F": c_cf, "C.D": c_cd, "Plancha": c_pla, "Peg": c_peg, "Imp": c_if+c_id, "Acab": c_af+c_ad, "Arr": c_arr, "Tir": c_tir, "Sub": sub})
+            coste_f += (c_cf + c_cd + c_pla + c_peg + c_if + c_id + c_af + c_ad + c_arr + c_tir)
+        
         c_ext_tot = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
         c_mo = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud)
-        t_fab = coste_f + c_mo + c_ext_tot
-        desc_full[q_n] = {"det": det_f, "man": c_mo, "extras": c_ext_tot, "total": t_fab, "qp": qp_taller}
+        # Aplicación del Importe Fijo antes de Margen
+        t_fab = coste_f + c_mo + c_ext_tot + imp_fijo
         res_final.append({"Cant": q_n, "Total": f"{(t_fab*margen):.2f}€", "Ud": f"{(t_fab*margen/q_n):.2f}€"})
 
 # --- 6. SALIDA VISUAL (Oferta Comercial Finalizada) ---
 if modo_comercial and res_final:
     p_html = ""
     for p in st.session_state.piezas_dict.values():
-        ac_c_list = []
-        if p.get('pel') and p['pel'] != "Sin Peliculado": ac_c_list.append(p['pel'])
-        if p.get('ld'): ac_c_list.append("Laminado Digital")
-        if p.get('ba'): ac_c_list.append("Barniz")
-        ac_c_final = " + ".join(ac_c_list) if ac_c_list else "Sin acabado"
+        ac_c_list = [p['pel'] if p.get('pel')!="Sin Peliculado" else None, "Laminado Digital" if p.get('ld') else None, "Barniz" if p.get('ba') else None]
+        ac_c_final = " + ".join([x for x in ac_c_list if x]) or "Sin acabado"
         p_html += f"<li><b>{p['nombre']}:</b> {p['w']}x{p['h']} mm ({p['pliegos']:g} pliegos/ud)<br/>"
         p_html += f"&nbsp;&nbsp;&nbsp;• Cara: {p['pf']} ({p.get('gf',0)}g) | Imp: {p['im']} | Acabado: {ac_c_final}<br/>"
         if p.get('pl') != "Ninguna": p_html += f"&nbsp;&nbsp;&nbsp;• Soporte Base: {p['pl']} - Calidad {p['ap']}<br/>"
         if p.get('pd') != "Ninguno":
-            ac_d_list = []
-            if p.get('pel_d', 'Sin Peliculado') != "Sin Peliculado": ac_d_list.append(p['pel_d'])
-            if p.get('ld_d'): ac_d_list.append("Laminado Digital")
-            if p.get('ba_d'): ac_d_list.append("Barniz")
-            ac_d_final = " + ".join(ac_d_list) if ac_d_list else "Sin acabado"
+            ac_d_list = [p.get('pel_d') if p.get('pel_d')!="Sin Peliculado" else None, "Laminado Digital" if p.get('ld_d') else None, "Barniz" if p.get('ba_d') else None]
+            ac_d_final = " + ".join([x for x in ac_d_list if x]) or "Sin acabado"
             p_html += f"&nbsp;&nbsp;&nbsp;• Dorso: {p['pd']} ({p.get('gd',0)}g) | Imp: {p.get('im_d', 'No')} | Acabado: {ac_d_final}</li>"
     ex_h_list = [f"<li>{e['nombre']} (x{e['cantidad']:g})</li>" for e in st.session_state.lista_extras_grabados]
     ex_h = "".join(ex_h_list) if ex_h_list else "<li>Sin accesorios adicionales</li>"
     f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Total']}</td><td><b>{r['Ud']}</b></td></tr>" for r in res_final])
     st.markdown(f"""<div class="comercial-box">
         <h2 class="comercial-header">OFERTA COMERCIAL - BRIEFING {st.session_state.brf}</h2>
-        <div class="header-info">
-            <span><b>Cliente:</b> {st.session_state.cli}</span><span><b>Comercial:</b> {st.session_state.com}</span><span><b>Versión:</b> {st.session_state.ver}</span>
-        </div>
+        <div class="header-info"><span><b>Cliente:</b> {st.session_state.cli}</span><span><b>Comercial:</b> {st.session_state.com}</span><span><b>Versión:</b> {st.session_state.ver}</span></div>
         <p><b>Descripción:</b> {st.session_state.des}</p>
         <h4>1. Especificaciones</h4><ul>{p_html}</ul>
         <h4>2. Accesorios y Montaje</h4><ul>{ex_h}<li><b>Tiempo de manipulado:</b> {t_input} {unidad_t.lower()} / ud incluido.</li></ul>
@@ -232,10 +222,5 @@ if modo_comercial and res_final:
     </div>""", unsafe_allow_html=True)
 else:
     if res_final:
-        st.header(f"📊 Briefing: {st.session_state.brf} - {st.session_state.cli}")
+        st.header(f"📊 Briefing: {st.session_state.brf}")
         st.dataframe(pd.DataFrame(res_final), use_container_width=True)
-        for q, info in desc_full.items():
-            with st.expander(f"🔍 Auditoría Compras {q} uds (Taller: {info['qp']} uds)"):
-                st.table(pd.DataFrame(info["det"]).style.format("{:.2f}€", subset=["C.F","C.D","Plancha","Peg","Imp","Acab","Arr","Tir","Sub"]))
-                st.write(f"**Mano Obra:** {info['man']:.2f}€ | **Extras:** {info['extras']:.2f}€")
-    elif sum(lista_cants) == 0: st.info("💡 Introduce una cantidad en el lateral.")
