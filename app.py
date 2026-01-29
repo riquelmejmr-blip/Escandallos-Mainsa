@@ -30,6 +30,21 @@ PRECIOS = {
     }
 }
 
+# --- LISTA DE FORMATOS COMUNES ---
+FORMATOS_STD = {
+    "Personalizado": (0, 0),
+    "1600x1200": (1600, 1200),
+    "1600x1100": (1600, 1100),
+    "1400x1000": (1400, 1000),
+    "1300x900": (1300, 900),
+    "1200x800": (1200, 800),
+    "1100x800": (1100, 800),
+    "1000x700": (1000, 700),
+    "900x650": (900, 650),
+    "800x550": (800, 550),
+    "700x500": (700, 500)
+}
+
 # --- 2. MOTORES TÉCNICOS ---
 def calcular_mermas(n, es_digital=False):
     if es_digital: return n * 0.10, 0 
@@ -47,7 +62,8 @@ def crear_forma_vacia(index):
     return {
         "nombre": f"Forma {index + 1}", "pliegos": 1.0, "w": 0, "h": 0, 
         "pf": "Ninguno", "gf": 0, "pl": "Ninguna", "ap": "C/C", 
-        "pd": "Ninguno", "gd": 0, "im": "Offset", "nt": 4, "ba": False, 
+        "pd": "Ninguno", "gd": 0, 
+        "im": "No", "nt": 0, "ba": False, 
         "im_d": "No", "nt_d": 0, "ba_d": False, "pel": "Sin Peliculado", 
         "pel_d": "Sin Peliculado", "ld": False, "ld_d": False, 
         "cor": "Troquelado", "cobrar_arreglo": True, "pv_troquel": 0.0
@@ -55,7 +71,6 @@ def crear_forma_vacia(index):
 
 if 'piezas_dict' not in st.session_state: st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
 if 'lista_extras_grabados' not in st.session_state: st.session_state.lista_extras_grabados = []
-# Diccionario para guardar costes manuales de embalaje UNITARIOS por cantidad {500: 0.50, 1000: 0.45}
 if 'costes_embalaje_manual' not in st.session_state: st.session_state.costes_embalaje_manual = {}
 
 st.markdown("""<style>
@@ -73,20 +88,16 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 with st.sidebar:
     st.header("⚙️ Configuración Admin")
     
-    # --- ZONA DE IMPORTACIÓN INTELIGENTE ---
     with st.expander("🤖 Importar Datos (IA/PDF)", expanded=True):
         tab_up, tab_paste = st.tabs(["📂 Subir Archivo", "📋 Pegar Texto"])
-        
         datos_json = None
         
-        # Opción 1: Subir Archivo
         with tab_up:
             subida_ia = st.file_uploader("Sube el JSON", type=["json"], key="uploader_ia")
             if subida_ia:
                 try: datos_json = json.load(subida_ia)
                 except Exception as e: st.error(f"Error archivo: {e}")
 
-        # Opción 2: Pegar Texto
         with tab_paste:
             texto_json = st.text_area("Pega el JSON aquí", height=150)
             if st.button("🚀 Cargar desde Texto"):
@@ -98,27 +109,22 @@ with st.sidebar:
                     else: st.warning("El campo está vacío")
                 except Exception as e: st.error(f"Error JSON: {e}")
 
-        # PROCESADO COMÚN
         if datos_json:
             try:
                 di = datos_json
-                
                 if "cli" in di: st.session_state["cli_input"] = di["cli"].strip() if isinstance(di["cli"], str) else di["cli"]
                 if "brf" in di: st.session_state["brf_input"] = str(di["brf"]).strip()
                 if "cantidades" in di: st.session_state["cants_input"] = ", ".join(map(str, di["cantidades"]))
-                
                 if "tiempo_manipulacion" in di: st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
                 if "unidad_manipulacion" in di:
                      val_u = str(di["unidad_manipulacion"])
                      st.session_state["unidad_t_input"] = "Minutos" if "in" in val_u.lower() else "Segundos"
-
                 if "dificultad" in di: 
                     v = float(di["dificultad"])
                     st.session_state["dif_input"] = v if v in [0.02, 0.061, 0.091] else 0.091
                 if "imp_fijo" in di: st.session_state["fijo_input"] = float(di["imp_fijo"])
                 if "margen" in di: st.session_state["margen_input"] = float(di["margen"])
 
-                # Extras
                 raw_ext = di.get("extras", [])
                 clean_ext = []
                 for ex in raw_ext:
@@ -126,11 +132,8 @@ with st.sidebar:
                     if isinstance(nom, str): nom = nom.strip()
                     clean_ext.append({"nombre": nom, "coste": ex.get("coste", 0.0), "cantidad": ex.get("cantidad", 1.0)})
                 st.session_state.lista_extras_grabados = clean_ext
-                
-                # Reiniciar costes embalaje manual al importar
                 st.session_state.costes_embalaje_manual = {}
 
-                # PIEZAS
                 if "piezas" in di:
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
                     for pid, p in st.session_state.piezas_dict.items():
@@ -149,19 +152,15 @@ with st.sidebar:
                             if key_json == "pv_troquel" and "coste_troquel_estimado" in p: 
                                 try: val = float(str(p["coste_troquel_estimado"]).split("€")[0].strip())
                                 except: val = 0.0
-
                             if val is not None:
                                 if isinstance(val, str): val = val.strip()
                                 if prefix_widget in ["p_", "pvt_", "gf_", "gd_"]: val = float(val)
                                 if prefix_widget in ["h_", "w_", "nt_", "ntd_"]: val = int(val)
                                 st.session_state[key_streamlit] = val
-
                 st.toast("✅ Datos cargados correctamente.", icon="🧠")
                 st.rerun()
-                
             except Exception as e: st.error(f"Error procesando datos: {e}")
 
-    # --- INPUTS MANUALES ---
     st.session_state.cli = st.text_input("Cliente", key="cli_input", value=st.session_state.get("cli_input", ""))
     st.session_state.brf = st.text_input("Nº Briefing", key="brf_input", value=st.session_state.get("brf_input", ""))
     st.divider()
@@ -200,7 +199,6 @@ with st.sidebar:
 
 # --- 5. ENTRADA DE DATOS ---
 if not modo_comercial:
-    # SECCIÓN 1: FORMAS
     st.header("1. Definición Técnica de Formas")
     c_btns = st.columns([1, 4])
     if c_btns[0].button("➕ Forma"):
@@ -215,11 +213,21 @@ if not modo_comercial:
             with col1:
                 p['nombre'] = st.text_input("Etiqueta", p.get('nombre', f"Forma {p_id+1}"), key=f"n_{p_id}")
                 p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get('pliegos', 1.0)), key=f"p_{p_id}")
+                
+                # --- NUEVO: FORMATOS RÁPIDOS ---
+                std_fmt = st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}")
+                if std_fmt != "Personalizado":
+                    h_std, w_std = FORMATOS_STD[std_fmt]
+                    if h_std > 0: 
+                        p['h'] = h_std
+                        p['w'] = w_std
+
                 p['h'] = st.number_input("Largo mm", 0, 5000, int(p.get('h', 0)), key=f"h_{p_id}")
                 p['w'] = st.number_input("Ancho mm", 0, 5000, int(p.get('w', 0)), key=f"w_{p_id}")
                 
                 opts_im = ["Offset", "Digital", "No"]
-                val_im = p.get('im', 'Offset'); idx_im = opts_im.index(val_im) if val_im in opts_im else 0
+                # Default "No" si no existe
+                val_im = p.get('im', 'No'); idx_im = opts_im.index(val_im) if val_im in opts_im else 2
                 p['im'] = st.selectbox("Sistema Cara", opts_im, index=idx_im, key=f"im_{p_id}")
                 
                 if p['im'] == "Offset":
@@ -235,9 +243,19 @@ if not modo_comercial:
                 opts_pf = list(PRECIOS["cartoncillo"].keys())
                 val_pf = p.get('pf', 'Ninguno'); idx_pf = opts_pf.index(val_pf) if val_pf in opts_pf else 0 
                 pf_prev = p.get('pf', 'Ninguno')
+                
                 p['pf'] = st.selectbox("C. Frontal", opts_pf, index=idx_pf, key=f"pf_{p_id}")
                 
-                if p['pf'] != pf_prev: p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
+                # --- AUTO-CONFIGURACIÓN ---
+                if p['pf'] != pf_prev:
+                    if p['pf'] != "Ninguno":
+                        p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
+                        p['im'] = "Offset"
+                        p['nt'] = 4
+                    else:
+                        p['im'] = "No"
+                        p['nt'] = 0
+
                 p['gf'] = st.number_input("Gramaje F.", value=int(p.get('gf', 0)), key=f"gf_{p_id}")
                 
                 opts_pl = list(PRECIOS["planchas"].keys())
@@ -278,7 +296,6 @@ if not modo_comercial:
                 
                 if st.button("🗑 Borrar Forma", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
 
-    # SECCIÓN EXTRAS
     st.divider(); st.subheader("📦 2. Almacén de Accesorios")
     opts_extra = ["---"] + list(PRECIOS["extras_base"].keys())
     ex_sel = st.selectbox("Añadir extra:", opts_extra)
@@ -289,18 +306,15 @@ if not modo_comercial:
         ca, cb, cc, cd = st.columns([3, 2, 2, 1]); ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud compra", value=float(ex['coste']), key=f"exc_{i}"); ex['cantidad'] = cc.number_input("Cant/Ud prod", value=float(ex['cantidad']), key=f"exq_{i}")
         if cd.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-    # SECCIÓN EMBALAJES (NUEVA VERSIÓN MANUAL UNITARIA)
     st.divider(); st.subheader("📦 3. Embalaje Manual")
     st.info("Introduce el coste de compra UNITARIO (por caja/unidad) para cada cantidad.")
-    
     if lista_cants:
         cols_emb = st.columns(len(lista_cants))
         for i, q in enumerate(lista_cants):
             current_val = st.session_state.costes_embalaje_manual.get(q, 0.0)
             val = cols_emb[i].number_input(f"Coste UNITARIO Compra {q} uds (€)", value=float(current_val), format="%.4f", key=f"emb_man_{q}")
             st.session_state.costes_embalaje_manual[q] = val
-    else:
-        st.warning("Define primero las cantidades en el panel lateral.")
+    else: st.warning("Define primero las cantidades en el panel lateral.")
 
 # --- 6. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
@@ -323,15 +337,17 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_cf = (hc_f * m2 * (p.get('gf',0)/1000) * PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
             c_cd = (hc_d * m2 * (p.get('gd',0)/1000) * PRECIOS["cartoncillo"][p.get('pd','Ninguno')]["precio_kg"])
             c_pla, c_peg = 0.0, 0.0
+            
             if p["pl"] != "Ninguna":
                 c_pla = hp * m2 * PRECIOS["planchas"][p["pl"]][p.get('ap','C/C')]
                 pas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p.get('pd','Ninguno')!="Ninguno" else 0)
                 c_peg = hp * m2 * PRECIOS["planchas"][p["pl"]]["peg"] * pas
-            
+            elif p["pf"] != "Ninguno" and p.get('pd', 'Ninguno') != "Ninguno":
+                c_peg = hp * m2 * PRECIOS["planchas"]["Microcanal / Canal 3"]["peg"] * 1
+
             def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
             c_if = (nb*m2*6.5 if p["im"]=="Digital" else (f_o(nb)*(p.get('nt',0)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
             c_id = (nb*m2*6.5 if p.get("im_d")=="Digital" else (f_o(nb)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get("im_d")=="Offset" else 0))
-            
             c_pel_f = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*3.5 if p.get("ld") else 0)
             c_pel_d = (hp*m2*PRECIOS["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp*m2*3.5 if p.get("ld_d") else 0)
             
@@ -344,37 +360,29 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             
             s_imp = c_if + c_id; s_narba = c_pel_f + c_pel_d + c_peg + c_arr + c_tir; s_mat = c_cf + c_pla + c_cd
             sub = s_imp + s_narba + s_mat; coste_f += sub
-            
             det_f.append({
-                "Pieza": p["nombre"],
-                "Mat. Frontal": c_cf, "Mat. Dorso": c_cd, "Mat. Ondulado": c_pla,
-                "Imp. Cara": c_if, "Imp. Dorso": c_id,
-                "Acab. Peliculado": c_pel_f + c_pel_d, "Acab. Contracolado": c_peg, "Acab. Troquel/Corte": c_arr + c_tir,
+                "Pieza": p["nombre"], "Mat. Frontal": c_cf, "Mat. Dorso": c_cd, "Mat. Ondulado": c_pla,
+                "Imp. Cara": c_if, "Imp. Dorso": c_id, "Acab. Peliculado": c_pel_f + c_pel_d, 
+                "Acab. Contracolado": c_peg, "Acab. Troquel/Corte": c_arr + c_tir,
                 "Total Imp": s_imp, "Total Narba": s_narba, "Total Mat": s_mat, "Subtotal": sub
             })
 
         c_ext_tot = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
         c_mo = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud)
         
-        # --- CÁLCULO EMBALAJE MANUAL (MARGEN FIJO 1.4) ---
         coste_emb_unit_compra = st.session_state.costes_embalaje_manual.get(q_n, 0.0)
         pv_emb_ud = coste_emb_unit_compra * 1.4
         pv_emb_total = pv_emb_ud * q_n
         
-        # --- PVP PRODUCTO ---
         pvp_producto_base = ((coste_f + c_ext_tot + c_mo) * margen) + imp_fijo_pvp
         pvp_total_todo = pvp_producto_base + pv_emb_total + total_pv_troqueles
-        
         p_venta_unitario = pvp_producto_base / q_n if q_n > 0 else 0
         p_total_unitario_all = pvp_total_todo / q_n if q_n > 0 else 0
 
         res_final.append({
-            "Cantidad": q_n, 
-            "Precio Venta Unitario": f"{p_venta_unitario:.3f}€",
-            "Precio Embalaje Unitario": f"{pv_emb_ud:.3f}€",
-            "Precio Troquel (Total)": f"{total_pv_troqueles:.2f}€",
-            "Precio Venta Total": f"{pvp_total_todo:.2f}€",
-            "Unitario (Todo Incluido)": f"{p_total_unitario_all:.3f}€"
+            "Cantidad": q_n, "Precio Venta Unitario": f"{p_venta_unitario:.3f}€",
+            "Precio Embalaje Unitario": f"{pv_emb_ud:.3f}€", "Precio Troquel (Total)": f"{total_pv_troqueles:.2f}€",
+            "Precio Venta Total": f"{pvp_total_todo:.2f}€", "Unitario (Todo Incluido)": f"{p_total_unitario_all:.3f}€"
         })
         desc_full[q_n] = {"det": det_f, "mo": c_mo, "extras": c_ext_tot, "fijo": imp_fijo_pvp, "taller": coste_f + c_mo + c_ext_tot, "qp": qp_taller}
 
@@ -383,56 +391,35 @@ if modo_comercial and res_final:
     desc_html = """<div style='text-align: left; margin-bottom: 20px; color: #444;'>
     <h4 style='color: #1E88E5; margin-bottom: 5px;'>📋 Especificaciones del Proyecto</h4>
     <ul style='list-style-type: none; padding-left: 0;'>"""
-    
-    # Detalle Formas COMPLETO (Materiales)
     for p in st.session_state.piezas_dict.values():
         mat_f = f"<b>Frontal:</b> {p['pf']} ({p.get('gf',0)}g)" if p['pf'] != "Ninguno" else ""
         mat_d = f" | <b>Dorso:</b> {p['pd']} ({p.get('gd',0)}g)" if p.get('pd', "Ninguno") != "Ninguno" else ""
         mat_pl = f" | <b>Base:</b> {p['pl']}" if p.get('pl', "Ninguna") != "Ninguna" else ""
         
-        # Construimos la línea uniendo solo lo que existe
-        detalles_mat = mat_f + mat_d + mat_pl
-        if not detalles_mat: detalles_mat = "Sin materiales definidos"
+        info_imp = ""
+        if p['im'] == "Offset": info_imp = f" | <b>Imp:</b> Offset {p['nt']} tintas" + (" + Barniz" if p['ba'] else "")
+        elif p['im'] == "Digital": info_imp = " | <b>Imp:</b> Digital"
+        info_pliegos = f" | <b>Pliegos/Ud:</b> {p['pliegos']}" if p['pliegos'] != 1 else ""
         
+        detalles_mat = mat_f + mat_d + mat_pl + info_imp + info_pliegos
+        if not detalles_mat: detalles_mat = "Sin materiales definidos"
         desc_html += f"<li style='margin-bottom: 8px;'>🔹 <b>{p['nombre']}</b> ({p['h']}x{p['w']} mm)<br><span style='font-size:0.9em; color:#666; margin-left: 20px;'>{detalles_mat}</span></li>"
-    
     if st.session_state.lista_extras_grabados:
         desc_html += "<li style='margin-top: 10px;'><b>🧩 Accesorios:</b> "
         items_acc = [f"{ex['nombre']} (x{int(ex['cantidad']) if ex['cantidad'].is_integer() else ex['cantidad']})" for ex in st.session_state.lista_extras_grabados]
         desc_html += ", ".join(items_acc) + "</li>"
-    
     desc_html += "</ul></div>"
 
     rows_html = ""
     for r in res_final:
-        rows_html += f"""<tr>
-            <td style='font-weight:bold;'>{r['Cantidad']}</td>
-            <td>{r['Precio Venta Unitario']}</td>
-            <td>{r['Precio Embalaje Unitario']}</td>
-            <td>{r['Precio Troquel (Total)']}</td>
-            <td style='background-color: #f0f8ff;'>{r['Precio Venta Total']}</td>
-            <td style='font-weight:bold; color: #1E88E5;'>{r['Unitario (Todo Incluido)']}</td>
-        </tr>"""
+        rows_html += f"""<tr><td style='font-weight:bold;'>{r['Cantidad']}</td><td>{r['Precio Venta Unitario']}</td><td>{r['Precio Embalaje Unitario']}</td><td>{r['Precio Troquel (Total)']}</td><td style='background-color: #f0f8ff;'>{r['Precio Venta Total']}</td><td style='font-weight:bold; color: #1E88E5;'>{r['Unitario (Todo Incluido)']}</td></tr>"""
 
     st.markdown(f"""
-    <div class="comercial-box">
-        <h2 class="comercial-header">OFERTA COMERCIAL - {st.session_state.cli}</h2>
-        <p class="comercial-ref">Ref. Briefing: {st.session_state.brf}</p>
-        {desc_html}
-        <table class="comercial-table">
-            <tr>
-                <th>Cantidad</th>
-                <th>P. Venta Unitario</th>
-                <th>P. Emb. Unitario</th>
-                <th>Troqueles (Total)</th>
-                <th>PRECIO VENTA TOTAL</th>
-                <th>UNITARIO (TODO)</th>
-            </tr>
-            {rows_html}
-        </table>
+    <div class="comercial-box"><h2 class="comercial-header">OFERTA COMERCIAL - {st.session_state.cli}</h2>
+        <p class="comercial-ref">Ref. Briefing: {st.session_state.brf}</p>{desc_html}
+        <table class="comercial-table"><tr><th>Cantidad</th><th>P. Venta Unitario</th><th>P. Emb. Unitario</th><th>Troqueles (Total)</th><th>PRECIO VENTA TOTAL</th><th>UNITARIO (TODO)</th></tr>{rows_html}</table>
         <p style='text-align: right; font-size: 0.9em; color: #777; margin-top: 15px;'>* Oferta válida salvo error tipográfico. IVA no incluido.</p>
-    </div>
-    """, unsafe_allow_html=True)
+    </div>""", unsafe_allow_html=True)
 
 else:
     if res_final:
@@ -442,16 +429,24 @@ else:
         for q, info in desc_full.items():
             with st.expander(f"🔍 Auditoría Taller {q} uds (Taller: {info['qp']} uds)"):
                 df_raw = pd.DataFrame(info["det"])
-                cols_order = ["Pieza", "Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Total Mat",
-                              "Imp. Cara", "Imp. Dorso", "Total Imp",
-                              "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte", "Total Narba", "Subtotal"]
+                cols_order = ["Pieza", "Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Total Mat", "Imp. Cara", "Imp. Dorso", "Total Imp", "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte", "Total Narba", "Subtotal"]
                 cols_final = [c for c in cols_order if c in df_raw.columns]
+                
                 df_sorted = df_raw[cols_final]
-                sum_row = {"Pieza": "TOTAL PROYECTO"}; 
-                for col in cols_final[1:]: sum_row[col] = df_sorted[col].sum()
-                df_f = pd.concat([df_sorted, pd.DataFrame([sum_row])], ignore_index=True)
+                
+                # Filas adicionales
+                row_mo = {c: 0 for c in cols_final[1:]}; row_mo["Pieza"] = "MANO DE OBRA (Manipulado)"; row_mo["Subtotal"] = info['mo']
+                row_ext = {c: 0 for c in cols_final[1:]}; row_ext["Pieza"] = "MATERIALES EXTRA (Accesorios)"; row_ext["Subtotal"] = info['extras']
+                
+                df_audit = pd.concat([df_sorted, pd.DataFrame([row_mo, row_ext])], ignore_index=True)
+                
+                sum_row = {"Pieza": "TOTAL COSTE INDUSTRIAL"}
+                for col in cols_final[1:]: sum_row[col] = df_audit[col].sum()
+                
+                df_final = pd.concat([df_audit, pd.DataFrame([sum_row])], ignore_index=True)
 
-                st.table(df_f.style.format("{:.2f}€", subset=df_f.columns[1:])
+                st.table(df_final.style.format("{:.2f}€", subset=df_final.columns[1:])
                          .set_properties(**{'background-color': '#e3f2fd', 'font-weight': 'bold'}, subset=["Total Imp","Total Narba","Total Mat","Subtotal"])
                          .set_properties(**{'color': '#666'}, subset=["Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Imp. Cara", "Imp. Dorso", "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte"]))
+                
                 st.metric("COSTO TALLER (Sin Margen)", f"{info['taller']:.2f}€")
