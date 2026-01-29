@@ -199,24 +199,44 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         mn_m, _ = calcular_mermas(q_n, es_digital=tiene_dig); qp_taller = q_n + mn_m; coste_f, det_f = 0.0, []
         
         for p_id, p in st.session_state.piezas_dict.items():
-            nb = q_n * p["pliegos"]; mn, mi = calcular_mermas(nb, (p["im"]=="Digital" or p.get("im_d")=="Digital"))
-            hc, hp = nb+mn+mi, nb+mn; m2 = (p["w"]*p["h"])/1_000_000
+            nb = q_n * p["pliegos"]
             
-            c_cf = (hc*m2*(p.get('gf',0)/1000)*PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
-            c_cd = (hc*m2*(p.get('gd',0)/1000)*PRECIOS["cartoncillo"][p.get('pd','Ninguno')]["precio_kg"])
+            # --- NUEVA LÓGICA MERMAS INDEPENDIENTES CARA/DORSO ---
+            # Cara: Si no hay impresión, solo mermas normales (manipulado), ignoramos impresión.
+            mn_f, mi_f = calcular_mermas(nb, (p["im"]=="Digital"))
+            waste_f = mn_f + (mi_f if p["im"] != "No" else 0)
+            hc_f = nb + waste_f # Hoja Compra Frontal
+            
+            # Dorso: Si no hay impresión, solo mermas normales.
+            mn_d, mi_d = calcular_mermas(nb, (p.get("im_d")=="Digital"))
+            waste_d = mn_d + (mi_d if p.get("im_d", "No") != "No" else 0)
+            hc_d = nb + waste_d # Hoja Compra Dorso
+
+            # Hoja Pasada (Finishing): Usamos la merma base (normalmente la de la cara marca el proceso)
+            mn_gen, _ = calcular_mermas(nb, (p["im"]=="Digital" or p.get("im_d")=="Digital"))
+            hp = nb + mn_gen 
+
+            m2 = (p["w"]*p["h"])/1_000_000
+            
+            # --- MATERIALES (Desglosado) ---
+            c_cf = (hc_f * m2 * (p.get('gf',0)/1000) * PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
+            c_cd = (hc_d * m2 * (p.get('gd',0)/1000) * PRECIOS["cartoncillo"][p.get('pd','Ninguno')]["precio_kg"])
             c_pla, c_peg = 0.0, 0.0
             if p["pl"] != "Ninguna":
                 c_pla = hp * m2 * PRECIOS["planchas"][p["pl"]][p.get('ap','C/C')]
                 pas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p.get('pd','Ninguno')!="Ninguno" else 0)
                 c_peg = hp * m2 * PRECIOS["planchas"][p["pl"]]["peg"] * pas
             
+            # --- IMPRESIÓN (Desglosado) ---
             def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
             c_if = (nb*m2*6.5 if p["im"]=="Digital" else (f_o(nb)*(p.get('nt',0)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
             c_id = (nb*m2*6.5 if p.get("im_d")=="Digital" else (f_o(nb)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get("im_d")=="Offset" else 0))
-            c_af = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*3.5 if p.get("ld") else 0)
-            c_ad = (hp*m2*PRECIOS["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp*m2*3.5 if p.get("ld_d") else 0)
             
-            # --- CRITERIO ARREGLO 1000x700 ---
+            # --- NARBA / ACABADOS (Desglosado) ---
+            c_pel_f = (hp*m2*PRECIOS["peliculado"][p["pel"]]) + (hp*m2*3.5 if p.get("ld") else 0)
+            c_pel_d = (hp*m2*PRECIOS["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp*m2*3.5 if p.get("ld_d") else 0)
+            
+            # Criterio Arreglo
             l_p, w_p = p['h'], p['w']
             if l_p > 1000 or w_p > 700: v_arr, v_tir = 107.80, 0.135
             elif l_p < 1000 and w_p < 700: v_arr, v_tir = 48.19, 0.06
@@ -225,9 +245,32 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_arr = v_arr if (p["cor"]=="Troquelado" and p.get('cobrar_arreglo', True)) else 0
             c_tir = (hp * v_tir) if p["cor"]=="Troquelado" else hp*1.5
             
-            s_imp, s_narba, s_mat = c_if + c_id, c_af + c_ad + c_peg + c_arr + c_tir, c_cf + c_pla + c_cd
-            sub = s_imp + s_narba + s_mat; coste_f += sub
-            det_f.append({"Pieza": p["nombre"], "Total Imp": s_imp, "Total Narba": s_narba, "Total Mat": s_mat, "Subtotal": sub})
+            s_imp = c_if + c_id
+            s_narba = c_pel_f + c_pel_d + c_peg + c_arr + c_tir
+            s_mat = c_cf + c_pla + c_cd
+            sub = s_imp + s_narba + s_mat
+            coste_f += sub
+            
+            # --- NUEVO DESGLOSE PARA AUDITORÍA ---
+            det_f.append({
+                "Pieza": p["nombre"],
+                # Grupo Materiales
+                "Mat. Frontal": c_cf,
+                "Mat. Dorso": c_cd,
+                "Mat. Ondulado": c_pla,
+                # Grupo Impresión
+                "Imp. Cara": c_if,
+                "Imp. Dorso": c_id,
+                # Grupo Narba
+                "Acab. Peliculado": c_pel_f + c_pel_d,
+                "Acab. Contracolado": c_peg,
+                "Acab. Troquel/Corte": c_arr + c_tir,
+                # Totales Originales (para referencia rápida)
+                "Total Imp": s_imp, 
+                "Total Narba": s_narba, 
+                "Total Mat": s_mat, 
+                "Subtotal": sub
+            })
 
         c_ext_tot = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
         c_mo = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud)
@@ -237,10 +280,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         pv_emb_total = coste_emb_taller * margen
         pv_emb_ud = pv_emb_total / q_n if q_n > 0 else 0
         
-        # --- PVP PRODUCTO (Fabricación * Margen + Fijo) ---
+        # --- PVP PRODUCTO ---
         pvp_producto_base = ((coste_f + c_ext_tot + c_mo) * margen) + imp_fijo_pvp
-        
-        # TOTAL OPERACIÓN
         pvp_total_todo = pvp_producto_base + pv_emb_total + total_pv_troqueles
         
         res_final.append({
@@ -264,6 +305,30 @@ else:
         st.dataframe(pd.DataFrame(res_final), use_container_width=True)
         for q, info in desc_full.items():
             with st.expander(f"🔍 Auditoría Taller {q} uds (Taller: {info['qp']} uds)"):
-                df_f = pd.concat([pd.DataFrame(info["det"]), pd.DataFrame([{"Pieza": "TOTAL PROYECTO", **pd.DataFrame(info["det"]).select_dtypes(include=['number']).sum().to_dict()}])], ignore_index=True)
-                st.table(df_f.style.format("{:.2f}€", subset=df_f.columns[1:]).set_properties(**{'background-color': '#f8f9fa', 'font-weight': 'bold'}, subset=["Total Imp","Total Narba","Total Mat","Subtotal"]))
+                # Crear Dataframe y ordenar columnas para que quede lógico el desglose
+                df_raw = pd.DataFrame(info["det"])
+                
+                # Definir orden de columnas para visualización clara
+                cols_order = ["Pieza", 
+                              "Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Total Mat",
+                              "Imp. Cara", "Imp. Dorso", "Total Imp",
+                              "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte", "Total Narba", 
+                              "Subtotal"]
+                
+                # Filtrar solo columnas que existan (por seguridad) y reordenar
+                cols_final = [c for c in cols_order if c in df_raw.columns]
+                df_sorted = df_raw[cols_final]
+
+                # Fila de totales
+                sum_row = {"Pieza": "TOTAL PROYECTO"}
+                for col in cols_final[1:]:
+                    sum_row[col] = df_sorted[col].sum()
+                
+                df_f = pd.concat([df_sorted, pd.DataFrame([sum_row])], ignore_index=True)
+
+                # Estilos visuales
+                st.table(df_f.style.format("{:.2f}€", subset=df_f.columns[1:])
+                         .set_properties(**{'background-color': '#e3f2fd', 'font-weight': 'bold'}, subset=["Total Imp","Total Narba","Total Mat","Subtotal"])
+                         .set_properties(**{'color': '#666'}, subset=["Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Imp. Cara", "Imp. Dorso", "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte"])
+                         )
                 st.metric("COSTO TALLER (Sin Margen)", f"{info['taller']:.2f}€")
