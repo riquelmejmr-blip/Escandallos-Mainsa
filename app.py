@@ -85,20 +85,67 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 # --- 4. PANEL LATERAL (CONTROL TOTAL) ---
 with st.sidebar:
     st.header("⚙️ Configuración Admin")
+    
+    # --- ZONA DE IMPORTACIÓN INTELIGENTE ---
+    with st.expander("🤖 Importar Datos de IA/PDF", expanded=False):
+        st.info("Sube el JSON generado por Gemini/ChatGPT")
+        subida_ia = st.file_uploader("Archivo JSON", type=["json"], key="uploader_ia")
+        if subida_ia:
+            try:
+                di = json.load(subida_ia)
+                # Cargar datos básicos
+                st.session_state.cli = di.get("cli", st.session_state.get('cli', ""))
+                st.session_state.brf = di.get("brf", st.session_state.get('brf', ""))
+                
+                # Cargar piezas (Conversión de claves string a int para el diccionario)
+                if "piezas" in di:
+                    st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
+                
+                # Cargar listas
+                st.session_state.lista_embalajes = di.get("embalajes", [])
+                st.session_state.lista_extras_grabados = di.get("extras", [])
+                
+                # Guardar valores temporales en session_state para que los inputs los lean
+                if "cantidades" in di: st.session_state['_tmp_cants'] = ", ".join(map(str, di["cantidades"]))
+                if "tiempo_manipulacion" in di: st.session_state['_tmp_tiempo'] = di["tiempo_manipulacion"]
+                if "dificultad" in di: st.session_state['_tmp_dif'] = di["dificultad"]
+                if "imp_fijo" in di: st.session_state['_tmp_fijo'] = di["imp_fijo"]
+                if "margen" in di: st.session_state['_tmp_margen'] = di["margen"]
+                
+                st.success("¡Datos importados!")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error en el JSON: {e}")
+
+    # --- INPUTS MANUALES (Con capacidad de sobreescritura por IA) ---
     st.session_state.cli = st.text_input("Cliente", st.session_state.get('cli', ""))
     st.session_state.brf = st.text_input("Nº Briefing", st.session_state.get('brf', ""))
     st.divider()
-    cants_str = st.text_input("Cantidades (ej: 500, 1000)", "0")
+    
+    # Recuperamos valores importados o usamos defecto
+    def_cants = st.session_state.pop('_tmp_cants', "0")
+    cants_str = st.text_input("Cantidades (ej: 500, 1000)", value=def_cants)
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
     
     unidad_t = st.radio("Manipulación en:", ["Segundos", "Minutos"], horizontal=True)
-    t_input = st.number_input(f"Tiempo montaje/ud", value=0)
+    
+    def_tiempo = st.session_state.pop('_tmp_tiempo', 0.0)
+    t_input = st.number_input(f"Tiempo montaje/ud", value=float(def_tiempo))
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
     
     st.divider()
-    dif_ud = st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2)
-    imp_fijo_pvp = st.number_input("Importe Fijo PVP (€)", value=500, help="Suma directa al precio de venta final.")
-    margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1)
+    
+    def_dif = st.session_state.pop('_tmp_dif', 0.091)
+    # Buscamos el índice más cercano para el selectbox si viene de IA
+    opts_dif = [0.02, 0.061, 0.091]
+    idx_dif = opts_dif.index(def_dif) if def_dif in opts_dif else 2
+    dif_ud = st.selectbox("Dificultad (€/ud)", opts_dif, index=idx_dif)
+    
+    def_fijo = st.session_state.pop('_tmp_fijo', 500.0)
+    imp_fijo_pvp = st.number_input("Importe Fijo PVP (€)", value=float(def_fijo), help="Suma directa al precio.")
+    
+    def_margen = st.session_state.pop('_tmp_margen', 2.2)
+    margen = st.number_input("Multiplicador Comercial", value=float(def_margen), step=0.1)
 
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
@@ -110,17 +157,9 @@ with st.sidebar:
     datos_exp = {
         "brf": st.session_state.brf, "cli": st.session_state.cli, "piezas": st.session_state.piezas_dict, 
         "extras": st.session_state.lista_extras_grabados, "embalajes": st.session_state.lista_embalajes,
-        "imp_fijo": imp_fijo_pvp, "margen": margen
+        "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, "tiempo": t_input, "dificultad": dif_ud
     }
     st.download_button("💾 Guardar Proyecto", json.dumps(datos_exp, indent=4), file_name=nombre_archivo)
-    
-    subida = st.file_uploader("📂 Importar Proyecto", type=["json"])
-    if subida:
-        di = json.load(subida)
-        st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
-        st.session_state.lista_extras_grabados = di.get("extras", [])
-        st.session_state.lista_embalajes = di.get("embalajes", [])
-        st.rerun()
 
 # --- 5. ENTRADA DE DATOS ---
 if not modo_comercial:
