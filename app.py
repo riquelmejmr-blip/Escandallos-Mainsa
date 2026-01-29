@@ -86,10 +86,9 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 with st.sidebar:
     st.header("⚙️ Configuración Admin")
     
-    # --- ZONA DE IMPORTACIÓN INTELIGENTE ---
+    # --- ZONA DE IMPORTACIÓN (INTELIGENTE Y PERMISIVA) ---
     with st.expander("🤖 Importar Datos (IA/PDF)", expanded=True):
         tab_up, tab_paste = st.tabs(["📂 Subir Archivo", "📋 Pegar Texto"])
-        
         datos_json = None
         
         # Opción 1: Subir
@@ -102,98 +101,113 @@ with st.sidebar:
         # Opción 2: Pegar
         with tab_paste:
             texto_json = st.text_area("Pega el JSON aquí", height=150)
-            if st.button("🚀 Cargar desde Texto"):
-                try:
+            if st.button("🚀 Cargar"):
+                try: 
                     if texto_json.strip(): datos_json = json.loads(texto_json)
-                except Exception as e: st.error(f"Error JSON: {e}")
+                except Exception as e: st.error(f"Error texto: {e}")
 
-        # PROCESADO DE DATOS
+        # PROCESADO DE DATOS (LIMPIEZA AUTOMÁTICA)
         if datos_json:
             try:
                 di = datos_json
                 
                 # A. VARIABLES SIMPLES
                 if "cli" in di: st.session_state["cli_input"] = di["cli"]
-                if "brf" in di: st.session_state["brf_input"] = di["brf"]
+                if "brf" in di: st.session_state["brf_input"] = str(di["brf"]) # Asegurar string
                 if "cantidades" in di: st.session_state["cants_input"] = ", ".join(map(str, di["cantidades"]))
-                
-                # --- NOVEDAD: TIEMPO Y UNIDAD ---
-                if "tiempo_manipulacion" in di: 
-                    st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
-                
+                if "tiempo_manipulacion" in di: st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
                 if "unidad_manipulacion" in di:
-                    # Validamos que sea una opción correcta para el Radio Button
-                    val_u = di["unidad_manipulacion"]
-                    if val_u in ["Segundos", "Minutos"]:
-                        st.session_state["unidad_t_input"] = val_u
-                    else:
-                        # Si la IA pone "seg" o "s", lo corregimos a "Segundos"
-                        if "s" in val_u.lower(): st.session_state["unidad_t_input"] = "Segundos"
-                        else: st.session_state["unidad_t_input"] = "Minutos"
+                     val_u = di["unidad_manipulacion"]
+                     st.session_state["unidad_t_input"] = "Minutos" if "Min" in val_u else "Segundos"
 
+                # Dificultad, Fijo y Margen
                 if "dificultad" in di: 
-                    vals_dif = [0.02, 0.061, 0.091]
-                    val_d = float(di["dificultad"])
-                    st.session_state["dif_input"] = val_d if val_d in vals_dif else 0.091
-
+                    v = float(di["dificultad"])
+                    st.session_state["dif_input"] = v if v in [0.02, 0.061, 0.091] else 0.091
                 if "imp_fijo" in di: st.session_state["fijo_input"] = float(di["imp_fijo"])
                 if "margen" in di: st.session_state["margen_input"] = float(di["margen"])
 
-                # B. LISTAS
-                st.session_state.lista_embalajes = di.get("embalajes", [])
-                st.session_state.lista_extras_grabados = di.get("extras", [])
+                # B. LIMPIEZA DE LISTAS (EXTRA ROBUSTEZ)
+                # Embalajes: El GEM a veces inventa tipos. Los normalizamos.
+                raw_emb = di.get("embalajes", [])
+                clean_emb = []
+                for e in raw_emb:
+                    # Intentar parsear medidas si vienen en texto (ej: "1200*800")
+                    l_val, w_val = e.get("l", 0), e.get("w", 0)
+                    if "medida" in e and isinstance(e["medida"], str):
+                        try:
+                            parts = e["medida"].lower().replace("mm","").replace("x","*").split("*")
+                            if len(parts) >= 2:
+                                l_val, w_val = int(parts[0].strip()), int(parts[1].strip())
+                        except: pass
+                    
+                    # Validar tipo
+                    tipo_ok = e.get("tipo", "Plano (Canal 5)")
+                    if tipo_ok not in ["Plano (Canal 5)", "En Volumen", "Guainas"]:
+                        tipo_ok = "Plano (Canal 5)" # Valor por defecto si inventa "EUR"
+                    
+                    clean_emb.append({"tipo": tipo_ok, "l": l_val, "w": w_val, "a": e.get("a", 0), "uds": e.get("uds", 1)})
+                st.session_state.lista_embalajes = clean_emb
+
+                # Extras: Si viene "nota" en vez de "nombre"
+                raw_ext = di.get("extras", [])
+                clean_ext = []
+                for ex in raw_ext:
+                    nom = ex.get("nombre", ex.get("nota", "Accesorio")) # Fallback a nota
+                    coste = ex.get("coste", 0.0)
+                    cant = ex.get("cantidad", 1.0)
+                    clean_ext.append({"nombre": nom, "coste": coste, "cantidad": cant})
+                st.session_state.lista_extras_grabados = clean_ext
                 
                 # C. PIEZAS
                 if "piezas" in di:
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
+                    # Inyección forzosa en widgets
                     for pid, p in st.session_state.piezas_dict.items():
-                        mapa_widgets = {
+                        mapa = {
                             "nombre": "n_", "pliegos": "p_", "h": "h_", "w": "w_", 
                             "im": "im_", "nt": "nt_", "ba": "ba_", "ld": "ld_", "pel": "pel_",
                             "pf": "pf_", "gf": "gf_", "pl": "pl_", "ap": "ap_", 
-                            "pd": "pd_", "gd": "gd_", 
-                            "cor": "cor_", "cobrar_arreglo": "arr_", "pv_troquel": "pvt_",
-                            "im_d": "imd_", "nt_d": "ntd_", "ba_d": "bad_", "ld_d": "ldd_", "pel_d": "peld_"
+                            "pd": "pd_", "gd": "gd_", "cor": "cor_", "cobrar_arreglo": "arr_", 
+                            "pv_troquel": "pvt_", "im_d": "imd_", "nt_d": "ntd_", 
+                            "ba_d": "bad_", "ld_d": "ldd_", "pel_d": "peld_"
                         }
-                        for key_json, prefix_widget in mapa_widgets.items():
-                            key_streamlit = f"{prefix_widget}{pid}"
-                            if key_json in p:
-                                val = p[key_json]
-                                if prefix_widget in ["p_", "pvt_", "gf_", "gd_"]: val = float(val)
-                                if prefix_widget in ["h_", "w_", "nt_", "ntd_"]: val = int(val)
-                                st.session_state[key_streamlit] = val
+                        for k_json, k_widget in mapa.items():
+                            key_st = f"{k_widget}{pid}"
+                            if k_json in p:
+                                val = p[k_json]
+                                # Casteo seguro
+                                if k_widget in ["p_", "pvt_", "gf_", "gd_"]: val = float(val)
+                                if k_widget in ["h_", "w_", "nt_", "ntd_"]: val = int(val)
+                                st.session_state[key_st] = val
 
-                st.toast("✅ Datos cargados con Unidad de Tiempo.", icon="⏱️")
+                st.toast("✅ Datos procesados e inyectados.", icon="🧠")
                 st.rerun()
                 
             except Exception as e:
-                st.error(f"Error procesando datos: {e}")
+                st.error(f"Error procesando: {e}")
 
     # --- INPUTS MANUALES ---
     st.session_state.cli = st.text_input("Cliente", key="cli_input", value=st.session_state.get("cli_input", ""))
     st.session_state.brf = st.text_input("Nº Briefing", key="brf_input", value=st.session_state.get("brf_input", ""))
     st.divider()
     
-    cants_str = st.text_input("Cantidades (ej: 500, 1000)", key="cants_input", value=st.session_state.get("cants_input", "0"))
+    cants_str = st.text_input("Cantidades", key="cants_input", value=st.session_state.get("cants_input", "0"))
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
     
-    # --- NOVEDAD: RADIO BUTTON CON KEY ---
-    # Le hemos puesto la key "unidad_t_input" para poder modificarla desde la importación
-    unidad_t = st.radio("Manipulación en:", ["Segundos", "Minutos"], horizontal=True, key="unidad_t_input")
-    
+    unidad_t = st.radio("Manipulación:", ["Segundos", "Minutos"], horizontal=True, key="unidad_t_input")
     t_input = st.number_input(f"Tiempo montaje/ud", key="t_input_widget", value=st.session_state.get("t_input_widget", 0.0))
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
     
     st.divider()
     
     idx_dif = 2
-    val_act_dif = st.session_state.get("dif_input", 0.091)
-    if val_act_dif in [0.02, 0.061, 0.091]:
-        idx_dif = [0.02, 0.061, 0.091].index(val_act_dif)
+    val_dif = st.session_state.get("dif_input", 0.091)
+    if val_dif in [0.02, 0.061, 0.091]: idx_dif = [0.02, 0.061, 0.091].index(val_dif)
     dif_ud = st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=idx_dif, key="dif_input")
     
-    imp_fijo_pvp = st.number_input("Importe Fijo PVP (€)", key="fijo_input", value=st.session_state.get("fijo_input", 500.0))
-    margen = st.number_input("Multiplicador Comercial", step=0.1, key="margen_input", value=st.session_state.get("margen_input", 2.2))
+    imp_fijo_pvp = st.number_input("Fijo PVP (€)", key="fijo_input", value=st.session_state.get("fijo_input", 500.0))
+    margen = st.number_input("Multiplicador", step=0.1, key="margen_input", value=st.session_state.get("margen_input", 2.2))
 
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
@@ -206,8 +220,7 @@ with st.sidebar:
         "brf": st.session_state.brf, "cli": st.session_state.cli, "piezas": st.session_state.piezas_dict, 
         "extras": st.session_state.lista_extras_grabados, "embalajes": st.session_state.lista_embalajes,
         "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, 
-        "tiempo_manipulacion": t_input, "dificultad": dif_ud, 
-        "unidad_manipulacion": unidad_t # Guardamos también la unidad para futuras referencias
+        "tiempo_manipulacion": t_input, "dificultad": dif_ud, "unidad_manipulacion": unidad_t
     }
     st.download_button("💾 Guardar Proyecto", json.dumps(datos_exp, indent=4), file_name=nombre_archivo)
 
