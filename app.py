@@ -30,7 +30,7 @@ PRECIOS = {
     }
 }
 
-# --- LISTA DE FORMATOS COMUNES ---
+# --- LISTA DE FORMATOS COMUNES (Global) ---
 FORMATOS_STD = {
     "Personalizado": (0, 0),
     "1600x1200": (1600, 1200),
@@ -214,19 +214,27 @@ if not modo_comercial:
                 p['nombre'] = st.text_input("Etiqueta", p.get('nombre', f"Forma {p_id+1}"), key=f"n_{p_id}")
                 p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get('pliegos', 1.0)), key=f"p_{p_id}")
                 
-                # --- NUEVO: FORMATOS RÁPIDOS ---
-                std_fmt = st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}")
-                if std_fmt != "Personalizado":
-                    h_std, w_std = FORMATOS_STD[std_fmt]
-                    if h_std > 0: 
-                        p['h'] = h_std
-                        p['w'] = w_std
+                # --- CALLBACK PARA MEDIDAS ESTÁNDAR ---
+                # Esta función fuerza la actualización de los widgets de largo y ancho
+                def aplicar_medida_estandar(key_std, key_h, key_w, pid):
+                    fmt = st.session_state[key_std]
+                    if fmt != "Personalizado":
+                        nh, nw = FORMATOS_STD[fmt]
+                        # Inyectar en session_state para que el widget number_input se entere
+                        st.session_state[key_h] = nh
+                        st.session_state[key_w] = nw
+                        # Actualizar diccionario
+                        st.session_state.piezas_dict[pid]['h'] = nh
+                        st.session_state.piezas_dict[pid]['w'] = nw
 
-                p['h'] = st.number_input("Largo mm", 0, 5000, int(p.get('h', 0)), key=f"h_{p_id}")
-                p['w'] = st.number_input("Ancho mm", 0, 5000, int(p.get('w', 0)), key=f"w_{p_id}")
+                st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}", 
+                             on_change=aplicar_medida_estandar, args=(f"std_{p_id}", f"h_{p_id}", f"w_{p_id}", p_id))
+
+                # Widgets de medidas vinculados a session_state para que el callback funcione
+                p['h'] = st.number_input("Largo mm", 0, 5000, key=f"h_{p_id}", value=int(p.get('h', 0)))
+                p['w'] = st.number_input("Ancho mm", 0, 5000, key=f"w_{p_id}", value=int(p.get('w', 0)))
                 
                 opts_im = ["Offset", "Digital", "No"]
-                # Default "No" si no existe
                 val_im = p.get('im', 'No'); idx_im = opts_im.index(val_im) if val_im in opts_im else 2
                 p['im'] = st.selectbox("Sistema Cara", opts_im, index=idx_im, key=f"im_{p_id}")
                 
@@ -246,7 +254,7 @@ if not modo_comercial:
                 
                 p['pf'] = st.selectbox("C. Frontal", opts_pf, index=idx_pf, key=f"pf_{p_id}")
                 
-                # --- AUTO-CONFIGURACIÓN ---
+                # --- AUTO-CONFIGURACIÓN INTELIGENTE ---
                 if p['pf'] != pf_prev:
                     if p['pf'] != "Ninguno":
                         p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
@@ -434,7 +442,6 @@ else:
                 
                 df_sorted = df_raw[cols_final]
                 
-                # Filas adicionales
                 row_mo = {c: 0 for c in cols_final[1:]}; row_mo["Pieza"] = "MANO DE OBRA (Manipulado)"; row_mo["Subtotal"] = info['mo']
                 row_ext = {c: 0 for c in cols_final[1:]}; row_ext["Pieza"] = "MATERIALES EXTRA (Accesorios)"; row_ext["Subtotal"] = info['extras']
                 
