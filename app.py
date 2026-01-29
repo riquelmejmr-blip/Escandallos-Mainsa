@@ -88,64 +88,98 @@ with st.sidebar:
     
     # --- ZONA DE IMPORTACIÓN INTELIGENTE ---
     with st.expander("🤖 Importar Datos de IA/PDF", expanded=False):
-        st.info("Sube el JSON generado por Gemini/ChatGPT")
+        st.info("Sube el JSON generado por Gemini")
         subida_ia = st.file_uploader("Archivo JSON", type=["json"], key="uploader_ia")
+        
         if subida_ia:
             try:
                 di = json.load(subida_ia)
-                # Cargar datos básicos
-                st.session_state.cli = di.get("cli", st.session_state.get('cli', ""))
-                st.session_state.brf = di.get("brf", st.session_state.get('brf', ""))
                 
-                # Cargar piezas (Conversión de claves string a int para el diccionario)
-                if "piezas" in di:
-                    st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
+                # 1. ACTUALIZAR VARIABLES GLOBALES DE SESIÓN
+                # Asignamos directamente a las 'keys' de los widgets para forzar el cambio visual
+                if "cli" in di: st.session_state.cli_input = di["cli"]
+                if "brf" in di: st.session_state.brf_input = di["brf"]
                 
-                # Cargar listas
+                if "cantidades" in di: 
+                    st.session_state.cants_input = ", ".join(map(str, di["cantidades"]))
+                
+                if "tiempo_manipulacion" in di: 
+                    # Detectar si son segundos o minutos (asumimos minutos si viene del JSON suele ser manipulación)
+                    st.session_state.t_input_widget = float(di["tiempo_manipulacion"])
+                    
+                if "dificultad" in di: 
+                    # Buscamos el índice correcto para el selectbox
+                    vals_dif = [0.02, 0.061, 0.091]
+                    val = float(di["dificultad"])
+                    if val in vals_dif:
+                        st.session_state.dif_input = val
+                    else:
+                        st.session_state.dif_input = 0.091 # Default si no coincide
+
+                if "imp_fijo" in di: st.session_state.fijo_input = float(di["imp_fijo"])
+                if "margen" in di: st.session_state.margen_input = float(di["margen"])
+
+                # 2. CARGAR LISTAS SIMPLES
                 st.session_state.lista_embalajes = di.get("embalajes", [])
                 st.session_state.lista_extras_grabados = di.get("extras", [])
                 
-                # Guardar valores temporales en session_state para que los inputs los lean
-                if "cantidades" in di: st.session_state['_tmp_cants'] = ", ".join(map(str, di["cantidades"]))
-                if "tiempo_manipulacion" in di: st.session_state['_tmp_tiempo'] = di["tiempo_manipulacion"]
-                if "dificultad" in di: st.session_state['_tmp_dif'] = di["dificultad"]
-                if "imp_fijo" in di: st.session_state['_tmp_fijo'] = di["imp_fijo"]
-                if "margen" in di: st.session_state['_tmp_margen'] = di["margen"]
-                
-                st.success("¡Datos importados!")
-                st.rerun()
-            except Exception as e:
-                st.error(f"Error en el JSON: {e}")
+                # 3. CARGAR PIEZAS Y LIMPIAR CACHÉ DE WIDGETS ANTIGUOS
+                # Esto es CRUCIAL: Borramos la memoria de los inputs de las formas (n_0, h_0...)
+                # para que se regeneren con los nuevos datos del diccionario.
+                if "piezas" in di:
+                    # Cargamos el diccionario
+                    st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
+                    
+                    # Lista de prefijos que usamos en los widgets de las formas
+                    prefijos_widgets = ["n_", "p_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_", 
+                                      "pf_", "gf_", "pl_", "ap_", "pd_", "gd_", "cor_", "arr_", "pvt_",
+                                      "imd_", "ntd_", "bad_", "ldd_", "peld_"]
+                    
+                    # Borramos estado de session_state para obligar a leer del diccionario
+                    keys_a_borrar = []
+                    for k in st.session_state.keys():
+                        for pid in st.session_state.piezas_dict.keys():
+                            # Si la key empieza por un prefijo y termina con el ID de la pieza (ej: h_0)
+                            for pre in prefijos_widgets:
+                                if k == f"{pre}{pid}":
+                                    keys_a_borrar.append(k)
+                    
+                    for k in keys_a_borrar:
+                        if k in st.session_state:
+                            del st.session_state[k]
 
-    # --- INPUTS MANUALES (Con capacidad de sobreescritura por IA) ---
-    st.session_state.cli = st.text_input("Cliente", st.session_state.get('cli', ""))
-    st.session_state.brf = st.text_input("Nº Briefing", st.session_state.get('brf', ""))
+                st.success("¡Datos cargados correctamente!")
+                # Forzamos recarga para ver los cambios
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"Error al leer JSON: {e}")
+
+    # --- INPUTS MANUALES (CON KEYS EXPLICITAS PARA PODER ESCRIBIRLES DESDE ARRIBA) ---
+    # Usamos st.session_state.get para el valor por defecto, pero la key es lo importante.
+    
+    st.session_state.cli = st.text_input("Cliente", value=st.session_state.get('cli', ""), key="cli_input")
+    st.session_state.brf = st.text_input("Nº Briefing", value=st.session_state.get('brf', ""), key="brf_input")
     st.divider()
     
-    # Recuperamos valores importados o usamos defecto
-    def_cants = st.session_state.pop('_tmp_cants', "0")
-    cants_str = st.text_input("Cantidades (ej: 500, 1000)", value=def_cants)
+    # Cantidades
+    cants_str = st.text_input("Cantidades (ej: 500, 1000)", value="0", key="cants_input")
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
     
     unidad_t = st.radio("Manipulación en:", ["Segundos", "Minutos"], horizontal=True)
     
-    def_tiempo = st.session_state.pop('_tmp_tiempo', 0.0)
-    t_input = st.number_input(f"Tiempo montaje/ud", value=float(def_tiempo))
+    # Tiempo
+    t_input = st.number_input(f"Tiempo montaje/ud", value=0.0, key="t_input_widget")
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
     
     st.divider()
     
-    def_dif = st.session_state.pop('_tmp_dif', 0.091)
-    # Buscamos el índice más cercano para el selectbox si viene de IA
-    opts_dif = [0.02, 0.061, 0.091]
-    idx_dif = opts_dif.index(def_dif) if def_dif in opts_dif else 2
-    dif_ud = st.selectbox("Dificultad (€/ud)", opts_dif, index=idx_dif)
+    # Dificultad
+    dif_ud = st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2, key="dif_input")
     
-    def_fijo = st.session_state.pop('_tmp_fijo', 500.0)
-    imp_fijo_pvp = st.number_input("Importe Fijo PVP (€)", value=float(def_fijo), help="Suma directa al precio.")
-    
-    def_margen = st.session_state.pop('_tmp_margen', 2.2)
-    margen = st.number_input("Multiplicador Comercial", value=float(def_margen), step=0.1)
+    # Fijo y Margen
+    imp_fijo_pvp = st.number_input("Importe Fijo PVP (€)", value=500.0, help="Suma directa al precio.", key="fijo_input")
+    margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1, key="margen_input")
 
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
@@ -157,7 +191,8 @@ with st.sidebar:
     datos_exp = {
         "brf": st.session_state.brf, "cli": st.session_state.cli, "piezas": st.session_state.piezas_dict, 
         "extras": st.session_state.lista_extras_grabados, "embalajes": st.session_state.lista_embalajes,
-        "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, "tiempo": t_input, "dificultad": dif_ud
+        "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, 
+        "tiempo_manipulacion": t_input, "dificultad": dif_ud
     }
     st.download_button("💾 Guardar Proyecto", json.dumps(datos_exp, indent=4), file_name=nombre_archivo)
 
