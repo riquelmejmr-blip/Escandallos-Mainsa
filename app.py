@@ -55,7 +55,7 @@ def crear_forma_vacia(index):
 
 if 'piezas_dict' not in st.session_state: st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
 if 'lista_extras_grabados' not in st.session_state: st.session_state.lista_extras_grabados = []
-# Diccionario para guardar costes manuales de embalaje por cantidad {500: 50.0, 1000: 80.0}
+# Diccionario para guardar costes manuales de embalaje UNITARIOS por cantidad {500: 0.50, 1000: 0.45}
 if 'costes_embalaje_manual' not in st.session_state: st.session_state.costes_embalaje_manual = {}
 
 st.markdown("""<style>
@@ -289,15 +289,15 @@ if not modo_comercial:
         ca, cb, cc, cd = st.columns([3, 2, 2, 1]); ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud compra", value=float(ex['coste']), key=f"exc_{i}"); ex['cantidad'] = cc.number_input("Cant/Ud prod", value=float(ex['cantidad']), key=f"exq_{i}")
         if cd.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-    # SECCIÓN EMBALAJES (NUEVA VERSIÓN MANUAL)
+    # SECCIÓN EMBALAJES (NUEVA VERSIÓN MANUAL UNITARIA)
     st.divider(); st.subheader("📦 3. Embalaje Manual")
-    st.info("Introduce el coste de compra TOTAL (de toda la partida de cajas, palets, film...) para cada cantidad.")
+    st.info("Introduce el coste de compra UNITARIO (por caja/unidad) para cada cantidad.")
     
     if lista_cants:
         cols_emb = st.columns(len(lista_cants))
         for i, q in enumerate(lista_cants):
             current_val = st.session_state.costes_embalaje_manual.get(q, 0.0)
-            val = cols_emb[i].number_input(f"Coste Total Emb. para {q} uds (€)", value=float(current_val), key=f"emb_man_{q}")
+            val = cols_emb[i].number_input(f"Coste UNITARIO Compra {q} uds (€)", value=float(current_val), format="%.4f", key=f"emb_man_{q}")
             st.session_state.costes_embalaje_manual[q] = val
     else:
         st.warning("Define primero las cantidades en el panel lateral.")
@@ -357,9 +357,9 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         c_mo = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud)
         
         # --- CÁLCULO EMBALAJE MANUAL (MARGEN FIJO 1.4) ---
-        coste_emb_compra = st.session_state.costes_embalaje_manual.get(q_n, 0.0)
-        pv_emb_total = coste_emb_compra * 1.4  # Margen fijo solicitado
-        pv_emb_ud = pv_emb_total / q_n if q_n > 0 else 0
+        coste_emb_unit_compra = st.session_state.costes_embalaje_manual.get(q_n, 0.0)
+        pv_emb_ud = coste_emb_unit_compra * 1.4
+        pv_emb_total = pv_emb_ud * q_n
         
         # --- PVP PRODUCTO ---
         pvp_producto_base = ((coste_f + c_ext_tot + c_mo) * margen) + imp_fijo_pvp
