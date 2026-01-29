@@ -225,51 +225,117 @@ if not modo_comercial:
     for p_id, p in st.session_state.piezas_dict.items():
         with st.expander(f"🛠 {p['nombre']} - {p['h']}x{p['w']} mm", expanded=True):
             col1, col2, col3 = st.columns(3)
+            
+            # --- COLUMNA 1: DATOS BÁSICOS ---
             with col1:
-                p['nombre'] = st.text_input("Etiqueta", p['nombre'], key=f"n_{p_id}")
-                p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p['pliegos']), key=f"p_{p_id}")
-                p['h'] = st.number_input("Largo mm", 0, 5000, int(p['h']), key=f"h_{p_id}")
-                p['w'] = st.number_input("Ancho mm", 0, 5000, int(p['w']), key=f"w_{p_id}")
-                p['im'] = st.selectbox("Sistema Cara", ["Offset", "Digital", "No"], index=["Offset", "Digital", "No"].index(p['im']), key=f"im_{p_id}")
+                p['nombre'] = st.text_input("Etiqueta", p.get('nombre', f"Forma {p_id+1}"), key=f"n_{p_id}")
+                p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get('pliegos', 1.0)), key=f"p_{p_id}")
+                p['h'] = st.number_input("Largo mm", 0, 5000, int(p.get('h', 0)), key=f"h_{p_id}")
+                p['w'] = st.number_input("Ancho mm", 0, 5000, int(p.get('w', 0)), key=f"w_{p_id}")
+                
+                # Validación Sistema Cara
+                opts_im = ["Offset", "Digital", "No"]
+                val_im = p.get('im', 'Offset')
+                idx_im = opts_im.index(val_im) if val_im in opts_im else 0
+                p['im'] = st.selectbox("Sistema Cara", opts_im, index=idx_im, key=f"im_{p_id}")
+                
                 if p['im'] == "Offset":
                     p['nt'] = st.number_input("Tintas F.", 0, 6, int(p.get('nt',4)), key=f"nt_{p_id}")
                     p['ba'] = st.checkbox("Barniz F.", p.get('ba',False), key=f"ba_{p_id}")
-                elif p['im'] == "Digital": p['ld'] = st.checkbox("Laminado Digital F.", p.get('ld',False), key=f"ld_{p_id}")
-                p['pel'] = st.selectbox("Peliculado Cara", list(PRECIOS["peliculado"].keys()), index=list(PRECIOS["peliculado"].keys()).index(p.get('pel', 'Sin Peliculado')), key=f"pel_{p_id}")
+                elif p['im'] == "Digital": 
+                    p['ld'] = st.checkbox("Laminado Digital F.", p.get('ld',False), key=f"ld_{p_id}")
+                
+                # Validación Peliculado Cara
+                opts_pel = list(PRECIOS["peliculado"].keys())
+                val_pel = p.get('pel', 'Sin Peliculado')
+                idx_pel = opts_pel.index(val_pel) if val_pel in opts_pel else 0
+                p['pel'] = st.selectbox("Peliculado Cara", opts_pel, index=idx_pel, key=f"pel_{p_id}")
+
+            # --- COLUMNA 2: MATERIALES ---
             with col2:
-                pf_prev = p['pf']; p['pf'] = st.selectbox("C. Frontal", list(PRECIOS["cartoncillo"].keys()), index=list(PRECIOS["cartoncillo"].keys()).index(p['pf']), key=f"pf_{p_id}")
-                if p['pf'] != pf_prev: p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
-                if p['pf'] != "Ninguno": p['gf'] = st.number_input("Gramaje F.", value=int(p['gf']), key=f"gf_{p_id}")
-                p['pl'] = st.selectbox("Plancha Base", list(PRECIOS["planchas"].keys()), index=list(PRECIOS["planchas"].keys()).index(p['pl']), key=f"pl_{p_id}")
-                p['ap'] = st.selectbox("Calidad", ["C/C", "B/C", "B/B"], index=["C/C", "B/C", "B/B"].index(p.get('ap', 'C/C')), key=f"ap_{p_id}")
-                p['pd'] = st.selectbox("C. Dorso", list(PRECIOS["cartoncillo"].keys()), index=list(PRECIOS["cartoncillo"].keys()).index(p.get('pd', 'Ninguno')), key=f"pd_{p_id}")
-                if p['pd'] != "Ninguno": p['gd'] = st.number_input("Gramaje D.", value=int(p.get('gd',0)), key=f"gd_{p_id}")
+                # Validación Frontal (CORREGIDO: SI NO EXISTE, PONE EL PRIMERO)
+                opts_pf = list(PRECIOS["cartoncillo"].keys())
+                val_pf = p.get('pf', 'Ninguno')
+                idx_pf = opts_pf.index(val_pf) if val_pf in opts_pf else 0 
+                
+                pf_prev = p.get('pf', 'Ninguno')
+                p['pf'] = st.selectbox("C. Frontal", opts_pf, index=idx_pf, key=f"pf_{p_id}")
+                
+                # Actualizar gramaje si cambia el material o si viene 0 del JSON pero hay material
+                gramaje_std = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
+                if p['pf'] != pf_prev: 
+                    p['gf'] = gramaje_std
+                
+                # Input de gramaje manual
+                val_gf = int(p.get('gf', 0))
+                p['gf'] = st.number_input("Gramaje F.", value=val_gf, key=f"gf_{p_id}")
+                
+                # Validación Plancha
+                opts_pl = list(PRECIOS["planchas"].keys())
+                val_pl = p.get('pl', 'Ninguna')
+                idx_pl = opts_pl.index(val_pl) if val_pl in opts_pl else 0
+                p['pl'] = st.selectbox("Plancha Base", opts_pl, index=idx_pl, key=f"pl_{p_id}")
+                
+                # Validación Calidad Ondulado
+                opts_ap = ["C/C", "B/C", "B/B"]
+                val_ap = p.get('ap', 'C/C')
+                idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 0
+                p['ap'] = st.selectbox("Calidad", opts_ap, index=idx_ap, key=f"ap_{p_id}")
+                
+                # Validación Dorso
+                opts_pd = list(PRECIOS["cartoncillo"].keys())
+                val_pd = p.get('pd', 'Ninguno')
+                idx_pd = opts_pd.index(val_pd) if val_pd in opts_pd else 0
+                p['pd'] = st.selectbox("C. Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}")
+                
+                if p['pd'] != "Ninguno": 
+                    p['gd'] = st.number_input("Gramaje D.", value=int(p.get('gd',0)), key=f"gd_{p_id}")
+            
+            # --- COLUMNA 3: ACABADOS Y DORSO ---
             with col3:
-                p['cor'] = st.selectbox("Corte", ["Troquelado", "Plotter"], index=["Troquelado", "Plotter"].index(p.get('cor', 'Troquelado')), key=f"cor_{p_id}")
+                # Validación Corte
+                opts_cor = ["Troquelado", "Plotter"]
+                val_cor = p.get('cor', 'Troquelado')
+                idx_cor = opts_cor.index(val_cor) if val_cor in opts_cor else 0
+                p['cor'] = st.selectbox("Corte", opts_cor, index=idx_cor, key=f"cor_{p_id}")
+                
                 if p['cor'] == "Troquelado": 
                     p['cobrar_arreglo'] = st.checkbox("¿Cobrar Arreglo?", value=p.get('cobrar_arreglo', True), key=f"arr_{p_id}")
                     p['pv_troquel'] = st.number_input("Precio Venta Troquel (€)", value=float(p.get('pv_troquel', 0.0)), key=f"pvt_{p_id}")
+                
+                # Lógica Dorso
                 if p['pd'] != "Ninguno":
-                    p['im_d'] = st.selectbox("Sistema Dorso", ["Offset", "Digital", "No"], index=["Offset", "Digital", "No"].index(p.get('im_d', 'No')), key=f"imd_{p_id}")
+                    opts_imd = ["Offset", "Digital", "No"]
+                    val_imd = p.get('im_d', 'No')
+                    idx_imd = opts_imd.index(val_imd) if val_imd in opts_imd else 2
+                    p['im_d'] = st.selectbox("Sistema Dorso", opts_imd, index=idx_imd, key=f"imd_{p_id}")
+                    
                     if p['im_d'] == "Offset":
                         p['nt_d'] = st.number_input("Tintas D.", 0, 6, int(p.get('nt_d',0)), key=f"ntd_{p_id}")
                         p['ba_d'] = st.checkbox("Barniz D.", p.get('ba_d',False), key=f"bad_{p_id}")
-                    elif p['im_d'] == "Digital": p['ld_d'] = st.checkbox("Laminado Digital D.", p.get('ld_d',False), key=f"ldd_{p_id}")
-                    p['pel_d'] = st.selectbox("Peliculado Dorso", list(PRECIOS["peliculado"].keys()), index=list(PRECIOS["peliculado"].keys()).index(p.get('pel_d', 'Sin Peliculado')), key=f"peld_{p_id}")
+                    elif p['im_d'] == "Digital": 
+                        p['ld_d'] = st.checkbox("Laminado Digital D.", p.get('ld_d',False), key=f"ldd_{p_id}")
+                    
+                    val_peld = p.get('pel_d', 'Sin Peliculado')
+                    idx_peld = opts_pel.index(val_peld) if val_peld in opts_pel else 0
+                    p['pel_d'] = st.selectbox("Peliculado Dorso", opts_pel, index=idx_peld, key=f"peld_{p_id}")
+                
                 if st.button("🗑 Borrar Forma", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
 
-    # SECCIÓN EXTRAS
+    # SECCIÓN EXTRAS (Sin cambios, pero incluída para contexto)
     st.divider(); st.subheader("📦 2. Almacén de Accesorios")
-    ex_sel = st.selectbox("Añadir extra:", ["---"] + list(PRECIOS["extras_base"].keys()))
+    opts_extra = ["---"] + list(PRECIOS["extras_base"].keys())
+    ex_sel = st.selectbox("Añadir extra:", opts_extra)
     if st.button("➕ Añadir Accesorio") and ex_sel != "---":
         st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": PRECIOS["extras_base"][ex_sel], "cantidad": 1.0}); st.rerun()
     for i, ex in enumerate(st.session_state.lista_extras_grabados):
         ca, cb, cc, cd = st.columns([3, 2, 2, 1]); ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud compra", value=float(ex['coste']), key=f"exc_{i}"); ex['cantidad'] = cc.number_input("Cant/Ud prod", value=float(ex['cantidad']), key=f"exq_{i}")
         if cd.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-    # SECCIÓN EMBALAJES
+    # SECCIÓN EMBALAJES (Sin cambios)
     st.divider(); st.subheader("📦 3. Complemento de Embalajes")
-    tipo_em = st.selectbox("Tipo de Caja:", ["Plano (Canal 5)", "En Volumen", "Guainas"])
+    opts_emb = ["Plano (Canal 5)", "En Volumen", "Guainas"]
+    tipo_em = st.selectbox("Tipo de Caja:", opts_emb)
     if st.button("➕ Añadir Embalaje"):
         st.session_state.lista_embalajes.append({"tipo": tipo_em, "l": 0, "w": 0, "a": 0, "uds": 1}); st.rerun()
     for i, em in enumerate(st.session_state.lista_embalajes):
