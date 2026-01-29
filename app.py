@@ -284,49 +284,103 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         pvp_producto_base = ((coste_f + c_ext_tot + c_mo) * margen) + imp_fijo_pvp
         pvp_total_todo = pvp_producto_base + pv_emb_total + total_pv_troqueles
         
+        # Calculamos unitarios para la tabla
+        p_venta_unitario = pvp_producto_base / q_n if q_n > 0 else 0
+        p_total_unitario_all = pvp_total_todo / q_n if q_n > 0 else 0
+
         res_final.append({
-            "Cant": q_n, 
-            "Producto (Total)": f"{pvp_producto_base:.2f}€",
-            "Embalaje (Ud)": f"{pv_emb_ud:.3f}€",
-            "Troqueles": f"{total_pv_troqueles:.2f}€",
-            "TOTAL OPERACIÓN": f"{pvp_total_todo:.2f}€",
-            "UNITARIO TODO": f"{pvp_total_todo/q_n:.2f}€"
+            "Cantidad": q_n, 
+            "Precio Venta Unitario": f"{p_venta_unitario:.3f}€",
+            "Precio Embalaje Unitario": f"{pv_emb_ud:.3f}€",
+            "Precio Troquel (Total)": f"{total_pv_troqueles:.2f}€",
+            "Precio Venta Total": f"{pvp_total_todo:.2f}€",
+            "Unitario (Todo Incluido)": f"{p_total_unitario_all:.3f}€"
         })
         desc_full[q_n] = {"det": det_f, "mo": c_mo, "extras": c_ext_tot, "fijo": imp_fijo_pvp, "taller": coste_f + c_mo + c_ext_tot, "qp": qp_taller}
 
 # --- 7. SALIDA VISUAL ---
 if modo_comercial and res_final:
-    p_html = "".join([f"<li><b>{p['nombre']}:</b> {p['h']}x{p['w']} mm</li>" for p in st.session_state.piezas_dict.values()])
-    f_h = "".join([f"<tr><td>{r['Cant']} uds</td><td>{r['Producto (Total)']}</td><td>{r['Embalaje (Ud)']}</td><td>{r['Troqueles']}</td><td><b>{r['TOTAL OPERACIÓN']}</b></td><td>{r['UNITARIO TODO']}</td></tr>" for r in res_final])
-    st.markdown(f"""<div class="comercial-box"><h2 class="comercial-header">OFERTA COMERCIAL - {st.session_state.cli}</h2><table class="comercial-table"><tr><th>Cantidad</th><th>Producto (Total)</th><th>Embalaje (Unitario)</th><th>Troqueles (Total)</th><th>TOTAL OPERACIÓN</th><th>UNITARIO TODO</th></tr>{f_h}</table></div>""", unsafe_allow_html=True)
+    # 1. Generar HTML de Descripción Técnica
+    desc_html = """<div style='text-align: left; margin-bottom: 20px; color: #444;'>
+    <h4 style='color: #1E88E5; margin-bottom: 5px;'>📋 Especificaciones del Proyecto</h4>
+    <ul style='list-style-type: none; padding-left: 0;'>"""
+    
+    # Detalle Formas
+    for p in st.session_state.piezas_dict.values():
+        mat_info = f"{p['pf']} ({p['gf']}g)" if p['pf'] != "Ninguno" else "Sin cartoncillo"
+        desc_html += f"<li style='margin-bottom: 5px;'>🔹 <b>{p['nombre']}</b>: {p['h']}x{p['w']} mm. Material: {mat_info}.</li>"
+    
+    # Detalle Accesorios
+    if st.session_state.lista_extras_grabados:
+        desc_html += "<li style='margin-top: 10px;'><b>🧩 Accesorios:</b> "
+        items_acc = [f"{ex['nombre']} (x{int(ex['cantidad']) if ex['cantidad'].is_integer() else ex['cantidad']})" for ex in st.session_state.lista_extras_grabados]
+        desc_html += ", ".join(items_acc) + "</li>"
+
+    # Detalle Embalaje
+    if st.session_state.lista_embalajes:
+        desc_html += "<li style='margin-top: 10px;'><b>📦 Embalaje:</b> "
+        items_emb = [f"{em['tipo']} ({em['l']}x{em['w']}x{em['a']} mm)" for em in st.session_state.lista_embalajes]
+        desc_html += ", ".join(items_emb) + "</li>"
+    else:
+        desc_html += "<li style='margin-top: 10px;'><b>📦 Embalaje:</b> Sin embalaje especial (A granel/Palet).</li>"
+
+    desc_html += "</ul></div>"
+
+    # 2. Generar Tabla de Precios
+    # Cabeceras exactas solicitadas
+    headers = ["Cantidad", "Precio venta unitario", "Precio Embalaje unitario", "Precio Troquel (total)", "Precio Venta Total", "Unitario (Todo Incluido)"]
+    
+    rows_html = ""
+    for r in res_final:
+        rows_html += f"""<tr>
+            <td style='font-weight:bold;'>{r['Cantidad']}</td>
+            <td>{r['Precio Venta Unitario']}</td>
+            <td>{r['Precio Embalaje Unitario']}</td>
+            <td>{r['Precio Troquel (Total)']}</td>
+            <td style='background-color: #f0f8ff;'>{r['Precio Venta Total']}</td>
+            <td style='font-weight:bold; color: #1E88E5;'>{r['Unitario (Todo Incluido)']}</td>
+        </tr>"""
+
+    st.markdown(f"""
+    <div class="comercial-box">
+        <h2 class="comercial-header">OFERTA COMERCIAL - {st.session_state.cli}</h2>
+        {desc_html}
+        <table class="comercial-table">
+            <tr>
+                <th>Cantidad</th>
+                <th>P. Venta Unitario</th>
+                <th>P. Emb. Unitario</th>
+                <th>Troqueles (Total)</th>
+                <th>PRECIO VENTA TOTAL</th>
+                <th>UNITARIO (TODO)</th>
+            </tr>
+            {rows_html}
+        </table>
+        <p style='text-align: right; font-size: 0.9em; color: #777; margin-top: 15px;'>* Oferta válida salvo error tipográfico. IVA no incluido.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
 else:
     if res_final:
         st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
+        # Ajustamos el dataframe normal para que tenga coherencia con los nuevos datos, aunque manteniendo simplicidad visual si se quiere
         st.dataframe(pd.DataFrame(res_final), use_container_width=True)
+        
         for q, info in desc_full.items():
             with st.expander(f"🔍 Auditoría Taller {q} uds (Taller: {info['qp']} uds)"):
-                # Crear Dataframe y ordenar columnas para que quede lógico el desglose
                 df_raw = pd.DataFrame(info["det"])
-                
-                # Definir orden de columnas para visualización clara
-                cols_order = ["Pieza", 
-                              "Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Total Mat",
+                cols_order = ["Pieza", "Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Total Mat",
                               "Imp. Cara", "Imp. Dorso", "Total Imp",
-                              "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte", "Total Narba", 
-                              "Subtotal"]
-                
-                # Filtrar solo columnas que existan (por seguridad) y reordenar
+                              "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte", "Total Narba", "Subtotal"]
                 cols_final = [c for c in cols_order if c in df_raw.columns]
                 df_sorted = df_raw[cols_final]
 
-                # Fila de totales
                 sum_row = {"Pieza": "TOTAL PROYECTO"}
                 for col in cols_final[1:]:
                     sum_row[col] = df_sorted[col].sum()
                 
                 df_f = pd.concat([df_sorted, pd.DataFrame([sum_row])], ignore_index=True)
 
-                # Estilos visuales
                 st.table(df_f.style.format("{:.2f}€", subset=df_f.columns[1:])
                          .set_properties(**{'background-color': '#e3f2fd', 'font-weight': 'bold'}, subset=["Total Imp","Total Narba","Total Mat","Subtotal"])
                          .set_properties(**{'color': '#666'}, subset=["Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Imp. Cara", "Imp. Dorso", "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte"])
