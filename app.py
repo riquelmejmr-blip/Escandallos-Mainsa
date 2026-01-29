@@ -86,29 +86,46 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 with st.sidebar:
     st.header("⚙️ Configuración Admin")
     
-    # --- ZONA DE IMPORTACIÓN INTELIGENTE ---
-    with st.expander("🤖 Importar Datos de IA/PDF", expanded=True):
-        st.info("Sube el JSON generado por Gemini")
-        # Usamos una key única para el uploader
-        subida_ia = st.file_uploader("Archivo JSON", type=["json"], key="uploader_ia")
+    # --- ZONA DE IMPORTACIÓN INTELIGENTE (MEJORADA) ---
+    with st.expander("🤖 Importar Datos (IA/PDF)", expanded=True):
+        # Creamos pestañas para elegir método
+        tab_up, tab_paste = st.tabs(["📂 Subir Archivo", "📋 Pegar Texto"])
         
-        # Botón para procesar (a veces el uploader solo no dispara el evento bien)
-        if subida_ia:
+        datos_json = None
+        
+        # Opción 1: Subir Archivo
+        with tab_up:
+            subida_ia = st.file_uploader("Sube el JSON", type=["json"], key="uploader_ia")
+            if subida_ia:
+                try:
+                    datos_json = json.load(subida_ia)
+                except Exception as e:
+                    st.error(f"Error archivo: {e}")
+
+        # Opción 2: Pegar Texto (¡LA NUEVA FUNCIÓN!)
+        with tab_paste:
+            texto_json = st.text_area("Pega aquí el código del GEM", height=150, help="Copia el bloque {...} que te da el GEM y pégalo aquí.")
+            if st.button("🚀 Cargar desde Texto"):
+                try:
+                    if texto_json.strip():
+                        datos_json = json.loads(texto_json)
+                    else:
+                        st.warning("El campo está vacío")
+                except Exception as e:
+                    st.error(f"Error en el texto pegado. Asegúrate de copiar solo el JSON. {e}")
+
+        # PROCESADO COMÚN (Si hay datos de cualquiera de las dos vías)
+        if datos_json:
             try:
-                di = json.load(subida_ia)
+                di = datos_json
                 
-                # A. ACTUALIZAR VARIABLES SIMPLES (Inyección directa a memoria)
+                # A. ACTUALIZAR VARIABLES SIMPLES
                 if "cli" in di: st.session_state["cli_input"] = di["cli"]
                 if "brf" in di: st.session_state["brf_input"] = di["brf"]
+                if "cantidades" in di: st.session_state["cants_input"] = ", ".join(map(str, di["cantidades"]))
+                if "tiempo_manipulacion" in di: st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
                 
-                if "cantidades" in di: 
-                    st.session_state["cants_input"] = ", ".join(map(str, di["cantidades"]))
-                
-                if "tiempo_manipulacion" in di: 
-                    st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
-                    
                 if "dificultad" in di: 
-                    # Validar que el valor existe en las opciones, si no, poner el default
                     vals_dif = [0.02, 0.061, 0.091]
                     val_d = float(di["dificultad"])
                     st.session_state["dif_input"] = val_d if val_d in vals_dif else 0.091
@@ -120,15 +137,11 @@ with st.sidebar:
                 st.session_state.lista_embalajes = di.get("embalajes", [])
                 st.session_state.lista_extras_grabados = di.get("extras", [])
                 
-                # C. CARGAR PIEZAS Y FORZAR VALORES EN WIDGETS
+                # C. CARGAR PIEZAS Y FORZAR VALORES
                 if "piezas" in di:
-                    # 1. Actualizamos el diccionario base
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
                     
-                    # 2. INYECCIÓN AGRESIVA: Recorremos cada pieza y forzamos sus valores en los inputs
-                    # Esto sobreescribe lo que haya en pantalla.
                     for pid, p in st.session_state.piezas_dict.items():
-                        # Mapa de: (Clave en JSON) -> (Prefijo del Widget en Streamlit)
                         mapa_widgets = {
                             "nombre": "n_", "pliegos": "p_", "h": "h_", "w": "w_", 
                             "im": "im_", "nt": "nt_", "ba": "ba_", "ld": "ld_", "pel": "pel_",
@@ -137,52 +150,42 @@ with st.sidebar:
                             "cor": "cor_", "cobrar_arreglo": "arr_", "pv_troquel": "pvt_",
                             "im_d": "imd_", "nt_d": "ntd_", "ba_d": "bad_", "ld_d": "ldd_", "pel_d": "peld_"
                         }
-                        
                         for key_json, prefix_widget in mapa_widgets.items():
                             key_streamlit = f"{prefix_widget}{pid}"
                             if key_json in p:
-                                # Forzamos el valor en la session_state
-                                # Nota: Convertimos tipos si es necesario para evitar errores de tipo
                                 val = p[key_json]
-                                # Streamlit es estricto con los tipos de number_input, aseguramos float/int según corresponda
                                 if prefix_widget in ["p_", "pvt_", "gf_", "gd_"]: val = float(val)
                                 if prefix_widget in ["h_", "w_", "nt_", "ntd_"]: val = int(val)
-                                
                                 st.session_state[key_streamlit] = val
 
-                st.toast("✅ Datos cargados correctamente. ¡Magia!", icon="🎉")
+                st.toast("✅ Datos cargados correctamente.", icon="🎉")
+                # Importante: No usamos st.rerun() dentro del bloque de dibujo condicional si no es necesario,
+                # pero aquí ayuda a refrescar los inputs visuales inmediatamente.
+                st.rerun() 
                 
             except Exception as e:
-                st.error(f"Error procesando JSON: {e}")
+                st.error(f"Error procesando datos: {e}")
 
-    # --- INPUTS MANUALES (VINCULADOS A SESSION_STATE) ---
-    
+    # --- INPUTS MANUALES (VINCULADOS) ---
     st.session_state.cli = st.text_input("Cliente", key="cli_input", value=st.session_state.get("cli_input", ""))
     st.session_state.brf = st.text_input("Nº Briefing", key="brf_input", value=st.session_state.get("brf_input", ""))
     st.divider()
     
-    # Cantidades
     cants_str = st.text_input("Cantidades (ej: 500, 1000)", key="cants_input", value=st.session_state.get("cants_input", "0"))
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
     
     unidad_t = st.radio("Manipulación en:", ["Segundos", "Minutos"], horizontal=True)
-    
-    # Tiempo
     t_input = st.number_input(f"Tiempo montaje/ud", key="t_input_widget", value=st.session_state.get("t_input_widget", 0.0))
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
     
     st.divider()
     
-    # Dificultad
-    # Aseguramos que el index sea válido
     idx_dif = 2
     val_act_dif = st.session_state.get("dif_input", 0.091)
     if val_act_dif in [0.02, 0.061, 0.091]:
         idx_dif = [0.02, 0.061, 0.091].index(val_act_dif)
-        
     dif_ud = st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=idx_dif, key="dif_input")
     
-    # Fijo y Margen
     imp_fijo_pvp = st.number_input("Importe Fijo PVP (€)", key="fijo_input", value=st.session_state.get("fijo_input", 500.0))
     margen = st.number_input("Multiplicador Comercial", step=0.1, key="margen_input", value=st.session_state.get("margen_input", 2.2))
 
