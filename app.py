@@ -208,6 +208,32 @@ if not modo_comercial:
     if c_btns[1].button("🗑 Reiniciar Todo"):
         st.session_state.piezas_dict = {0: crear_forma_vacia(0)}; st.session_state.lista_extras_grabados = []; st.session_state.costes_embalaje_manual = {}; st.rerun()
 
+    # --- FUNCIONES CALLBACK PARA EVITAR ERRORES DE API ---
+    def callback_cambio_frontal(pid):
+        """Se ejecuta ANTES de redibujar cuando cambia el material frontal"""
+        new_mat = st.session_state[f"pf_{pid}"]
+        if new_mat != "Ninguno":
+            st.session_state[f"gf_{pid}"] = PRECIOS["cartoncillo"][new_mat]["gramaje"]
+            st.session_state[f"im_{pid}"] = "Offset"
+            st.session_state[f"nt_{pid}"] = 4
+        else:
+            st.session_state[f"im_{pid}"] = "No"
+            st.session_state[f"nt_{pid}"] = 0
+
+    def callback_cambio_dorso(pid):
+        """Se ejecuta ANTES de redibujar cuando cambia el material dorso"""
+        new_mat = st.session_state[f"pd_{pid}"]
+        if new_mat != "Ninguno":
+            st.session_state[f"gd_{pid}"] = PRECIOS["cartoncillo"][new_mat]["gramaje"]
+
+    def callback_medida_estandar(pid):
+        """Aplica la medida estándar seleccionada"""
+        fmt = st.session_state[f"std_{pid}"]
+        if fmt != "Personalizado":
+            nh, nw = FORMATOS_STD[fmt]
+            st.session_state[f"h_{pid}"] = nh
+            st.session_state[f"w_{pid}"] = nw
+
     for p_id, p in st.session_state.piezas_dict.items():
         with st.expander(f"🛠 {p.get('nombre', 'Forma')} - {p.get('h',0)}x{p.get('w',0)} mm", expanded=True):
             col1, col2, col3 = st.columns(3)
@@ -215,18 +241,9 @@ if not modo_comercial:
                 p['nombre'] = st.text_input("Etiqueta", p.get('nombre', f"Forma {p_id+1}"), key=f"n_{p_id}")
                 p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get('pliegos', 1.0)), key=f"p_{p_id}")
                 
-                # --- CALLBACK FORMATOS ---
-                def aplicar_medida_estandar(key_std, key_h, key_w, pid):
-                    fmt = st.session_state[key_std]
-                    if fmt != "Personalizado":
-                        nh, nw = FORMATOS_STD[fmt]
-                        st.session_state[key_h] = nh
-                        st.session_state[key_w] = nw
-                        st.session_state.piezas_dict[pid]['h'] = nh
-                        st.session_state.piezas_dict[pid]['w'] = nw
-
+                # Desplegable Medidas con Callback
                 st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}", 
-                             on_change=aplicar_medida_estandar, args=(f"std_{p_id}", f"h_{p_id}", f"w_{p_id}", p_id))
+                             on_change=callback_medida_estandar, args=(p_id,))
 
                 p['h'] = st.number_input("Largo mm", 0, 5000, key=f"h_{p_id}", value=int(p.get('h', 0)))
                 p['w'] = st.number_input("Ancho mm", 0, 5000, key=f"w_{p_id}", value=int(p.get('w', 0)))
@@ -247,51 +264,28 @@ if not modo_comercial:
             with col2:
                 opts_pf = list(PRECIOS["cartoncillo"].keys())
                 val_pf = p.get('pf', 'Ninguno'); idx_pf = opts_pf.index(val_pf) if val_pf in opts_pf else 0 
-                pf_prev = p.get('pf', 'Ninguno')
                 
-                p['pf'] = st.selectbox("C. Frontal", opts_pf, index=idx_pf, key=f"pf_{p_id}")
+                # SELECTBOX CON CALLBACK DE CAMBIO DE MATERIAL
+                p['pf'] = st.selectbox("C. Frontal", opts_pf, index=idx_pf, key=f"pf_{p_id}", 
+                                       on_change=callback_cambio_frontal, args=(p_id,))
                 
-                # --- AUTO-CONFIG INTELIGENTE CON FUERZA BRUTA DE SESSION_STATE ---
-                if p['pf'] != pf_prev:
-                    if p['pf'] != "Ninguno":
-                        new_gf = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
-                        p['gf'] = new_gf
-                        p['im'] = "Offset"
-                        p['nt'] = 4
-                        # FORZAR WIDGETS
-                        st.session_state[f"gf_{p_id}"] = int(new_gf)
-                        st.session_state[f"im_{p_id}"] = "Offset"
-                        st.session_state[f"nt_{p_id}"] = 4
-                    else:
-                        p['im'] = "No"
-                        p['nt'] = 0
-                        # FORZAR WIDGETS
-                        st.session_state[f"im_{p_id}"] = "No"
-                        st.session_state[f"nt_{p_id}"] = 0
-
                 p['gf'] = st.number_input("Gramaje F.", value=int(p.get('gf', 0)), key=f"gf_{p_id}")
                 
                 opts_pl = list(PRECIOS["planchas"].keys())
                 val_pl = p.get('pl', 'Ninguna'); idx_pl = opts_pl.index(val_pl) if val_pl in opts_pl else 0
                 p['pl'] = st.selectbox("Plancha Base", opts_pl, index=idx_pl, key=f"pl_{p_id}")
                 
-                # --- CALIDAD DEFAULT B/C ---
+                # CALIDAD B/C POR DEFECTO
                 opts_ap = ["C/C", "B/C", "B/B"]
                 val_ap = p.get('ap', 'B/C'); idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 1
                 p['ap'] = st.selectbox("Calidad", opts_ap, index=idx_ap, key=f"ap_{p_id}")
                 
                 opts_pd = list(PRECIOS["cartoncillo"].keys())
                 val_pd = p.get('pd', 'Ninguno'); idx_pd = opts_pd.index(val_pd) if val_pd in opts_pd else 0
-                pd_prev = p.get('pd', 'Ninguno') 
                 
-                p['pd'] = st.selectbox("C. Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}")
-                
-                # --- AUTO-CONFIG DORSO CON FUERZA BRUTA ---
-                if p['pd'] != pd_prev:
-                    if p['pd'] != "Ninguno":
-                        new_gd = PRECIOS["cartoncillo"][p['pd']]["gramaje"]
-                        p['gd'] = new_gd
-                        st.session_state[f"gd_{p_id}"] = int(new_gd)
+                # SELECTBOX CON CALLBACK DE CAMBIO DE DORSO
+                p['pd'] = st.selectbox("C. Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}", 
+                                       on_change=callback_cambio_dorso, args=(p_id,))
                 
                 if p['pd'] != "Ninguno": p['gd'] = st.number_input("Gramaje D.", value=int(p.get('gd',0)), key=f"gd_{p_id}")
             
