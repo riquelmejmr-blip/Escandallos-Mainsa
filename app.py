@@ -86,45 +86,51 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 with st.sidebar:
     st.header("⚙️ Configuración Admin")
     
-    # --- ZONA DE IMPORTACIÓN INTELIGENTE (MEJORADA) ---
+    # --- ZONA DE IMPORTACIÓN INTELIGENTE ---
     with st.expander("🤖 Importar Datos (IA/PDF)", expanded=True):
-        # Creamos pestañas para elegir método
         tab_up, tab_paste = st.tabs(["📂 Subir Archivo", "📋 Pegar Texto"])
         
         datos_json = None
         
-        # Opción 1: Subir Archivo
+        # Opción 1: Subir
         with tab_up:
             subida_ia = st.file_uploader("Sube el JSON", type=["json"], key="uploader_ia")
             if subida_ia:
-                try:
-                    datos_json = json.load(subida_ia)
-                except Exception as e:
-                    st.error(f"Error archivo: {e}")
+                try: datos_json = json.load(subida_ia)
+                except Exception as e: st.error(f"Error archivo: {e}")
 
-        # Opción 2: Pegar Texto (¡LA NUEVA FUNCIÓN!)
+        # Opción 2: Pegar
         with tab_paste:
-            texto_json = st.text_area("Pega aquí el código del GEM", height=150, help="Copia el bloque {...} que te da el GEM y pégalo aquí.")
+            texto_json = st.text_area("Pega el JSON aquí", height=150)
             if st.button("🚀 Cargar desde Texto"):
                 try:
-                    if texto_json.strip():
-                        datos_json = json.loads(texto_json)
-                    else:
-                        st.warning("El campo está vacío")
-                except Exception as e:
-                    st.error(f"Error en el texto pegado. Asegúrate de copiar solo el JSON. {e}")
+                    if texto_json.strip(): datos_json = json.loads(texto_json)
+                except Exception as e: st.error(f"Error JSON: {e}")
 
-        # PROCESADO COMÚN (Si hay datos de cualquiera de las dos vías)
+        # PROCESADO DE DATOS
         if datos_json:
             try:
                 di = datos_json
                 
-                # A. ACTUALIZAR VARIABLES SIMPLES
+                # A. VARIABLES SIMPLES
                 if "cli" in di: st.session_state["cli_input"] = di["cli"]
                 if "brf" in di: st.session_state["brf_input"] = di["brf"]
                 if "cantidades" in di: st.session_state["cants_input"] = ", ".join(map(str, di["cantidades"]))
-                if "tiempo_manipulacion" in di: st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
                 
+                # --- NOVEDAD: TIEMPO Y UNIDAD ---
+                if "tiempo_manipulacion" in di: 
+                    st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
+                
+                if "unidad_manipulacion" in di:
+                    # Validamos que sea una opción correcta para el Radio Button
+                    val_u = di["unidad_manipulacion"]
+                    if val_u in ["Segundos", "Minutos"]:
+                        st.session_state["unidad_t_input"] = val_u
+                    else:
+                        # Si la IA pone "seg" o "s", lo corregimos a "Segundos"
+                        if "s" in val_u.lower(): st.session_state["unidad_t_input"] = "Segundos"
+                        else: st.session_state["unidad_t_input"] = "Minutos"
+
                 if "dificultad" in di: 
                     vals_dif = [0.02, 0.061, 0.091]
                     val_d = float(di["dificultad"])
@@ -133,14 +139,13 @@ with st.sidebar:
                 if "imp_fijo" in di: st.session_state["fijo_input"] = float(di["imp_fijo"])
                 if "margen" in di: st.session_state["margen_input"] = float(di["margen"])
 
-                # B. CARGAR LISTAS
+                # B. LISTAS
                 st.session_state.lista_embalajes = di.get("embalajes", [])
                 st.session_state.lista_extras_grabados = di.get("extras", [])
                 
-                # C. CARGAR PIEZAS Y FORZAR VALORES
+                # C. PIEZAS
                 if "piezas" in di:
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
-                    
                     for pid, p in st.session_state.piezas_dict.items():
                         mapa_widgets = {
                             "nombre": "n_", "pliegos": "p_", "h": "h_", "w": "w_", 
@@ -158,15 +163,13 @@ with st.sidebar:
                                 if prefix_widget in ["h_", "w_", "nt_", "ntd_"]: val = int(val)
                                 st.session_state[key_streamlit] = val
 
-                st.toast("✅ Datos cargados correctamente.", icon="🎉")
-                # Importante: No usamos st.rerun() dentro del bloque de dibujo condicional si no es necesario,
-                # pero aquí ayuda a refrescar los inputs visuales inmediatamente.
-                st.rerun() 
+                st.toast("✅ Datos cargados con Unidad de Tiempo.", icon="⏱️")
+                st.rerun()
                 
             except Exception as e:
                 st.error(f"Error procesando datos: {e}")
 
-    # --- INPUTS MANUALES (VINCULADOS) ---
+    # --- INPUTS MANUALES ---
     st.session_state.cli = st.text_input("Cliente", key="cli_input", value=st.session_state.get("cli_input", ""))
     st.session_state.brf = st.text_input("Nº Briefing", key="brf_input", value=st.session_state.get("brf_input", ""))
     st.divider()
@@ -174,7 +177,10 @@ with st.sidebar:
     cants_str = st.text_input("Cantidades (ej: 500, 1000)", key="cants_input", value=st.session_state.get("cants_input", "0"))
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
     
-    unidad_t = st.radio("Manipulación en:", ["Segundos", "Minutos"], horizontal=True)
+    # --- NOVEDAD: RADIO BUTTON CON KEY ---
+    # Le hemos puesto la key "unidad_t_input" para poder modificarla desde la importación
+    unidad_t = st.radio("Manipulación en:", ["Segundos", "Minutos"], horizontal=True, key="unidad_t_input")
+    
     t_input = st.number_input(f"Tiempo montaje/ud", key="t_input_widget", value=st.session_state.get("t_input_widget", 0.0))
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
     
@@ -200,7 +206,8 @@ with st.sidebar:
         "brf": st.session_state.brf, "cli": st.session_state.cli, "piezas": st.session_state.piezas_dict, 
         "extras": st.session_state.lista_extras_grabados, "embalajes": st.session_state.lista_embalajes,
         "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, 
-        "tiempo_manipulacion": t_input, "dificultad": dif_ud
+        "tiempo_manipulacion": t_input, "dificultad": dif_ud, 
+        "unidad_manipulacion": unidad_t # Guardamos también la unidad para futuras referencias
     }
     st.download_button("💾 Guardar Proyecto", json.dumps(datos_exp, indent=4), file_name=nombre_archivo)
 
