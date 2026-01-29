@@ -62,7 +62,7 @@ def crear_forma_vacia(index):
     return {
         "nombre": f"Forma {index + 1}", "pliegos": 1.0, "w": 0, "h": 0, 
         "pf": "Ninguno", "gf": 0, "pl": "Ninguna", 
-        "ap": "B/C", # <--- CAMBIO: Por defecto B/C
+        "ap": "B/C", # Por defecto B/C
         "pd": "Ninguno", "gd": 0, 
         "im": "No", "nt": 0, "ba": False, 
         "im_d": "No", "nt_d": 0, "ba_d": False, "pel": "Sin Peliculado", 
@@ -251,15 +251,23 @@ if not modo_comercial:
                 
                 p['pf'] = st.selectbox("C. Frontal", opts_pf, index=idx_pf, key=f"pf_{p_id}")
                 
-                # --- AUTO-CONFIG FRONT ---
+                # --- AUTO-CONFIG INTELIGENTE CON FUERZA BRUTA DE SESSION_STATE ---
                 if p['pf'] != pf_prev:
                     if p['pf'] != "Ninguno":
-                        p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
+                        new_gf = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
+                        p['gf'] = new_gf
                         p['im'] = "Offset"
                         p['nt'] = 4
+                        # FORZAR WIDGETS
+                        st.session_state[f"gf_{p_id}"] = int(new_gf)
+                        st.session_state[f"im_{p_id}"] = "Offset"
+                        st.session_state[f"nt_{p_id}"] = 4
                     else:
                         p['im'] = "No"
                         p['nt'] = 0
+                        # FORZAR WIDGETS
+                        st.session_state[f"im_{p_id}"] = "No"
+                        st.session_state[f"nt_{p_id}"] = 0
 
                 p['gf'] = st.number_input("Gramaje F.", value=int(p.get('gf', 0)), key=f"gf_{p_id}")
                 
@@ -274,13 +282,16 @@ if not modo_comercial:
                 
                 opts_pd = list(PRECIOS["cartoncillo"].keys())
                 val_pd = p.get('pd', 'Ninguno'); idx_pd = opts_pd.index(val_pd) if val_pd in opts_pd else 0
-                pd_prev = p.get('pd', 'Ninguno') # Captura valor anterior
+                pd_prev = p.get('pd', 'Ninguno') 
                 
                 p['pd'] = st.selectbox("C. Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}")
                 
-                # --- AUTO-CONFIG DORSO ---
-                if p['pd'] != pd_prev and p['pd'] != "Ninguno":
-                     p['gd'] = PRECIOS["cartoncillo"][p['pd']]["gramaje"]
+                # --- AUTO-CONFIG DORSO CON FUERZA BRUTA ---
+                if p['pd'] != pd_prev:
+                    if p['pd'] != "Ninguno":
+                        new_gd = PRECIOS["cartoncillo"][p['pd']]["gramaje"]
+                        p['gd'] = new_gd
+                        st.session_state[f"gd_{p_id}"] = int(new_gd)
                 
                 if p['pd'] != "Ninguno": p['gd'] = st.number_input("Gramaje D.", value=int(p.get('gd',0)), key=f"gd_{p_id}")
             
