@@ -87,99 +87,104 @@ with st.sidebar:
     st.header("⚙️ Configuración Admin")
     
     # --- ZONA DE IMPORTACIÓN INTELIGENTE ---
-    with st.expander("🤖 Importar Datos de IA/PDF", expanded=False):
+    with st.expander("🤖 Importar Datos de IA/PDF", expanded=True):
         st.info("Sube el JSON generado por Gemini")
+        # Usamos una key única para el uploader
         subida_ia = st.file_uploader("Archivo JSON", type=["json"], key="uploader_ia")
         
+        # Botón para procesar (a veces el uploader solo no dispara el evento bien)
         if subida_ia:
             try:
                 di = json.load(subida_ia)
                 
-                # 1. ACTUALIZAR VARIABLES GLOBALES DE SESIÓN
-                # Asignamos directamente a las 'keys' de los widgets para forzar el cambio visual
-                if "cli" in di: st.session_state.cli_input = di["cli"]
-                if "brf" in di: st.session_state.brf_input = di["brf"]
+                # A. ACTUALIZAR VARIABLES SIMPLES (Inyección directa a memoria)
+                if "cli" in di: st.session_state["cli_input"] = di["cli"]
+                if "brf" in di: st.session_state["brf_input"] = di["brf"]
                 
                 if "cantidades" in di: 
-                    st.session_state.cants_input = ", ".join(map(str, di["cantidades"]))
+                    st.session_state["cants_input"] = ", ".join(map(str, di["cantidades"]))
                 
                 if "tiempo_manipulacion" in di: 
-                    # Detectar si son segundos o minutos (asumimos minutos si viene del JSON suele ser manipulación)
-                    st.session_state.t_input_widget = float(di["tiempo_manipulacion"])
+                    st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
                     
                 if "dificultad" in di: 
-                    # Buscamos el índice correcto para el selectbox
+                    # Validar que el valor existe en las opciones, si no, poner el default
                     vals_dif = [0.02, 0.061, 0.091]
-                    val = float(di["dificultad"])
-                    if val in vals_dif:
-                        st.session_state.dif_input = val
-                    else:
-                        st.session_state.dif_input = 0.091 # Default si no coincide
+                    val_d = float(di["dificultad"])
+                    st.session_state["dif_input"] = val_d if val_d in vals_dif else 0.091
 
-                if "imp_fijo" in di: st.session_state.fijo_input = float(di["imp_fijo"])
-                if "margen" in di: st.session_state.margen_input = float(di["margen"])
+                if "imp_fijo" in di: st.session_state["fijo_input"] = float(di["imp_fijo"])
+                if "margen" in di: st.session_state["margen_input"] = float(di["margen"])
 
-                # 2. CARGAR LISTAS SIMPLES
+                # B. CARGAR LISTAS
                 st.session_state.lista_embalajes = di.get("embalajes", [])
                 st.session_state.lista_extras_grabados = di.get("extras", [])
                 
-                # 3. CARGAR PIEZAS Y LIMPIAR CACHÉ DE WIDGETS ANTIGUOS
-                # Esto es CRUCIAL: Borramos la memoria de los inputs de las formas (n_0, h_0...)
-                # para que se regeneren con los nuevos datos del diccionario.
+                # C. CARGAR PIEZAS Y FORZAR VALORES EN WIDGETS
                 if "piezas" in di:
-                    # Cargamos el diccionario
+                    # 1. Actualizamos el diccionario base
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
                     
-                    # Lista de prefijos que usamos en los widgets de las formas
-                    prefijos_widgets = ["n_", "p_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_", 
-                                      "pf_", "gf_", "pl_", "ap_", "pd_", "gd_", "cor_", "arr_", "pvt_",
-                                      "imd_", "ntd_", "bad_", "ldd_", "peld_"]
-                    
-                    # Borramos estado de session_state para obligar a leer del diccionario
-                    keys_a_borrar = []
-                    for k in st.session_state.keys():
-                        for pid in st.session_state.piezas_dict.keys():
-                            # Si la key empieza por un prefijo y termina con el ID de la pieza (ej: h_0)
-                            for pre in prefijos_widgets:
-                                if k == f"{pre}{pid}":
-                                    keys_a_borrar.append(k)
-                    
-                    for k in keys_a_borrar:
-                        if k in st.session_state:
-                            del st.session_state[k]
+                    # 2. INYECCIÓN AGRESIVA: Recorremos cada pieza y forzamos sus valores en los inputs
+                    # Esto sobreescribe lo que haya en pantalla.
+                    for pid, p in st.session_state.piezas_dict.items():
+                        # Mapa de: (Clave en JSON) -> (Prefijo del Widget en Streamlit)
+                        mapa_widgets = {
+                            "nombre": "n_", "pliegos": "p_", "h": "h_", "w": "w_", 
+                            "im": "im_", "nt": "nt_", "ba": "ba_", "ld": "ld_", "pel": "pel_",
+                            "pf": "pf_", "gf": "gf_", "pl": "pl_", "ap": "ap_", 
+                            "pd": "pd_", "gd": "gd_", 
+                            "cor": "cor_", "cobrar_arreglo": "arr_", "pv_troquel": "pvt_",
+                            "im_d": "imd_", "nt_d": "ntd_", "ba_d": "bad_", "ld_d": "ldd_", "pel_d": "peld_"
+                        }
+                        
+                        for key_json, prefix_widget in mapa_widgets.items():
+                            key_streamlit = f"{prefix_widget}{pid}"
+                            if key_json in p:
+                                # Forzamos el valor en la session_state
+                                # Nota: Convertimos tipos si es necesario para evitar errores de tipo
+                                val = p[key_json]
+                                # Streamlit es estricto con los tipos de number_input, aseguramos float/int según corresponda
+                                if prefix_widget in ["p_", "pvt_", "gf_", "gd_"]: val = float(val)
+                                if prefix_widget in ["h_", "w_", "nt_", "ntd_"]: val = int(val)
+                                
+                                st.session_state[key_streamlit] = val
 
-                st.success("¡Datos cargados correctamente!")
-                # Forzamos recarga para ver los cambios
-                st.rerun()
+                st.toast("✅ Datos cargados correctamente. ¡Magia!", icon="🎉")
                 
             except Exception as e:
-                st.error(f"Error al leer JSON: {e}")
+                st.error(f"Error procesando JSON: {e}")
 
-    # --- INPUTS MANUALES (CON KEYS EXPLICITAS PARA PODER ESCRIBIRLES DESDE ARRIBA) ---
-    # Usamos st.session_state.get para el valor por defecto, pero la key es lo importante.
+    # --- INPUTS MANUALES (VINCULADOS A SESSION_STATE) ---
     
-    st.session_state.cli = st.text_input("Cliente", value=st.session_state.get('cli', ""), key="cli_input")
-    st.session_state.brf = st.text_input("Nº Briefing", value=st.session_state.get('brf', ""), key="brf_input")
+    st.session_state.cli = st.text_input("Cliente", key="cli_input", value=st.session_state.get("cli_input", ""))
+    st.session_state.brf = st.text_input("Nº Briefing", key="brf_input", value=st.session_state.get("brf_input", ""))
     st.divider()
     
     # Cantidades
-    cants_str = st.text_input("Cantidades (ej: 500, 1000)", value="0", key="cants_input")
+    cants_str = st.text_input("Cantidades (ej: 500, 1000)", key="cants_input", value=st.session_state.get("cants_input", "0"))
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
     
     unidad_t = st.radio("Manipulación en:", ["Segundos", "Minutos"], horizontal=True)
     
     # Tiempo
-    t_input = st.number_input(f"Tiempo montaje/ud", value=0.0, key="t_input_widget")
+    t_input = st.number_input(f"Tiempo montaje/ud", key="t_input_widget", value=st.session_state.get("t_input_widget", 0.0))
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
     
     st.divider()
     
     # Dificultad
-    dif_ud = st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2, key="dif_input")
+    # Aseguramos que el index sea válido
+    idx_dif = 2
+    val_act_dif = st.session_state.get("dif_input", 0.091)
+    if val_act_dif in [0.02, 0.061, 0.091]:
+        idx_dif = [0.02, 0.061, 0.091].index(val_act_dif)
+        
+    dif_ud = st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=idx_dif, key="dif_input")
     
     # Fijo y Margen
-    imp_fijo_pvp = st.number_input("Importe Fijo PVP (€)", value=500.0, help="Suma directa al precio.", key="fijo_input")
-    margen = st.number_input("Multiplicador Comercial", value=2.2, step=0.1, key="margen_input")
+    imp_fijo_pvp = st.number_input("Importe Fijo PVP (€)", key="fijo_input", value=st.session_state.get("fijo_input", 500.0))
+    margen = st.number_input("Multiplicador Comercial", step=0.1, key="margen_input", value=st.session_state.get("margen_input", 2.2))
 
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
