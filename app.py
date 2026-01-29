@@ -30,7 +30,7 @@ PRECIOS = {
     }
 }
 
-# --- LISTA DE FORMATOS COMUNES (Global) ---
+# --- LISTA DE FORMATOS COMUNES ---
 FORMATOS_STD = {
     "Personalizado": (0, 0),
     "1600x1200": (1600, 1200),
@@ -61,7 +61,8 @@ st.set_page_config(page_title="MAINSA ADMIN V33", layout="wide")
 def crear_forma_vacia(index):
     return {
         "nombre": f"Forma {index + 1}", "pliegos": 1.0, "w": 0, "h": 0, 
-        "pf": "Ninguno", "gf": 0, "pl": "Ninguna", "ap": "C/C", 
+        "pf": "Ninguno", "gf": 0, "pl": "Ninguna", 
+        "ap": "B/C", # <--- CAMBIO: Por defecto B/C
         "pd": "Ninguno", "gd": 0, 
         "im": "No", "nt": 0, "ba": False, 
         "im_d": "No", "nt_d": 0, "ba_d": False, "pel": "Sin Peliculado", 
@@ -214,23 +215,19 @@ if not modo_comercial:
                 p['nombre'] = st.text_input("Etiqueta", p.get('nombre', f"Forma {p_id+1}"), key=f"n_{p_id}")
                 p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get('pliegos', 1.0)), key=f"p_{p_id}")
                 
-                # --- CALLBACK PARA MEDIDAS ESTÁNDAR ---
-                # Esta función fuerza la actualización de los widgets de largo y ancho
+                # --- CALLBACK FORMATOS ---
                 def aplicar_medida_estandar(key_std, key_h, key_w, pid):
                     fmt = st.session_state[key_std]
                     if fmt != "Personalizado":
                         nh, nw = FORMATOS_STD[fmt]
-                        # Inyectar en session_state para que el widget number_input se entere
                         st.session_state[key_h] = nh
                         st.session_state[key_w] = nw
-                        # Actualizar diccionario
                         st.session_state.piezas_dict[pid]['h'] = nh
                         st.session_state.piezas_dict[pid]['w'] = nw
 
                 st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}", 
                              on_change=aplicar_medida_estandar, args=(f"std_{p_id}", f"h_{p_id}", f"w_{p_id}", p_id))
 
-                # Widgets de medidas vinculados a session_state para que el callback funcione
                 p['h'] = st.number_input("Largo mm", 0, 5000, key=f"h_{p_id}", value=int(p.get('h', 0)))
                 p['w'] = st.number_input("Ancho mm", 0, 5000, key=f"w_{p_id}", value=int(p.get('w', 0)))
                 
@@ -254,7 +251,7 @@ if not modo_comercial:
                 
                 p['pf'] = st.selectbox("C. Frontal", opts_pf, index=idx_pf, key=f"pf_{p_id}")
                 
-                # --- AUTO-CONFIGURACIÓN INTELIGENTE ---
+                # --- AUTO-CONFIG FRONT ---
                 if p['pf'] != pf_prev:
                     if p['pf'] != "Ninguno":
                         p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
@@ -270,13 +267,20 @@ if not modo_comercial:
                 val_pl = p.get('pl', 'Ninguna'); idx_pl = opts_pl.index(val_pl) if val_pl in opts_pl else 0
                 p['pl'] = st.selectbox("Plancha Base", opts_pl, index=idx_pl, key=f"pl_{p_id}")
                 
+                # --- CALIDAD DEFAULT B/C ---
                 opts_ap = ["C/C", "B/C", "B/B"]
-                val_ap = p.get('ap', 'C/C'); idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 0
+                val_ap = p.get('ap', 'B/C'); idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 1
                 p['ap'] = st.selectbox("Calidad", opts_ap, index=idx_ap, key=f"ap_{p_id}")
                 
                 opts_pd = list(PRECIOS["cartoncillo"].keys())
                 val_pd = p.get('pd', 'Ninguno'); idx_pd = opts_pd.index(val_pd) if val_pd in opts_pd else 0
+                pd_prev = p.get('pd', 'Ninguno') # Captura valor anterior
+                
                 p['pd'] = st.selectbox("C. Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}")
+                
+                # --- AUTO-CONFIG DORSO ---
+                if p['pd'] != pd_prev and p['pd'] != "Ninguno":
+                     p['gd'] = PRECIOS["cartoncillo"][p['pd']]["gramaje"]
                 
                 if p['pd'] != "Ninguno": p['gd'] = st.number_input("Gramaje D.", value=int(p.get('gd',0)), key=f"gd_{p_id}")
             
