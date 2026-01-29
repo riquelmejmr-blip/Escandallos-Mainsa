@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
+import re  # <--- IMPORTANTE: Librería para limpiar el texto "sucio" del GEM
 
 # --- 1. BASE DE DATOS DE PRECIOS ---
 PRECIOS = {
@@ -86,39 +87,55 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 with st.sidebar:
     st.header("⚙️ Configuración Admin")
     
-    # --- ZONA DE IMPORTACIÓN (INTELIGENTE Y PERMISIVA) ---
+    # --- ZONA DE IMPORTACIÓN INTELIGENTE ---
     with st.expander("🤖 Importar Datos (IA/PDF)", expanded=True):
         tab_up, tab_paste = st.tabs(["📂 Subir Archivo", "📋 Pegar Texto"])
+        
         datos_json = None
         
-        # Opción 1: Subir
+        # Opción 1: Subir Archivo
         with tab_up:
             subida_ia = st.file_uploader("Sube el JSON", type=["json"], key="uploader_ia")
             if subida_ia:
-                try: datos_json = json.load(subida_ia)
-                except Exception as e: st.error(f"Error archivo: {e}")
+                try:
+                    datos_json = json.load(subida_ia)
+                except Exception as e:
+                    st.error(f"Error archivo: {e}")
 
-        # Opción 2: Pegar
+        # Opción 2: Pegar Texto (CON LIMPIEZA AUTOMÁTICA)
         with tab_paste:
-            texto_json = st.text_area("Pega el JSON aquí", height=150)
-            if st.button("🚀 Cargar"):
-                try: 
-                    if texto_json.strip(): datos_json = json.loads(texto_json)
-                except Exception as e: st.error(f"Error texto: {e}")
+            texto_json = st.text_area("Pega el JSON aquí", height=150, help="Pega el código que te da el GEM, aunque tenga cosas raras.")
+            if st.button("🚀 Cargar desde Texto"):
+                try:
+                    if texto_json.strip():
+                        # LIMPIEZA DE ETIQUETAS DEL GEM [cite...]
+                        # Esta linea elimina todo lo que esté entre corchetes tipo [cite...] o 
+                        texto_limpio = re.sub(r'\[cite.*?\]', '', texto_json)
+                        texto_limpio = re.sub(r'\[cite_start.*?\]', '', texto_limpio)
+                        
+                        datos_json = json.loads(texto_limpio)
+                    else:
+                        st.warning("El campo está vacío")
+                except Exception as e:
+                    st.error(f"Error en el formato del JSON. Asegúrate de copiar desde el primer {{ hasta el último }}. Detalle: {e}")
 
-        # PROCESADO DE DATOS (LIMPIEZA AUTOMÁTICA)
+        # PROCESADO COMÚN (Si hay datos de cualquiera de las dos vías)
         if datos_json:
             try:
                 di = datos_json
                 
-                # A. VARIABLES SIMPLES
+                # A. ACTUALIZAR VARIABLES SIMPLES
                 if "cli" in di: st.session_state["cli_input"] = di["cli"]
-                if "brf" in di: st.session_state["brf_input"] = str(di["brf"]) # Asegurar string
+                if "brf" in di: st.session_state["brf_input"] = str(di["brf"])
                 if "cantidades" in di: st.session_state["cants_input"] = ", ".join(map(str, di["cantidades"]))
+                
+                # Tiempo y Unidad
                 if "tiempo_manipulacion" in di: st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
                 if "unidad_manipulacion" in di:
                      val_u = di["unidad_manipulacion"]
-                     st.session_state["unidad_t_input"] = "Minutos" if "Min" in val_u else "Segundos"
+                     # Lógica para detectar Minutos o Segundos
+                     if "in" in val_u.lower(): st.session_state["unidad_t_input"] = "Minutos"
+                     else: st.session_state["unidad_t_input"] = "Segundos"
 
                 # Dificultad, Fijo y Margen
                 if "dificultad" in di: 
@@ -128,86 +145,98 @@ with st.sidebar:
                 if "margen" in di: st.session_state["margen_input"] = float(di["margen"])
 
                 # B. LIMPIEZA DE LISTAS (EXTRA ROBUSTEZ)
-                # Embalajes: El GEM a veces inventa tipos. Los normalizamos.
+                # Embalajes
                 raw_emb = di.get("embalajes", [])
                 clean_emb = []
                 for e in raw_emb:
-                    # Intentar parsear medidas si vienen en texto (ej: "1200*800")
                     l_val, w_val = e.get("l", 0), e.get("w", 0)
+                    # Intentar leer medidas si vienen en texto
                     if "medida" in e and isinstance(e["medida"], str):
                         try:
                             parts = e["medida"].lower().replace("mm","").replace("x","*").split("*")
-                            if len(parts) >= 2:
-                                l_val, w_val = int(parts[0].strip()), int(parts[1].strip())
+                            if len(parts) >= 2: l_val, w_val = int(parts[0].strip()), int(parts[1].strip())
                         except: pass
                     
-                    # Validar tipo
+                    # Validar tipo de caja
                     tipo_ok = e.get("tipo", "Plano (Canal 5)")
                     if tipo_ok not in ["Plano (Canal 5)", "En Volumen", "Guainas"]:
-                        tipo_ok = "Plano (Canal 5)" # Valor por defecto si inventa "EUR"
+                        tipo_ok = "Plano (Canal 5)"
                     
                     clean_emb.append({"tipo": tipo_ok, "l": l_val, "w": w_val, "a": e.get("a", 0), "uds": e.get("uds", 1)})
                 st.session_state.lista_embalajes = clean_emb
 
-                # Extras: Si viene "nota" en vez de "nombre"
+                # Extras
                 raw_ext = di.get("extras", [])
                 clean_ext = []
                 for ex in raw_ext:
-                    nom = ex.get("nombre", ex.get("nota", "Accesorio")) # Fallback a nota
+                    # A veces el GEM pone "descripcion" o "nota" en vez de nombre
+                    nom = ex.get("nombre", ex.get("nota", ex.get("descripcion", "Accesorio")))
                     coste = ex.get("coste", 0.0)
                     cant = ex.get("cantidad", 1.0)
                     clean_ext.append({"nombre": nom, "coste": coste, "cantidad": cant})
                 st.session_state.lista_extras_grabados = clean_ext
                 
-                # C. PIEZAS
+                # C. PIEZAS (INYECCIÓN EN PANTALLA)
                 if "piezas" in di:
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
-                    # Inyección forzosa en widgets
+                    
                     for pid, p in st.session_state.piezas_dict.items():
-                        mapa = {
+                        # Mapa para conectar JSON -> Widget Streamlit
+                        mapa_widgets = {
                             "nombre": "n_", "pliegos": "p_", "h": "h_", "w": "w_", 
                             "im": "im_", "nt": "nt_", "ba": "ba_", "ld": "ld_", "pel": "pel_",
                             "pf": "pf_", "gf": "gf_", "pl": "pl_", "ap": "ap_", 
-                            "pd": "pd_", "gd": "gd_", "cor": "cor_", "cobrar_arreglo": "arr_", 
-                            "pv_troquel": "pvt_", "im_d": "imd_", "nt_d": "ntd_", 
-                            "ba_d": "bad_", "ld_d": "ldd_", "pel_d": "peld_"
+                            "pd": "pd_", "gd": "gd_", 
+                            "cor": "cor_", "cobrar_arreglo": "arr_", "pv_troquel": "pvt_",
+                            "im_d": "imd_", "nt_d": "ntd_", "ba_d": "bad_", "ld_d": "ldd_", "pel_d": "peld_"
                         }
-                        for k_json, k_widget in mapa.items():
-                            key_st = f"{k_widget}{pid}"
-                            if k_json in p:
-                                val = p[k_json]
-                                # Casteo seguro
-                                if k_widget in ["p_", "pvt_", "gf_", "gd_"]: val = float(val)
-                                if k_widget in ["h_", "w_", "nt_", "ntd_"]: val = int(val)
-                                st.session_state[key_st] = val
+                        
+                        for key_json, prefix_widget in mapa_widgets.items():
+                            key_streamlit = f"{prefix_widget}{pid}"
+                            
+                            # Mapeos especiales si el nombre del campo difiere
+                            val = None
+                            if key_json in p: val = p[key_json]
+                            # A veces PV troquel viene con otro nombre
+                            if key_json == "pv_troquel" and "coste_troquel_estimado" in p: 
+                                # Si es un string con texto (ej: "500€ aprox"), intentamos sacar numero o dejar 0
+                                try: val = float(str(p["coste_troquel_estimado"]).split("€")[0].strip())
+                                except: val = 0.0
+
+                            if val is not None:
+                                # Conversión de tipos para evitar errores de widget
+                                if prefix_widget in ["p_", "pvt_", "gf_", "gd_"]: val = float(val)
+                                if prefix_widget in ["h_", "w_", "nt_", "ntd_"]: val = int(val)
+                                st.session_state[key_streamlit] = val
 
                 st.toast("✅ Datos procesados e inyectados.", icon="🧠")
-                st.rerun()
+                st.rerun() # Refrescar pantalla
                 
             except Exception as e:
-                st.error(f"Error procesando: {e}")
+                st.error(f"Error procesando datos: {e}")
 
-    # --- INPUTS MANUALES ---
+    # --- INPUTS MANUALES (VINCULADOS) ---
     st.session_state.cli = st.text_input("Cliente", key="cli_input", value=st.session_state.get("cli_input", ""))
     st.session_state.brf = st.text_input("Nº Briefing", key="brf_input", value=st.session_state.get("brf_input", ""))
     st.divider()
     
-    cants_str = st.text_input("Cantidades", key="cants_input", value=st.session_state.get("cants_input", "0"))
+    cants_str = st.text_input("Cantidades (ej: 500, 1000)", key="cants_input", value=st.session_state.get("cants_input", "0"))
     lista_cants = [int(x.strip()) for x in cants_str.split(",") if x.strip().isdigit()]
     
-    unidad_t = st.radio("Manipulación:", ["Segundos", "Minutos"], horizontal=True, key="unidad_t_input")
+    unidad_t = st.radio("Manipulación en:", ["Segundos", "Minutos"], horizontal=True, key="unidad_t_input")
     t_input = st.number_input(f"Tiempo montaje/ud", key="t_input_widget", value=st.session_state.get("t_input_widget", 0.0))
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
     
     st.divider()
     
     idx_dif = 2
-    val_dif = st.session_state.get("dif_input", 0.091)
-    if val_dif in [0.02, 0.061, 0.091]: idx_dif = [0.02, 0.061, 0.091].index(val_dif)
+    val_act_dif = st.session_state.get("dif_input", 0.091)
+    if val_act_dif in [0.02, 0.061, 0.091]:
+        idx_dif = [0.02, 0.061, 0.091].index(val_act_dif)
     dif_ud = st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=idx_dif, key="dif_input")
     
-    imp_fijo_pvp = st.number_input("Fijo PVP (€)", key="fijo_input", value=st.session_state.get("fijo_input", 500.0))
-    margen = st.number_input("Multiplicador", step=0.1, key="margen_input", value=st.session_state.get("margen_input", 2.2))
+    imp_fijo_pvp = st.number_input("Importe Fijo PVP (€)", key="fijo_input", value=st.session_state.get("fijo_input", 500.0))
+    margen = st.number_input("Multiplicador Comercial", step=0.1, key="margen_input", value=st.session_state.get("margen_input", 2.2))
 
     st.divider()
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
@@ -220,11 +249,12 @@ with st.sidebar:
         "brf": st.session_state.brf, "cli": st.session_state.cli, "piezas": st.session_state.piezas_dict, 
         "extras": st.session_state.lista_extras_grabados, "embalajes": st.session_state.lista_embalajes,
         "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, 
-        "tiempo_manipulacion": t_input, "dificultad": dif_ud, "unidad_manipulacion": unidad_t
+        "tiempo_manipulacion": t_input, "dificultad": dif_ud, 
+        "unidad_manipulacion": unidad_t
     }
     st.download_button("💾 Guardar Proyecto", json.dumps(datos_exp, indent=4), file_name=nombre_archivo)
 
-# --- 5. ENTRADA DE DATOS ---
+# --- 5. ENTRADA DE DATOS (ZONA BLINDADA ANTI-ERRORES) ---
 if not modo_comercial:
     # SECCIÓN 1: FORMAS
     st.header("1. Definición Técnica de Formas")
@@ -236,7 +266,7 @@ if not modo_comercial:
         st.session_state.piezas_dict = {0: crear_forma_vacia(0)}; st.session_state.lista_extras_grabados = []; st.session_state.lista_embalajes = []; st.rerun()
 
     for p_id, p in st.session_state.piezas_dict.items():
-        with st.expander(f"🛠 {p['nombre']} - {p['h']}x{p['w']} mm", expanded=True):
+        with st.expander(f"🛠 {p.get('nombre', 'Forma')} - {p.get('h',0)}x{p.get('w',0)} mm", expanded=True):
             col1, col2, col3 = st.columns(3)
             
             # --- COLUMNA 1: DATOS BÁSICOS ---
@@ -275,11 +305,9 @@ if not modo_comercial:
                 p['pf'] = st.selectbox("C. Frontal", opts_pf, index=idx_pf, key=f"pf_{p_id}")
                 
                 # Actualizar gramaje si cambia el material o si viene 0 del JSON pero hay material
-                gramaje_std = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
                 if p['pf'] != pf_prev: 
-                    p['gf'] = gramaje_std
+                    p['gf'] = PRECIOS["cartoncillo"][p['pf']]["gramaje"]
                 
-                # Input de gramaje manual
                 val_gf = int(p.get('gf', 0))
                 p['gf'] = st.number_input("Gramaje F.", value=val_gf, key=f"gf_{p_id}")
                 
@@ -335,20 +363,22 @@ if not modo_comercial:
                 
                 if st.button("🗑 Borrar Forma", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
 
-    # SECCIÓN EXTRAS (Sin cambios, pero incluída para contexto)
+    # SECCIÓN EXTRAS
     st.divider(); st.subheader("📦 2. Almacén de Accesorios")
     opts_extra = ["---"] + list(PRECIOS["extras_base"].keys())
     ex_sel = st.selectbox("Añadir extra:", opts_extra)
+    
     if st.button("➕ Añadir Accesorio") and ex_sel != "---":
         st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": PRECIOS["extras_base"][ex_sel], "cantidad": 1.0}); st.rerun()
     for i, ex in enumerate(st.session_state.lista_extras_grabados):
         ca, cb, cc, cd = st.columns([3, 2, 2, 1]); ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud compra", value=float(ex['coste']), key=f"exc_{i}"); ex['cantidad'] = cc.number_input("Cant/Ud prod", value=float(ex['cantidad']), key=f"exq_{i}")
         if cd.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-    # SECCIÓN EMBALAJES (Sin cambios)
+    # SECCIÓN EMBALAJES
     st.divider(); st.subheader("📦 3. Complemento de Embalajes")
     opts_emb = ["Plano (Canal 5)", "En Volumen", "Guainas"]
     tipo_em = st.selectbox("Tipo de Caja:", opts_emb)
+    
     if st.button("➕ Añadir Embalaje"):
         st.session_state.lista_embalajes.append({"tipo": tipo_em, "l": 0, "w": 0, "a": 0, "uds": 1}); st.rerun()
     for i, em in enumerate(st.session_state.lista_embalajes):
@@ -369,7 +399,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         for p_id, p in st.session_state.piezas_dict.items():
             nb = q_n * p["pliegos"]
             
-            # --- NUEVA LÓGICA MERMAS INDEPENDIENTES CARA/DORSO ---
+            # --- LÓGICA MERMAS INDEPENDIENTES CARA/DORSO ---
             # Cara: Si no hay impresión, solo mermas normales (manipulado), ignoramos impresión.
             mn_f, mi_f = calcular_mermas(nb, (p["im"]=="Digital"))
             waste_f = mn_f + (mi_f if p["im"] != "No" else 0)
@@ -475,7 +505,7 @@ if modo_comercial and res_final:
     
     # Detalle Formas
     for p in st.session_state.piezas_dict.values():
-        mat_info = f"{p['pf']} ({p['gf']}g)" if p['pf'] != "Ninguno" else "Sin cartoncillo"
+        mat_info = f"{p['pf']} ({p.get('gf',0)}g)" if p['pf'] != "Ninguno" else "Sin cartoncillo"
         desc_html += f"<li style='margin-bottom: 5px;'>🔹 <b>{p['nombre']}</b>: {p['h']}x{p['w']} mm. Material: {mat_info}.</li>"
     
     # Detalle Accesorios
@@ -495,9 +525,6 @@ if modo_comercial and res_final:
     desc_html += "</ul></div>"
 
     # 2. Generar Tabla de Precios
-    # Cabeceras exactas solicitadas
-    headers = ["Cantidad", "Precio venta unitario", "Precio Embalaje unitario", "Precio Troquel (total)", "Precio Venta Total", "Unitario (Todo Incluido)"]
-    
     rows_html = ""
     for r in res_final:
         rows_html += f"""<tr>
@@ -531,7 +558,6 @@ if modo_comercial and res_final:
 else:
     if res_final:
         st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
-        # Ajustamos el dataframe normal para que tenga coherencia con los nuevos datos, aunque manteniendo simplicidad visual si se quiere
         st.dataframe(pd.DataFrame(res_final), use_container_width=True)
         
         for q, info in desc_full.items():
