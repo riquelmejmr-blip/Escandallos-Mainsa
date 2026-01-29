@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import json
-import re  # <--- IMPORTANTE: Librería para limpiar el texto "sucio" del GEM
+import re  # Librería para limpiar el texto "sucio" del GEM
 
 # --- 1. BASE DE DATOS DE PRECIOS ---
 PRECIOS = {
@@ -102,14 +102,13 @@ with st.sidebar:
                 except Exception as e:
                     st.error(f"Error archivo: {e}")
 
-        # Opción 2: Pegar Texto (CON LIMPIEZA AUTOMÁTICA)
+        # Opción 2: Pegar Texto (CON LIMPIEZA AUTOMÁTICA MEJORADA)
         with tab_paste:
-            texto_json = st.text_area("Pega el JSON aquí", height=150, help="Pega el código que te da el GEM, aunque tenga cosas raras.")
+            texto_json = st.text_area("Pega el JSON aquí", height=150, help="Pega el código que te da el GEM.")
             if st.button("🚀 Cargar desde Texto"):
                 try:
                     if texto_json.strip():
                         # LIMPIEZA DE ETIQUETAS DEL GEM [cite...]
-                        # Esta linea elimina todo lo que esté entre corchetes tipo [cite...] o 
                         texto_limpio = re.sub(r'\[cite.*?\]', '', texto_json)
                         texto_limpio = re.sub(r'\[cite_start.*?\]', '', texto_limpio)
                         
@@ -117,23 +116,22 @@ with st.sidebar:
                     else:
                         st.warning("El campo está vacío")
                 except Exception as e:
-                    st.error(f"Error en el formato del JSON. Asegúrate de copiar desde el primer {{ hasta el último }}. Detalle: {e}")
+                    st.error(f"Error en el formato del JSON: {e}")
 
-        # PROCESADO COMÚN (Si hay datos de cualquiera de las dos vías)
+        # PROCESADO COMÚN
         if datos_json:
             try:
                 di = datos_json
                 
                 # A. ACTUALIZAR VARIABLES SIMPLES
-                if "cli" in di: st.session_state["cli_input"] = di["cli"]
-                if "brf" in di: st.session_state["brf_input"] = str(di["brf"])
+                if "cli" in di: st.session_state["cli_input"] = di["cli"].strip() if isinstance(di["cli"], str) else di["cli"]
+                if "brf" in di: st.session_state["brf_input"] = str(di["brf"]).strip()
                 if "cantidades" in di: st.session_state["cants_input"] = ", ".join(map(str, di["cantidades"]))
                 
                 # Tiempo y Unidad
                 if "tiempo_manipulacion" in di: st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
                 if "unidad_manipulacion" in di:
-                     val_u = di["unidad_manipulacion"]
-                     # Lógica para detectar Minutos o Segundos
+                     val_u = str(di["unidad_manipulacion"])
                      if "in" in val_u.lower(): st.session_state["unidad_t_input"] = "Minutos"
                      else: st.session_state["unidad_t_input"] = "Segundos"
 
@@ -144,21 +142,20 @@ with st.sidebar:
                 if "imp_fijo" in di: st.session_state["fijo_input"] = float(di["imp_fijo"])
                 if "margen" in di: st.session_state["margen_input"] = float(di["margen"])
 
-                # B. LIMPIEZA DE LISTAS (EXTRA ROBUSTEZ)
+                # B. LIMPIEZA DE LISTAS
                 # Embalajes
                 raw_emb = di.get("embalajes", [])
                 clean_emb = []
                 for e in raw_emb:
                     l_val, w_val = e.get("l", 0), e.get("w", 0)
-                    # Intentar leer medidas si vienen en texto
                     if "medida" in e and isinstance(e["medida"], str):
                         try:
                             parts = e["medida"].lower().replace("mm","").replace("x","*").split("*")
                             if len(parts) >= 2: l_val, w_val = int(parts[0].strip()), int(parts[1].strip())
                         except: pass
                     
-                    # Validar tipo de caja
                     tipo_ok = e.get("tipo", "Plano (Canal 5)")
+                    if isinstance(tipo_ok, str): tipo_ok = tipo_ok.strip()
                     if tipo_ok not in ["Plano (Canal 5)", "En Volumen", "Guainas"]:
                         tipo_ok = "Plano (Canal 5)"
                     
@@ -169,19 +166,18 @@ with st.sidebar:
                 raw_ext = di.get("extras", [])
                 clean_ext = []
                 for ex in raw_ext:
-                    # A veces el GEM pone "descripcion" o "nota" en vez de nombre
                     nom = ex.get("nombre", ex.get("nota", ex.get("descripcion", "Accesorio")))
+                    if isinstance(nom, str): nom = nom.strip()
                     coste = ex.get("coste", 0.0)
                     cant = ex.get("cantidad", 1.0)
                     clean_ext.append({"nombre": nom, "coste": coste, "cantidad": cant})
                 st.session_state.lista_extras_grabados = clean_ext
                 
-                # C. PIEZAS (INYECCIÓN EN PANTALLA)
+                # C. PIEZAS (INYECCIÓN EN PANTALLA CON STRIP)
                 if "piezas" in di:
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
                     
                     for pid, p in st.session_state.piezas_dict.items():
-                        # Mapa para conectar JSON -> Widget Streamlit
                         mapa_widgets = {
                             "nombre": "n_", "pliegos": "p_", "h": "h_", "w": "w_", 
                             "im": "im_", "nt": "nt_", "ba": "ba_", "ld": "ld_", "pel": "pel_",
@@ -193,29 +189,31 @@ with st.sidebar:
                         
                         for key_json, prefix_widget in mapa_widgets.items():
                             key_streamlit = f"{prefix_widget}{pid}"
-                            
-                            # Mapeos especiales si el nombre del campo difiere
                             val = None
+                            
+                            # Obtener valor
                             if key_json in p: val = p[key_json]
-                            # A veces PV troquel viene con otro nombre
                             if key_json == "pv_troquel" and "coste_troquel_estimado" in p: 
-                                # Si es un string con texto (ej: "500€ aprox"), intentamos sacar numero o dejar 0
                                 try: val = float(str(p["coste_troquel_estimado"]).split("€")[0].strip())
                                 except: val = 0.0
 
                             if val is not None:
-                                # Conversión de tipos para evitar errores de widget
+                                # LIMPIEZA DE ESPACIOS SI ES TEXTO (CRÍTICO PARA MATERIALES)
+                                if isinstance(val, str):
+                                    val = val.strip()
+                                
+                                # Conversión de tipos
                                 if prefix_widget in ["p_", "pvt_", "gf_", "gd_"]: val = float(val)
                                 if prefix_widget in ["h_", "w_", "nt_", "ntd_"]: val = int(val)
                                 st.session_state[key_streamlit] = val
 
-                st.toast("✅ Datos procesados e inyectados.", icon="🧠")
-                st.rerun() # Refrescar pantalla
+                st.toast("✅ Datos cargados correctamente.", icon="🧠")
+                st.rerun()
                 
             except Exception as e:
                 st.error(f"Error procesando datos: {e}")
 
-    # --- INPUTS MANUALES (VINCULADOS) ---
+    # --- INPUTS MANUALES ---
     st.session_state.cli = st.text_input("Cliente", key="cli_input", value=st.session_state.get("cli_input", ""))
     st.session_state.brf = st.text_input("Nº Briefing", key="brf_input", value=st.session_state.get("brf_input", ""))
     st.divider()
@@ -254,7 +252,7 @@ with st.sidebar:
     }
     st.download_button("💾 Guardar Proyecto", json.dumps(datos_exp, indent=4), file_name=nombre_archivo)
 
-# --- 5. ENTRADA DE DATOS (ZONA BLINDADA ANTI-ERRORES) ---
+# --- 5. ENTRADA DE DATOS (ZONA BLINDADA) ---
 if not modo_comercial:
     # SECCIÓN 1: FORMAS
     st.header("1. Definición Técnica de Formas")
