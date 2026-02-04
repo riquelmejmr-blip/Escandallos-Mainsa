@@ -47,14 +47,22 @@ FORMATOS_STD = {
 
 # --- 2. MOTORES TÉCNICOS ---
 def calcular_mermas_estandar(n, es_digital=False):
-    """Devuelve (merma_procesos, merma_impresion)"""
-    if es_digital: return int(n * 0.05), int(n * 0.05) 
-    if n < 100: return 15, 135
-    if n < 200: return 30, 150
-    if n < 600: return 40, 160
-    if n < 1000: return 50, 170
-    if n < 2000: return 60, 170
-    return 120, 170
+    """
+    Devuelve una tupla: (merma_procesos_unidades, merma_impresion_hojas)
+    - Procesos: % variable (roturas, manipulado)
+    - Impresión: fijo de arranque (maculaturas, planchas)
+    """
+    if es_digital: 
+        # Digital: Muy poco arranque, algo de proceso
+        return int(n * 0.02), 10 
+    
+    # Offset: Arranque alto (hojas), Proceso variable
+    if n < 100: return 5, 100    # 5 uds rotas, 100 hojas arranque
+    if n < 200: return 10, 120   # 10 uds rotas, 120 hojas arranque
+    if n < 600: return 20, 150   # 20 uds rotas, 150 hojas arranque
+    if n < 1000: return 30, 200  # 30 uds rotas, 200 hojas arranque
+    if n < 2000: return 50, 250
+    return int(n*0.03), 300      # 3% rotura, 300 hojas arranque para largas
 
 # --- 3. INICIALIZACIÓN ---
 st.set_page_config(page_title="MAINSA ADMIN V33", layout="wide")
@@ -340,26 +348,23 @@ if not modo_comercial:
             st.session_state.costes_embalaje_manual[q] = val
     else: st.warning("Define primero las cantidades en el panel lateral.")
 
-    # --- SECCIÓN 4: MERMAS MANUALES DIVIDIDAS ---
+    # --- SECCIÓN 4: MERMAS MANUALES DETALLADAS ---
     st.divider(); st.subheader("⚙️ 4. Gestión de Mermas (Manual)")
-    with st.expander("Configuración de Mermas Detallada (Imp + Procesos)"):
+    with st.expander("Configuración de Mermas Detallada (Imp + Procesos)", expanded=True):
         tiene_dig = any(pz["im"] == "Digital" or pz.get("im_d") == "Digital" for pz in st.session_state.piezas_dict.values())
         
         if lista_cants:
-            # Creamos filas para cada cantidad
             for q in lista_cants:
                 c1, c2, c3 = st.columns([1, 2, 2])
                 c1.write(f"**{q} uds**")
                 
-                # Calculamos default
                 std_proc, std_imp = calcular_mermas_estandar(q, tiene_dig)
                 
-                # Recuperar o usar default
                 curr_imp = st.session_state.mermas_imp_manual.get(q, std_imp)
                 curr_proc = st.session_state.mermas_proc_manual.get(q, std_proc)
                 
-                val_imp = c2.number_input(f"🎨 Merma Impresión", value=int(curr_imp), key=f"m_imp_{q}")
-                val_proc = c3.number_input(f"⚙️ Merma Procesos", value=int(curr_proc), key=f"m_proc_{q}")
+                val_imp = c2.number_input(f"Imp. (Hojas Fijas)", value=int(curr_imp), key=f"m_imp_{q}")
+                val_proc = c3.number_input(f"Proc. (Unidades)", value=int(curr_proc), key=f"m_proc_{q}")
                 
                 st.session_state.mermas_imp_manual[q] = val_imp
                 st.session_state.mermas_proc_manual[q] = val_proc
@@ -373,31 +378,34 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
         tiene_dig = any(pz["im"] == "Digital" or pz.get("im_d") == "Digital" for pz in st.session_state.piezas_dict.values())
         
-        # --- RECUPERAR MERMAS MANUALES ---
-        # Si no están definidas, el fallback es 0 (aunque deberían estarlo por la UI)
-        merma_imp_user = st.session_state.mermas_imp_manual.get(q_n, 0)
-        merma_proc_user = st.session_state.mermas_proc_manual.get(q_n, 0)
+        merma_imp_hojas = st.session_state.mermas_imp_manual.get(q_n, 0)
+        merma_proc_unidades = st.session_state.mermas_proc_manual.get(q_n, 0)
         
-        # CANTIDAD TALLER = Cantidad Real + Merma Procesos (El impresor entrega esto al taller)
-        qp_taller = q_n + merma_proc_user
+        # CANTIDAD A MANIPULAR = Cantidad Neta + Merma Procesos (Unidades que salen de imprenta)
+        qp_taller = q_n + merma_proc_unidades
 
         coste_f, det_f = 0.0, []
         
         for p_id, p in st.session_state.piezas_dict.items():
+            # 1. Hojas Netas para cubrir el pedido
             nb = q_n * p["pliegos"]
             
-            # --- CÁLCULO DE HOJAS DE COMPRA ---
-            # Hojas Compra = (Neto + Merma Proc + Merma Imp) * Pliegos
-            waste_f = (merma_proc_user + merma_imp_user) * p["pliegos"]
-            waste_d = waste_f # Asumimos misma merma para dorso
+            # 2. Hojas extra por Merma Procesos (Convertimos Unidades a Hojas)
+            waste_proc_hojas = merma_proc_unidades * p["pliegos"]
             
-            hc_f = nb + waste_f
-            hc_d = nb + waste_d
+            # 3. Hojas extra por Merma Impresión (Son hojas fijas de arranque)
+            waste_imp_hojas = merma_imp_hojas 
             
-            # Hojas de Pasada (Imprenta/Acabados)
-            # Para impresión y acabados se cuenta todo: Neto + Proc + Imp
-            hp = nb + waste_f 
+            # TOTAL HOJAS COMPRA
+            hc_f = nb + waste_proc_hojas + waste_imp_hojas
+            hc_d = hc_f 
             
+            # Hojas Pasada (Impresión/Acabados): Se imprime todo lo que se compra
+            hp = hc_f 
+            
+            # Info para Auditoría
+            debug_merma = f"Imp: {waste_imp_hojas} hojas | Proc: {merma_proc_unidades} uds ({waste_proc_hojas:.1f} hojas)"
+
             m2 = (p["w"]*p["h"])/1_000_000
             
             c_cf = (hc_f * m2 * (p.get('gf',0)/1000) * PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
@@ -430,7 +438,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "Pieza": p["nombre"], "Mat. Frontal": c_cf, "Mat. Dorso": c_cd, "Mat. Ondulado": c_pla,
                 "Imp. Cara": c_if, "Imp. Dorso": c_id, "Acab. Peliculado": c_pel_f + c_pel_d, 
                 "Acab. Contracolado": c_peg, "Acab. Troquel/Corte": c_arr + c_tir,
-                "Total Imp": s_imp, "Total Narba": s_narba, "Total Mat": s_mat, "Subtotal": sub
+                "Total Imp": s_imp, "Total Narba": s_narba, "Total Mat": s_mat, "Subtotal": sub,
+                "_debug": debug_merma
             })
 
         c_ext_tot = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
@@ -450,7 +459,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             "Precio Embalaje Unitario": f"{pv_emb_ud:.3f}€", "Precio Troquel (Total)": f"{total_pv_troqueles:.2f}€",
             "Precio Venta Total": f"{pvp_total_todo:.2f}€", "Unitario (Todo Incluido)": f"{p_total_unitario_all:.3f}€"
         })
-        desc_full[q_n] = {"det": det_f, "mo": c_mo, "extras": c_ext_tot, "fijo": imp_fijo_pvp, "taller": coste_f + c_mo + c_ext_tot, "qp": qp_taller}
+        desc_full[q_n] = {"det": det_f, "mo": c_mo, "extras": c_ext_tot, "fijo": imp_fijo_pvp, "taller": coste_f + c_mo + c_ext_tot, "qp": qp_taller, 
+                          "m_imp": merma_imp_hojas, "m_proc": merma_proc_unidades}
 
 # --- 7. SALIDA VISUAL ---
 if modo_comercial and res_final:
@@ -494,6 +504,15 @@ else:
         
         for q, info in desc_full.items():
             with st.expander(f"🔍 Auditoría Taller {q} uds (Taller: {info['qp']} uds)"):
+                
+                # --- VISUALIZACIÓN CRISTALINA DE MERMAS ---
+                st.info(f"""
+                **CONTROL DE MERMAS:**
+                \n🔹 **Arranque Impresión:** {info['m_imp']} hojas fijas (Se tiran al inicio)
+                \n🔹 **Merma Procesos:** {info['m_proc']} unidades perdidas en taller
+                \n✅ **Total a Manipular (Taller):** {q} + {info['m_proc']} = **{info['qp']} unidades**
+                """)
+
                 df_raw = pd.DataFrame(info["det"])
                 cols_order = ["Pieza", "Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Total Mat", "Imp. Cara", "Imp. Dorso", "Total Imp", "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte", "Total Narba", "Subtotal"]
                 cols_final = [c for c in cols_order if c in df_raw.columns]
