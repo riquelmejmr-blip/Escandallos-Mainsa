@@ -126,6 +126,8 @@ with st.sidebar:
                 di = datos_json
                 if "cli" in di: st.session_state["cli_input"] = di["cli"].strip() if isinstance(di["cli"], str) else di["cli"]
                 if "brf" in di: st.session_state["brf_input"] = str(di["brf"]).strip()
+                if "desc" in di: st.session_state["desc_input"] = str(di["desc"]).strip()
+                
                 if "cantidades" in di: st.session_state["cants_input"] = ", ".join(map(str, di["cantidades"]))
                 if "tiempo_manipulacion" in di: st.session_state["t_input_widget"] = float(di["tiempo_manipulacion"])
                 if "unidad_manipulacion" in di:
@@ -145,13 +147,18 @@ with st.sidebar:
                     clean_ext.append({"nombre": nom, "coste": ex.get("coste", 0.0), "cantidad": ex.get("cantidad", 1.0)})
                 st.session_state.lista_extras_grabados = clean_ext
                 
+                # RECARGAR COSTES Y MERMAS MANUALES
                 if "costes_emb" in di:
                     st.session_state.costes_embalaje_manual = {int(k): float(v) for k, v in di["costes_emb"].items()}
                 else: st.session_state.costes_embalaje_manual = {}
                 
-                # Reset mermas manuales al importar nuevo
-                st.session_state.mermas_imp_manual = {}
-                st.session_state.mermas_proc_manual = {}
+                if "mermas_imp" in di:
+                    st.session_state.mermas_imp_manual = {int(k): int(v) for k, v in di["mermas_imp"].items()}
+                else: st.session_state.mermas_imp_manual = {}
+
+                if "mermas_proc" in di:
+                    st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in di["mermas_proc"].items()}
+                else: st.session_state.mermas_proc_manual = {}
 
                 if "piezas" in di:
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
@@ -180,8 +187,11 @@ with st.sidebar:
                 st.rerun()
             except Exception as e: st.error(f"Error procesando datos: {e}")
 
-    st.session_state.cli = st.text_input("Cliente", key="cli_input", value=st.session_state.get("cli_input", ""))
+    # --- NUEVO ORDEN DE INPUTS ---
     st.session_state.brf = st.text_input("Nº Briefing", key="brf_input", value=st.session_state.get("brf_input", ""))
+    st.session_state.cli = st.text_input("Cliente", key="cli_input", value=st.session_state.get("cli_input", ""))
+    st.session_state.desc = st.text_input("Descripción", key="desc_input", value=st.session_state.get("desc_input", ""))
+    
     st.divider()
     
     cants_str = st.text_input("Cantidades (ej: 500, 1000)", key="cants_input", value=st.session_state.get("cants_input", "0"))
@@ -205,17 +215,26 @@ with st.sidebar:
     modo_comercial = st.checkbox("🌟 VISTA OFERTA COMERCIAL", value=False)
     
     st.header("📂 Gestión de Archivos")
-    partes_nombre = [st.session_state.brf, st.session_state.cli]
-    nombre_archivo = "ADMIN_" + "_".join([str(p).strip() for p in partes_nombre if str(p).strip()]) + ".json"
+    
+    # --- NOMBRE DE ARCHIVO AUTOMÁTICO ---
+    # Limpiamos caracteres raros para evitar errores en windows
+    safe_brf = re.sub(r'[\\/*?:"<>|]', "", st.session_state.brf).replace(" ", "_")
+    safe_cli = re.sub(r'[\\/*?:"<>|]', "", st.session_state.cli).replace(" ", "_")
+    safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc).replace(" ", "_")
+    
+    partes_nombre = [safe_brf, safe_cli, safe_desc]
+    nombre_archivo = "_".join([p for p in partes_nombre if p]) + ".json"
+    if not nombre_archivo or nombre_archivo == ".json": nombre_archivo = "proyecto_escandallo.json"
     
     datos_exp = {
-        "brf": st.session_state.brf, "cli": st.session_state.cli, "piezas": st.session_state.piezas_dict, 
+        "brf": st.session_state.brf, "cli": st.session_state.cli, "desc": st.session_state.desc,
+        "piezas": st.session_state.piezas_dict, 
         "extras": st.session_state.lista_extras_grabados, "costes_emb": st.session_state.costes_embalaje_manual,
         "mermas_imp": st.session_state.mermas_imp_manual, "mermas_proc": st.session_state.mermas_proc_manual,
         "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, 
         "tiempo_manipulacion": t_input, "dificultad": dif_ud, "unidad_manipulacion": unidad_t
     }
-    st.download_button("💾 Guardar Proyecto", json.dumps(datos_exp, indent=4), file_name=nombre_archivo)
+    st.download_button(f"💾 Guardar {nombre_archivo}", json.dumps(datos_exp, indent=4), file_name=nombre_archivo)
 
 # --- 5. ENTRADA DE DATOS ---
 if not modo_comercial:
