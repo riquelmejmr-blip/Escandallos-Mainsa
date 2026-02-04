@@ -93,11 +93,16 @@ with st.sidebar:
         tab_up, tab_paste = st.tabs(["📂 Subir Archivo", "📋 Pegar Texto"])
         datos_json = None
         
+        # --- CORRECCIÓN: EVITAR BUCLE INFINITO DE RECARGA ---
         with tab_up:
             subida_ia = st.file_uploader("Sube el JSON", type=["json"], key="uploader_ia")
             if subida_ia:
-                try: datos_json = json.load(subida_ia)
-                except Exception as e: st.error(f"Error archivo: {e}")
+                # Comprobamos si el archivo es nuevo comparando con el último procesado
+                if 'last_loaded_name' not in st.session_state or st.session_state.last_loaded_name != subida_ia.name:
+                    try: 
+                        datos_json = json.load(subida_ia)
+                        st.session_state.last_loaded_name = subida_ia.name # Marcamos como leído
+                    except Exception as e: st.error(f"Error archivo: {e}")
 
         with tab_paste:
             texto_json = st.text_area("Pega el JSON aquí", height=150)
@@ -126,6 +131,7 @@ with st.sidebar:
                 if "imp_fijo" in di: st.session_state["fijo_input"] = float(di["imp_fijo"])
                 if "margen" in di: st.session_state["margen_input"] = float(di["margen"])
 
+                # Extras
                 raw_ext = di.get("extras", [])
                 clean_ext = []
                 for ex in raw_ext:
@@ -133,8 +139,15 @@ with st.sidebar:
                     if isinstance(nom, str): nom = nom.strip()
                     clean_ext.append({"nombre": nom, "coste": ex.get("coste", 0.0), "cantidad": ex.get("cantidad", 1.0)})
                 st.session_state.lista_extras_grabados = clean_ext
-                st.session_state.costes_embalaje_manual = {}
+                
+                # --- CORRECCIÓN: CARGAR COSTES DE EMBALAJE (FALTABA ESTO) ---
+                if "costes_emb" in di:
+                    # Recuperamos el diccionario convirtiendo las claves de string a int (JSON guarda keys como string)
+                    st.session_state.costes_embalaje_manual = {int(k): float(v) for k, v in di["costes_emb"].items()}
+                else:
+                    st.session_state.costes_embalaje_manual = {}
 
+                # Piezas
                 if "piezas" in di:
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
                     for pid, p in st.session_state.piezas_dict.items():
