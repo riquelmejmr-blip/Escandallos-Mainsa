@@ -73,6 +73,7 @@ def crear_forma_vacia(index):
 if 'piezas_dict' not in st.session_state: st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
 if 'lista_extras_grabados' not in st.session_state: st.session_state.lista_extras_grabados = []
 if 'costes_embalaje_manual' not in st.session_state: st.session_state.costes_embalaje_manual = {}
+if 'mermas_manual' not in st.session_state: st.session_state.mermas_manual = {}
 
 st.markdown("""<style>
     .comercial-box { background-color: white; padding: 30px; border: 2px solid #1E88E5; border-radius: 10px; color: #333; }
@@ -93,15 +94,14 @@ with st.sidebar:
         tab_up, tab_paste = st.tabs(["📂 Subir Archivo", "📋 Pegar Texto"])
         datos_json = None
         
-        # --- CORRECCIÓN: EVITAR BUCLE INFINITO DE RECARGA ---
         with tab_up:
             subida_ia = st.file_uploader("Sube el JSON", type=["json"], key="uploader_ia")
             if subida_ia:
-                # Comprobamos si el archivo es nuevo comparando con el último procesado
+                # EVITAR RECARGA INFINITA
                 if 'last_loaded_name' not in st.session_state or st.session_state.last_loaded_name != subida_ia.name:
                     try: 
                         datos_json = json.load(subida_ia)
-                        st.session_state.last_loaded_name = subida_ia.name # Marcamos como leído
+                        st.session_state.last_loaded_name = subida_ia.name
                     except Exception as e: st.error(f"Error archivo: {e}")
 
         with tab_paste:
@@ -131,7 +131,6 @@ with st.sidebar:
                 if "imp_fijo" in di: st.session_state["fijo_input"] = float(di["imp_fijo"])
                 if "margen" in di: st.session_state["margen_input"] = float(di["margen"])
 
-                # Extras
                 raw_ext = di.get("extras", [])
                 clean_ext = []
                 for ex in raw_ext:
@@ -140,14 +139,14 @@ with st.sidebar:
                     clean_ext.append({"nombre": nom, "coste": ex.get("coste", 0.0), "cantidad": ex.get("cantidad", 1.0)})
                 st.session_state.lista_extras_grabados = clean_ext
                 
-                # --- CORRECCIÓN: CARGAR COSTES DE EMBALAJE (FALTABA ESTO) ---
+                # Cargar costes manuales si existen
                 if "costes_emb" in di:
-                    # Recuperamos el diccionario convirtiendo las claves de string a int (JSON guarda keys como string)
                     st.session_state.costes_embalaje_manual = {int(k): float(v) for k, v in di["costes_emb"].items()}
-                else:
-                    st.session_state.costes_embalaje_manual = {}
+                else: st.session_state.costes_embalaje_manual = {}
+                
+                # Reset mermas al importar nuevo
+                st.session_state.mermas_manual = {}
 
-                # Piezas
                 if "piezas" in di:
                     st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
                     for pid, p in st.session_state.piezas_dict.items():
@@ -206,6 +205,7 @@ with st.sidebar:
     datos_exp = {
         "brf": st.session_state.brf, "cli": st.session_state.cli, "piezas": st.session_state.piezas_dict, 
         "extras": st.session_state.lista_extras_grabados, "costes_emb": st.session_state.costes_embalaje_manual,
+        "mermas_man": st.session_state.mermas_manual, # Guardar mermas
         "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, 
         "tiempo_manipulacion": t_input, "dificultad": dif_ud, "unidad_manipulacion": unidad_t
     }
@@ -219,11 +219,10 @@ if not modo_comercial:
         nid = max(st.session_state.piezas_dict.keys()) + 1
         st.session_state.piezas_dict[nid] = crear_forma_vacia(nid); st.rerun()
     if c_btns[1].button("🗑 Reiniciar Todo"):
-        st.session_state.piezas_dict = {0: crear_forma_vacia(0)}; st.session_state.lista_extras_grabados = []; st.session_state.costes_embalaje_manual = {}; st.rerun()
+        st.session_state.piezas_dict = {0: crear_forma_vacia(0)}; st.session_state.lista_extras_grabados = []; st.session_state.costes_embalaje_manual = {}; st.session_state.mermas_manual = {}; st.rerun()
 
-    # --- FUNCIONES CALLBACK PARA EVITAR ERRORES DE API ---
+    # --- CALLBACKS ---
     def callback_cambio_frontal(pid):
-        """Se ejecuta ANTES de redibujar cuando cambia el material frontal"""
         new_mat = st.session_state[f"pf_{pid}"]
         if new_mat != "Ninguno":
             st.session_state[f"gf_{pid}"] = PRECIOS["cartoncillo"][new_mat]["gramaje"]
@@ -234,13 +233,11 @@ if not modo_comercial:
             st.session_state[f"nt_{pid}"] = 0
 
     def callback_cambio_dorso(pid):
-        """Se ejecuta ANTES de redibujar cuando cambia el material dorso"""
         new_mat = st.session_state[f"pd_{pid}"]
         if new_mat != "Ninguno":
             st.session_state[f"gd_{pid}"] = PRECIOS["cartoncillo"][new_mat]["gramaje"]
 
     def callback_medida_estandar(pid):
-        """Aplica la medida estándar seleccionada"""
         fmt = st.session_state[f"std_{pid}"]
         if fmt != "Personalizado":
             nh, nw = FORMATOS_STD[fmt]
@@ -254,7 +251,6 @@ if not modo_comercial:
                 p['nombre'] = st.text_input("Etiqueta", p.get('nombre', f"Forma {p_id+1}"), key=f"n_{p_id}")
                 p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get('pliegos', 1.0)), key=f"p_{p_id}")
                 
-                # Desplegable Medidas con Callback
                 st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}", 
                              on_change=callback_medida_estandar, args=(p_id,))
 
@@ -277,8 +273,6 @@ if not modo_comercial:
             with col2:
                 opts_pf = list(PRECIOS["cartoncillo"].keys())
                 val_pf = p.get('pf', 'Ninguno'); idx_pf = opts_pf.index(val_pf) if val_pf in opts_pf else 0 
-                
-                # SELECTBOX CON CALLBACK DE CAMBIO DE MATERIAL
                 p['pf'] = st.selectbox("C. Frontal", opts_pf, index=idx_pf, key=f"pf_{p_id}", 
                                        on_change=callback_cambio_frontal, args=(p_id,))
                 
@@ -288,15 +282,12 @@ if not modo_comercial:
                 val_pl = p.get('pl', 'Ninguna'); idx_pl = opts_pl.index(val_pl) if val_pl in opts_pl else 0
                 p['pl'] = st.selectbox("Plancha Base", opts_pl, index=idx_pl, key=f"pl_{p_id}")
                 
-                # CALIDAD B/C POR DEFECTO
                 opts_ap = ["C/C", "B/C", "B/B"]
                 val_ap = p.get('ap', 'B/C'); idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 1
                 p['ap'] = st.selectbox("Calidad", opts_ap, index=idx_ap, key=f"ap_{p_id}")
                 
                 opts_pd = list(PRECIOS["cartoncillo"].keys())
                 val_pd = p.get('pd', 'Ninguno'); idx_pd = opts_pd.index(val_pd) if val_pd in opts_pd else 0
-                
-                # SELECTBOX CON CALLBACK DE CAMBIO DE DORSO
                 p['pd'] = st.selectbox("C. Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}", 
                                        on_change=callback_cambio_dorso, args=(p_id,))
                 
@@ -346,6 +337,27 @@ if not modo_comercial:
             st.session_state.costes_embalaje_manual[q] = val
     else: st.warning("Define primero las cantidades en el panel lateral.")
 
+    # --- NUEVA SECCIÓN DE MERMAS MANUALES ---
+    st.divider(); st.subheader("⚙️ 4. Gestión de Mermas (Manual)")
+    with st.expander("Configuración de Mermas por Cantidad"):
+        st.info("Define la merma TOTAL (arranque + rodaje) en unidades. Por defecto el sistema sugiere la merma estándar.")
+        # Detectamos si hay digital para sugerir valor
+        tiene_dig = any(pz["im"] == "Digital" or pz.get("im_d") == "Digital" for pz in st.session_state.piezas_dict.values())
+        
+        if lista_cants:
+            cols_merma = st.columns(len(lista_cants))
+            for i, q in enumerate(lista_cants):
+                # Calculamos sugerencia estándar
+                std_var, std_fix = calcular_mermas(q, tiene_dig)
+                default_merma = int(std_var + std_fix)
+                
+                # Usamos el valor guardado si existe, sino el default
+                current_merma = st.session_state.mermas_manual.get(q, default_merma)
+                
+                val_m = cols_merma[i].number_input(f"Merma Total {q} uds", value=int(current_merma), key=f"merma_man_{q}")
+                st.session_state.mermas_manual[q] = val_m
+        else: st.warning("Define primero las cantidades.")
+
 # --- 6. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
@@ -353,15 +365,43 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     
     for q_n in lista_cants:
         tiene_dig = any(pz["im"] == "Digital" or pz.get("im_d") == "Digital" for pz in st.session_state.piezas_dict.values())
-        mn_m, _ = calcular_mermas(q_n, es_digital=tiene_dig); qp_taller = q_n + mn_m; coste_f, det_f = 0.0, []
+        
+        # --- LÓGICA DE MERMA MANUAL vs AUTOMÁTICA ---
+        # Si hay valor en mermas_manual, lo usamos. Si no, calculamos estándar.
+        merma_manual_user = st.session_state.mermas_manual.get(q_n)
+        
+        if merma_manual_user is not None:
+            # USAR MANUAL
+            qp_taller = q_n + merma_manual_user
+            waste_run = merma_manual_user # Asumimos todo como rodaje/total
+            waste_setup = 0 # Ya incluido en el total manual
+        else:
+            # USAR AUTOMÁTICA
+            mn_m, _ = calcular_mermas(q_n, es_digital=tiene_dig) # Para taller solo variable
+            qp_taller = q_n + mn_m
+            # Para papel se recalcula dentro por pieza (por si usan lógica distinta)
+            waste_run = None 
+
+        coste_f, det_f = 0.0, []
         
         for p_id, p in st.session_state.piezas_dict.items():
             nb = q_n * p["pliegos"]
-            mn_f, mi_f = calcular_mermas(nb, (p["im"]=="Digital"))
-            waste_f = mn_f + (mi_f if p["im"] != "No" else 0); hc_f = nb + waste_f
-            mn_d, mi_d = calcular_mermas(nb, (p.get("im_d")=="Digital"))
-            waste_d = mn_d + (mi_d if p.get("im_d", "No") != "No" else 0); hc_d = nb + waste_d
-            mn_gen, _ = calcular_mermas(nb, (p["im"]=="Digital" or p.get("im_d")=="Digital")); hp = nb + mn_gen 
+            
+            if merma_manual_user is not None:
+                # OVERRIDE MANUAL DE MERMAS DE MATERIAL
+                waste_f = merma_manual_user * p["pliegos"]
+                waste_d = merma_manual_user * p["pliegos"]
+                hc_f = nb + waste_f
+                hc_d = nb + waste_d
+                hp = nb + (merma_manual_user * p["pliegos"])
+            else:
+                # CÁLCULO ESTÁNDAR ORIGINAL
+                mn_f, mi_f = calcular_mermas(nb, (p["im"]=="Digital"))
+                waste_f = mn_f + (mi_f if p["im"] != "No" else 0); hc_f = nb + waste_f
+                mn_d, mi_d = calcular_mermas(nb, (p.get("im_d")=="Digital"))
+                waste_d = mn_d + (mi_d if p.get("im_d", "No") != "No" else 0); hc_d = nb + waste_d
+                mn_gen, _ = calcular_mermas(nb, (p["im"]=="Digital" or p.get("im_d")=="Digital")); hp = nb + mn_gen 
+            
             m2 = (p["w"]*p["h"])/1_000_000
             
             c_cf = (hc_f * m2 * (p.get('gf',0)/1000) * PRECIOS["cartoncillo"][p["pf"]]["precio_kg"])
