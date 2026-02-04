@@ -4,7 +4,6 @@ import json
 import re
 
 # --- 1. BASE DE DATOS INICIAL (PRECIOS POR DEFECTO) ---
-# Se usará para inicializar la app, luego se podrá editar en la pestaña de costes
 PRECIOS_BASE = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0.0, "gramaje": 0},
@@ -31,6 +30,11 @@ PRECIOS_BASE = {
         "CINTA D/CARA": 0.26, "CINTA LOHMAN": 0.49, "CINTA GEL": 1.2,
         "GOMA TERMINALES": 0.079, "IMAN 20x2mm": 1.145, "TUBOS": 1.06,
         "REMACHES": 0.049, "VELCRO": 0.43, "PUNTO ADHESIVO": 0.08
+    },
+    "troquelado": {
+        "Pequeño (< 1000x700)": {"arranque": 48.19, "tiro": 0.06},
+        "Mediano (Estándar)":   {"arranque": 80.77, "tiro": 0.09},
+        "Grande (> 1000x700)":  {"arranque": 107.80, "tiro": 0.135}
     }
 }
 
@@ -60,7 +64,7 @@ def calcular_mermas_estandar(n, es_digital=False):
     return int(n*0.03), 300
 
 # --- 3. INICIALIZACIÓN ---
-st.set_page_config(page_title="MAINSA ADMIN V21", layout="wide")
+st.set_page_config(page_title="MAINSA ADMIN V22", layout="wide")
 
 # Inicialización de la Base de Datos de Precios Editable
 if 'db_precios' not in st.session_state:
@@ -99,11 +103,11 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 tab_calculadora, tab_costes = st.tabs(["🧮 Calculadora", "💰 Base de Datos de Costes"])
 
 # ==============================================================================
-# PESTAÑA 2: GESTIÓN DE COSTES (NUEVA)
+# PESTAÑA 2: GESTIÓN DE COSTES
 # ==============================================================================
 with tab_costes:
-    st.header("Gestión de Costes de Materia Prima")
-    st.info("💡 Los cambios que hagas aquí se aplicarán inmediatamente a los cálculos y se guardarán si exportas el proyecto.")
+    st.header("Gestión de Costes de Materia Prima y Procesos")
+    st.info("💡 Los cambios se aplican al instante. Recuerda guardar el proyecto para conservar estos precios.")
     
     col_c1, col_c2 = st.columns(2)
     
@@ -111,7 +115,6 @@ with tab_costes:
         with st.expander("📄 Cartoncillo (Precio €/Kg)", expanded=True):
             for k, v in st.session_state.db_precios["cartoncillo"].items():
                 if k != "Ninguno":
-                    # Usamos unique keys
                     nuevo_precio = st.number_input(f"{k} (€/kg)", value=float(v["precio_kg"]), format="%.3f", key=f"cost_cart_{k}")
                     st.session_state.db_precios["cartoncillo"][k]["precio_kg"] = nuevo_precio
         
@@ -121,7 +124,6 @@ with tab_costes:
                     st.markdown(f"**{k}**")
                     cols = st.columns(len(v))
                     for idx, (sub_k, sub_v) in enumerate(v.items()):
-                        # peg es pegado, los otros son calidades
                         label = "Pegado" if sub_k == "peg" else f"Calidad {sub_k}"
                         nuevo_val = cols[idx].number_input(f"{label}", value=float(sub_v), format="%.3f", key=f"cost_pla_{k}_{sub_k}")
                         st.session_state.db_precios["planchas"][k][sub_k] = nuevo_val
@@ -133,22 +135,35 @@ with tab_costes:
                 if k != "Sin Peliculado":
                     nuevo_p = st.number_input(f"{k}", value=float(v), format="%.3f", key=f"cost_pel_{k}")
                     st.session_state.db_precios["peliculado"][k] = nuevo_p
-            
-            # Laminado Digital (Variable suelta)
             st.divider()
             lam_dig = st.number_input("Laminado Digital (€/m²)", value=float(st.session_state.db_precios.get("laminado_digital", 3.5)), key="cost_lam_dig")
             st.session_state.db_precios["laminado_digital"] = lam_dig
 
-        with st.expander("🧩 Extras y Accesorios (€/ud)", expanded=True):
+        # --- NUEVA SECCIÓN DE TROQUELADO EDITABLE ---
+        with st.expander("🔪 Troquelado (Arranque y Tiro)", expanded=True):
+            if "troquelado" not in st.session_state.db_precios:
+                st.session_state.db_precios["troquelado"] = PRECIOS_BASE["troquelado"]
+            
+            for k, v in st.session_state.db_precios["troquelado"].items():
+                st.markdown(f"**{k}**")
+                c_arr, c_tir = st.columns(2)
+                
+                n_arr = c_arr.number_input(f"Arranque (€)", value=float(v["arranque"]), format="%.2f", key=f"trq_arr_{k}")
+                n_tir = c_tir.number_input(f"Tiro (€/hoja)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}")
+                
+                st.session_state.db_precios["troquelado"][k]["arranque"] = n_arr
+                st.session_state.db_precios["troquelado"][k]["tiro"] = n_tir
+                st.divider()
+
+        with st.expander("🧩 Extras y Accesorios (€/ud)", expanded=False):
             for k, v in st.session_state.db_precios["extras_base"].items():
                 nuevo_e = st.number_input(f"{k}", value=float(v), format="%.4f", key=f"cost_ext_{k}")
                 st.session_state.db_precios["extras_base"][k] = nuevo_e
 
 # ==============================================================================
-# PESTAÑA 1: CALCULADORA (LÓGICA ORIGINAL)
+# PESTAÑA 1: CALCULADORA
 # ==============================================================================
 with tab_calculadora:
-    # --- PANEL LATERAL ---
     with st.sidebar:
         st.header("⚙️ Configuración")
         
@@ -194,16 +209,18 @@ with tab_calculadora:
                     if "imp_fijo" in di: st.session_state["fijo_input"] = float(di["imp_fijo"])
                     if "margen" in di: st.session_state["margen_input"] = float(di["margen"])
 
-                    # CARGAR DB DE PRECIOS PERSONALIZADA SI EXISTE
+                    # CARGAR DB DE PRECIOS PERSONALIZADA
                     if "db_precios" in di:
                         st.session_state.db_precios = di["db_precios"]
+                        # Asegurar que troquelado existe (retrocompatibilidad)
+                        if "troquelado" not in st.session_state.db_precios:
+                            st.session_state.db_precios["troquelado"] = PRECIOS_BASE["troquelado"]
 
                     raw_ext = di.get("extras", [])
                     clean_ext = []
                     for ex in raw_ext:
                         nom = ex.get("nombre", ex.get("nota", ex.get("descripcion", "Accesorio")))
                         if isinstance(nom, str): nom = nom.strip()
-                        # Usamos coste de la DB actual
                         base_cost = st.session_state.db_precios["extras_base"].get(nom, 0.0)
                         clean_ext.append({"nombre": nom, "coste": base_cost, "cantidad": ex.get("cantidad", 1.0)})
                     st.session_state.lista_extras_grabados = clean_ext
@@ -289,7 +306,7 @@ with tab_calculadora:
             "mermas_imp": st.session_state.mermas_imp_manual, "mermas_proc": st.session_state.mermas_proc_manual,
             "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, 
             "tiempo_manipulacion": t_input, "dificultad": dif_ud, "unidad_manipulacion": unidad_t,
-            "db_precios": st.session_state.db_precios # GUARDAMOS LOS PRECIOS CUSTOM
+            "db_precios": st.session_state.db_precios 
         }
         st.download_button(f"💾 Guardar {nombre_archivo}", json.dumps(datos_exp, indent=4), file_name=nombre_archivo)
 
@@ -308,7 +325,6 @@ with tab_calculadora:
         def callback_cambio_frontal(pid):
             new_mat = st.session_state[f"pf_{pid}"]
             if new_mat != "Ninguno":
-                # Usamos st.session_state.db_precios
                 st.session_state[f"gf_{pid}"] = st.session_state.db_precios["cartoncillo"][new_mat]["gramaje"]
                 st.session_state[f"im_{pid}"] = "Offset"
                 st.session_state[f"nt_{pid}"] = 4
@@ -406,7 +422,6 @@ with tab_calculadora:
         ex_sel = st.selectbox("Añadir extra:", opts_extra)
         
         if st.button("➕ Añadir Accesorio") and ex_sel != "---":
-            # Usar coste de la DB personalizada
             coste_actual = st.session_state.db_precios["extras_base"][ex_sel]
             st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": coste_actual, "cantidad": 1.0}); st.rerun()
         for i, ex in enumerate(st.session_state.lista_extras_grabados):
@@ -483,7 +498,6 @@ with tab_calculadora:
 
                 m2 = (p["w"]*p["h"])/1_000_000
                 
-                # --- USAR DB_PRECIOS EN LUGAR DE PRECIOS ESTATICOS ---
                 db = st.session_state.db_precios
                 
                 c_cf = (hc_f * m2 * (p.get('gf',0)/1000) * db["cartoncillo"][p["pf"]]["precio_kg"])
@@ -501,14 +515,20 @@ with tab_calculadora:
                 c_if = (nb*m2*6.5 if p["im"]=="Digital" else (f_o(nb)*(p.get('nt',0)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
                 c_id = (nb*m2*6.5 if p.get("im_d")=="Digital" else (f_o(nb)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get("im_d")=="Offset" else 0))
                 
-                # Precios peliculado dinámicos
                 c_pel_f = (hp*m2*db["peliculado"][p["pel"]]) + (hp*m2*db.get("laminado_digital", 3.5) if p.get("ld") else 0)
                 c_pel_d = (hp*m2*db["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp*m2*db.get("laminado_digital", 3.5) if p.get("ld_d") else 0)
                 
+                # --- NUEVA LÓGICA DE TROQUEL DINÁMICO ---
                 l_p, w_p = p['h'], p['w']
-                if l_p > 1000 or w_p > 700: v_arr, v_tir = 107.80, 0.135
-                elif l_p < 1000 and w_p < 700: v_arr, v_tir = 48.19, 0.06
-                else: v_arr, v_tir = 80.77, 0.09
+                t_db = db.get("troquelado", PRECIOS_BASE["troquelado"])
+                
+                if l_p > 1000 or w_p > 700:
+                    v_arr, v_tir = t_db["Grande (> 1000x700)"]["arranque"], t_db["Grande (> 1000x700)"]["tiro"]
+                elif l_p < 1000 and w_p < 700:
+                    v_arr, v_tir = t_db["Pequeño (< 1000x700)"]["arranque"], t_db["Pequeño (< 1000x700)"]["tiro"]
+                else:
+                    v_arr, v_tir = t_db["Mediano (Estándar)"]["arranque"], t_db["Mediano (Estándar)"]["tiro"]
+                
                 c_arr = v_arr if (p["cor"]=="Troquelado" and p.get('cobrar_arreglo', True)) else 0
                 c_tir = (hp * v_tir) if p["cor"]=="Troquelado" else hp*1.5
                 
@@ -587,8 +607,8 @@ with tab_calculadora:
                     
                     st.info(f"""
                     **CONTROL DE MERMAS:**
-                    \n🔹 **Arranque Impresión:** {info['m_imp']} hojas fijas (Se tiran al inicio)
-                    \n🔹 **Merma Procesos:** {info['m_proc']} unidades perdidas en taller
+                    \n🔹 **Arranque Impresión:** {info['m_imp']} hojas fijas
+                    \n🔹 **Merma Procesos:** {info['m_proc']} unidades perdidas
                     \n✅ **Total a Manipular (Taller):** {q} + {info['m_proc']} = **{info['qp']} unidades**
                     """)
 
