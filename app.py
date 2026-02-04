@@ -49,20 +49,16 @@ FORMATOS_STD = {
 def calcular_mermas_estandar(n, es_digital=False):
     """
     Devuelve tupla: (merma_procesos_unidades, merma_impresion_hojas)
-    Actualizado según tabla del usuario (V19).
     """
     if es_digital: 
-        # Digital suele tener arranques muy bajos. Mantenemos logica simple o 0 si prefieres.
         return int(n * 0.02), 10 
     
-    # Lógica OFFSET según tabla proporcionada
     if n < 100: return 10, 150
     if n < 200: return 20, 175
     if n < 600: return 30, 200
     if n < 1000: return 40, 220
     if n < 2000: return 50, 250
-    # Para 2000 o más
-    return int(n * 0.03), 300
+    return int(n*0.03), 300
 
 # --- 3. INICIALIZACIÓN ---
 st.set_page_config(page_title="MAINSA ADMIN V33", layout="wide")
@@ -260,7 +256,9 @@ if not modo_comercial:
             col1, col2, col3 = st.columns(3)
             with col1:
                 p['nombre'] = st.text_input("Etiqueta", p.get('nombre', f"Forma {p_id+1}"), key=f"n_{p_id}")
-                p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get('pliegos', 1.0)), key=f"p_{p_id}")
+                
+                # --- CAMBIO: 4 DECIMALES EN PLIEGOS ---
+                p['pliegos'] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get('pliegos', 1.0)), format="%.4f", key=f"p_{p_id}")
                 
                 st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}", 
                              on_change=callback_medida_estandar, args=(p_id,))
