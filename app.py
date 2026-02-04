@@ -405,28 +405,32 @@ with tab_calculadora:
                     st.session_state.mermas_proc_manual[q] = val_proc
         else: st.warning("Define primero las cantidades en el panel lateral.")
 
-   # --- 6. MOTOR DE CÁLCULO ---
+  # --- 6. MOTOR DE CÁLCULO ---
     res_final, desc_full = [], {}
     if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         total_pv_troqueles = sum(float(pz.get('pv_troquel', 0.0)) for pz in st.session_state.piezas_dict.values())
         
         for q_n in lista_cants:
-            # 1. Definición de Mermas
-            merma_imp_hojas = st.session_state.mermas_imp_manual.get(q_n, 0)       # Solo arranque maq.
-            merma_proc_unidades = st.session_state.mermas_proc_manual.get(q_n, 0)  # Roturas en procesos
-            
-            # 2. Cantidades Base
-            qp_taller = q_n + merma_proc_unidades  # Unidades que deben salir "vivas" de producción
+            # 1. Definición de Mermas (Inputs Manuales)
+            merma_imp_hojas = st.session_state.mermas_imp_manual.get(q_n, 0)       
+            merma_proc_hojas = st.session_state.mermas_proc_manual.get(q_n, 0) # AHORA SE TRATA COMO HOJAS, NO PIEZAS
             
             coste_f, det_f, debug_log = 0.0, [], []
             
+            # Para Mano de Obra (Manipulado Manual): Calculamos sobre la cantidad cliente (netas)
+            # Generalmente no se cobra manipular cajas que van a la basura.
+            qp_labor = q_n 
+            
             for p_id, p in st.session_state.piezas_dict.items():
-                # A. Base para PROCESOS POSTERIORES (Peliculado, Plancha, Troquel)
-                # Solo incluye la cantidad del cliente + la merma de producción
-                hp_produccion = qp_taller * p["pliegos"] 
+                # A. HOJAS NETAS (Lo que se entrega al cliente)
+                nb = q_n * p["pliegos"]
 
-                # B. Base para PAPEL e IMPRESIÓN
-                # Incluye todo lo anterior + las hojas que se tiran al arrancar la máquina de imprimir
+                # B. BASE PROCESOS (Netas + Merma Producción "por hoja")
+                # Se usa para: Peliculado, Plancha, Troquelado, Contracolado
+                hp_produccion = nb + merma_proc_hojas 
+
+                # C. BASE PAPEL (Todo lo anterior + Merma Arranque Impresión)
+                # Se usa para: Compra de Papel y Clicks Digitales
                 hp_papel = hp_produccion + merma_imp_hojas
                 
                 m2 = (p["w"]*p["h"])/1_000_000
@@ -434,36 +438,53 @@ with tab_calculadora:
                 
                 # --- AUDIT LOG ---
                 debug_log.append(f"<b>🔹 FORMA: {p['nombre']}</b> (Cant. Cliente: {q_n} | Pliegos/ud: {p['pliegos']})")
-                debug_log.append(f"   - Base Papel/Imp: <b>{hp_papel:.1f} hojas</b> (Inc. {merma_imp_hojas} arranque)")
-                debug_log.append(f"   - Base Acabados:  <b>{hp_produccion:.1f} hojas</b> (Exc. arranque)")
+                debug_log.append(f"   - Hojas Netas (Base Offset): <b>{nb:.1f} h</b>")
+                debug_log.append(f"   - Hojas Producción (Base Acabados): <b>{hp_produccion:.1f} h</b> (Netas {nb:.1f} + Merma Proc {merma_proc_hojas})")
+                debug_log.append(f"   - Hojas Totales (Base Papel/Digital): <b>{hp_papel:.1f} h</b> (Prod {hp_produccion:.1f} + Arranque {merma_imp_hojas})")
                 
                 # ---------------------------------------------------------
-                # GRUPO 1: IMPRESIÓN Y PAPEL (Usan hp_papel)
+                # 1. PAPEL (Se compra todo)
                 # ---------------------------------------------------------
-                
-                # Material Frontal
                 p_kg_f = db["cartoncillo"][p["pf"]]["precio_kg"]
                 c_cf = (hp_papel * m2 * (p.get('gf',0)/1000) * p_kg_f)
-                if p["pf"]!="Ninguno": debug_log.append(f"- Mat. Frontal: {hp_papel:.1f}h x {m2:.4f}m² x {p.get('gf',0)/1000:.3f}kg x {p_kg_f}€ = {c_cf:.2f}€")
                 
-                # Material Dorso
                 p_kg_d = db["cartoncillo"][p.get('pd','Ninguno')]["precio_kg"]
                 c_cd = (hp_papel * m2 * (p.get('gd',0)/1000) * p_kg_d)
-                if p.get('pd','Ninguno')!="Ninguno": debug_log.append(f"- Mat. Dorso: {hp_papel:.1f}h x {m2:.4f}m² x {p.get('gd',0)/1000:.3f}kg x {p_kg_d}€ = {c_cd:.2f}€")
                 
-                # Impresión (Generalmente se cobra el click de la merma también porque pasa por máquina)
+                if p["pf"]!="Ninguno": debug_log.append(f"- Papel Frontal (s/ {hp_papel:.0f}h): {c_cf:.2f}€")
+
+                # ---------------------------------------------------------
+                # 2. IMPRESIÓN 
+                #    - Offset: Solo NETAS (nb)
+                #    - Digital: TOTALES (hp_papel) -> Cuentan todos los clicks
+                # ---------------------------------------------------------
                 def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
-                # Nota: Usamos hp_papel porque esas hojas pasan por la máquina de imprimir
-                c_if = (hp_papel*m2*6.5 if p["im"]=="Digital" else (f_o(hp_papel)*(p.get('nt',0)+(1 if p.get('ba') else 0)) if p["im"]=="Offset" else 0))
-                c_id = (hp_papel*m2*6.5 if p.get("im_d")=="Digital" else (f_o(hp_papel)*(p.get('nt_d',0)+(1 if p.get('ba_d') else 0)) if p.get("im_d")=="Offset" else 0))
-                if c_if > 0: debug_log.append(f"- Imp. Cara ({p['im']}) s/ {hp_papel:.0f}h: {c_if:.2f}€")
-                if c_id > 0: debug_log.append(f"- Imp. Dorso ({p.get('im_d')}) s/ {hp_papel:.0f}h: {c_id:.2f}€")
+                
+                # Cálculo Impresión Cara
+                if p["im"] == "Digital":
+                    c_if = hp_papel * m2 * 6.5 # Precio click digital
+                    debug_log.append(f"- Imp. Digital Cara (s/ {hp_papel:.0f}h Totales): {c_if:.2f}€")
+                elif p["im"] == "Offset":
+                    c_if = f_o(nb) * (p.get('nt',0) + (1 if p.get('ba') else 0))
+                    if c_if > 0: debug_log.append(f"- Imp. Offset Cara (s/ {nb:.0f}h Netas): {c_if:.2f}€")
+                else:
+                    c_if = 0
+
+                # Cálculo Impresión Dorso
+                if p.get("im_d") == "Digital":
+                    c_id = hp_papel * m2 * 6.5
+                    debug_log.append(f"- Imp. Digital Dorso (s/ {hp_papel:.0f}h Totales): {c_id:.2f}€")
+                elif p.get("im_d") == "Offset":
+                    c_id = f_o(nb) * (p.get('nt_d',0) + (1 if p.get('ba_d') else 0))
+                    if c_id > 0: debug_log.append(f"- Imp. Offset Dorso (s/ {nb:.0f}h Netas): {c_id:.2f}€")
+                else:
+                    c_id = 0
 
                 # ---------------------------------------------------------
-                # GRUPO 2: ACABADOS / PRODUCCIÓN (Usan hp_produccion)
+                # 3. PROCESOS PRODUCTIVOS (Usan hp_produccion = Netas + Merma Rodaje)
                 # ---------------------------------------------------------
 
-                # Ondulado (Plancha) - CORREGIDO: Usa hp_produccion
+                # Ondulado (Plancha)
                 c_pla, c_peg = 0.0, 0.0
                 if p["pl"] != "Ninguna":
                     p_ond = db["planchas"][p["pl"]][p.get('ap','C/C')]
@@ -472,14 +493,13 @@ with tab_calculadora:
                     pas = (1 if p["pf"]!="Ninguno" else 0) + (1 if p.get('pd','Ninguno')!="Ninguno" else 0)
                     c_peg = hp_produccion * m2 * p_peg * pas
                     debug_log.append(f"- Ondulado s/ {hp_produccion:.1f}h: {c_pla:.2f}€")
-                    debug_log.append(f"- Contracolado s/ {hp_produccion:.1f}h: {c_peg:.2f}€")
                 
-                # Acabados (Peliculado) - CORREGIDO: Usa hp_produccion
+                # Peliculado
                 c_pel_f = (hp_produccion*m2*db["peliculado"][p["pel"]]) + (hp_produccion*m2*db.get("laminado_digital", 3.5) if p.get("ld") else 0)
                 c_pel_d = (hp_produccion*m2*db["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp_produccion*m2*db.get("laminado_digital", 3.5) if p.get("ld_d") else 0)
                 if (c_pel_f+c_pel_d) > 0: debug_log.append(f"- Peliculados s/ {hp_produccion:.1f}h: {c_pel_f+c_pel_d:.2f}€")
                 
-                # Corte / Troquelado - CORREGIDO: Usa hp_produccion
+                # Troquelado / Corte
                 l_p, w_p = p['h'], p['w']
                 if p["cor"] == "Troquelado":
                     t_db = db.get("troquelado", PRECIOS_BASE["troquelado"])
@@ -498,16 +518,19 @@ with tab_calculadora:
                 sub = s_imp + s_narba + s_mat; coste_f += sub
                 det_f.append({"Pieza": p["nombre"], "Mat. Frontal": c_cf, "Mat. Dorso": c_cd, "Mat. Ondulado": c_pla, "Imp. Cara": c_if, "Imp. Dorso": c_id, "Acab. Peliculado": c_pel_f + c_pel_d, "Acab. Contracolado": c_peg, "Acab. Troquel/Corte": c_arr + c_tir, "Total Imp": s_imp, "Total Narba": s_narba, "Total Mat": s_mat, "Subtotal": sub})
 
-            c_ext_tot = sum(e["coste"] * e["cantidad"] * qp_taller for e in st.session_state.lista_extras_grabados)
-            c_mo = ((seg_man_total/3600)*18*qp_taller) + (qp_taller*dif_ud)
+            # Costes Manuales y Extras (Calculados sobre Cantidad Cliente para no inflar mano de obra innecesariamente)
+            c_ext_tot = sum(e["coste"] * e["cantidad"] * qp_labor for e in st.session_state.lista_extras_grabados)
+            c_mo = ((seg_man_total/3600)*18*qp_labor) + (qp_labor*dif_ud)
+            
             coste_emb_unit_compra = st.session_state.costes_embalaje_manual.get(q_n, 0.0)
             pv_emb_ud = coste_emb_unit_compra * 1.4; pv_emb_total = pv_emb_ud * q_n
+            
             pvp_producto_base = ((coste_f + c_ext_tot + c_mo) * margen) + imp_fijo_pvp
             pvp_total_todo = pvp_producto_base + pv_emb_total + total_pv_troqueles
             p_total_unitario_all = pvp_total_todo / q_n if q_n > 0 else 0
 
             res_final.append({"Cantidad": q_n, "Precio Venta Unitario": f"{pvp_producto_base/q_n:.3f}€", "Precio Embalaje Unitario": f"{pv_emb_ud:.3f}€", "Precio Troquel (Total)": f"{total_pv_troqueles:.2f}€", "Precio Venta Total": f"{pvp_total_todo:.2f}€", "Unitario (Todo Incluido)": f"{p_total_unitario_all:.3f}€"})
-            desc_full[q_n] = {"det": det_f, "mo": c_mo, "extras": c_ext_tot, "fijo": imp_fijo_pvp, "taller": coste_f + c_mo + c_ext_tot, "qp": qp_taller, "m_imp": merma_imp_hojas, "m_proc": merma_proc_unidades, "debug": debug_log}
+            desc_full[q_n] = {"det": det_f, "mo": c_mo, "extras": c_ext_tot, "fijo": imp_fijo_pvp, "taller": coste_f + c_mo + c_ext_tot, "qp": qp_labor, "m_imp": merma_imp_hojas, "m_proc": merma_proc_hojas, "debug": debug_log}
 
     # --- 7. SALIDA VISUAL ---
     if modo_comercial and res_final:
