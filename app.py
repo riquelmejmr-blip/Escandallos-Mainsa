@@ -48,7 +48,7 @@ FORMATOS_STD = {
 # --- 2. MOTORES TÉCNICOS ---
 def calcular_mermas_estandar(n, es_digital=False):
     """
-    Devuelve una tupla: (merma_procesos_unidades, merma_impresion_hojas)
+    Devuelve tupla: (merma_procesos_unidades, merma_impresion_hojas)
     """
     if es_digital: 
         return int(n * 0.02), 10 
@@ -67,7 +67,7 @@ def crear_forma_vacia(index):
     return {
         "nombre": f"Forma {index + 1}", "pliegos": 1.0, "w": 0, "h": 0, 
         "pf": "Ninguno", "gf": 0, "pl": "Ninguna", 
-        "ap": "B/C", # Por defecto B/C
+        "ap": "B/C", 
         "pd": "Ninguno", "gd": 0, 
         "im": "No", "nt": 0, "ba": False, 
         "im_d": "No", "nt_d": 0, "ba_d": False, "pel": "Sin Peliculado", 
@@ -344,30 +344,38 @@ if not modo_comercial:
             st.session_state.costes_embalaje_manual[q] = val
     else: st.warning("Define primero las cantidades en el panel lateral.")
 
-    # --- SECCIÓN 4: MERMAS MANUALES DETALLADAS ---
-    st.divider(); st.subheader("⚙️ 4. Gestión de Mermas (Manual)")
-    with st.expander("Configuración de Mermas Detallada (Imp + Procesos)", expanded=True):
-        tiene_dig = any(pz["im"] == "Digital" or pz.get("im_d") == "Digital" for pz in st.session_state.piezas_dict.values())
-        
-        if lista_cants:
-            # Aquí generamos 3 columnas para cada fila: Etiqueta, Input Impresión, Input Procesos
-            for q in lista_cants:
-                c1, c2, c3 = st.columns([1, 2, 2])
-                c1.write(f"**{q} uds**")
+    # --- SECCIÓN 4: MERMAS MANUALES DIVIDIDAS (CON DISEÑO NUEVO) ---
+    st.divider()
+    st.subheader("⚙️ 4. Gestión de Mermas (Manual)")
+    
+    tiene_dig = any(pz["im"] == "Digital" or pz.get("im_d") == "Digital" for pz in st.session_state.piezas_dict.values())
+    
+    if lista_cants:
+        for q in lista_cants:
+            # --- USO CONTAINER PARA FORZAR CAMBIO VISUAL ---
+            with st.container(border=True):
+                c_lbl, c_imp, c_proc = st.columns([1, 2, 2])
+                
+                c_lbl.markdown(f"### 📦 {q} uds")
                 
                 std_proc, std_imp = calcular_mermas_estandar(q, tiene_dig)
                 
+                # Recuperar
                 curr_imp = st.session_state.mermas_imp_manual.get(q, std_imp)
                 curr_proc = st.session_state.mermas_proc_manual.get(q, std_proc)
                 
-                # --- AQUÍ ESTÁ EL CAMBIO CLAVE DE UI ---
-                # Usamos columnas separadas y textos claros
-                val_imp = c2.number_input(f"Hojas Arranque (Imp)", value=int(curr_imp), key=f"m_imp_{q}")
-                val_proc = c3.number_input(f"Uds Rotura (Proc)", value=int(curr_proc), key=f"m_proc_{q}")
+                # Inputs con keys únicas
+                val_imp = c_imp.number_input(f"🖨️ Arranque (Hojas)", value=int(curr_imp), key=f"mi_{q}", help="Hojas fijas de puesta a punto")
+                val_proc = c_proc.number_input(f"⚙️ Rodaje (Unidades)", value=int(curr_proc), key=f"mp_{q}", help="Piezas perdidas durante el proceso")
                 
                 st.session_state.mermas_imp_manual[q] = val_imp
                 st.session_state.mermas_proc_manual[q] = val_proc
-        else: st.warning("Define primero las cantidades.")
+                
+                # Resumen visual
+                p_ejemplo = list(st.session_state.piezas_dict.values())[0] if st.session_state.piezas_dict else {'pliegos': 1}
+                total_hojas_extra = val_imp + (val_proc * p_ejemplo['pliegos'])
+                st.caption(f"Total desperdicio estimado: {total_hojas_extra:.0f} hojas de papel extra.")
+    else: st.warning("Define primero las cantidades en el panel lateral.")
 
 # --- 6. MOTOR DE CÁLCULO ---
 res_final, desc_full = [], {}
@@ -506,10 +514,11 @@ else:
         for q, info in desc_full.items():
             with st.expander(f"🔍 Auditoría Taller {q} uds (Taller: {info['qp']} uds)"):
                 
+                # --- VISUALIZACIÓN CRISTALINA DE MERMAS ---
                 st.info(f"""
                 **CONTROL DE MERMAS:**
-                \n🔹 **Arranque Impresión:** {info['m_imp']} hojas fijas
-                \n🔹 **Merma Procesos:** {info['m_proc']} unidades perdidas
+                \n🔹 **Arranque Impresión:** {info['m_imp']} hojas fijas (Se tiran al inicio)
+                \n🔹 **Merma Procesos:** {info['m_proc']} unidades perdidas en taller
                 \n✅ **Total a Manipular (Taller):** {q} + {info['m_proc']} = **{info['qp']} unidades**
                 """)
 
