@@ -49,16 +49,20 @@ FORMATOS_STD = {
 def calcular_mermas_estandar(n, es_digital=False):
     """
     Devuelve tupla: (merma_procesos_unidades, merma_impresion_hojas)
+    Actualizado según tabla del usuario (V19).
     """
     if es_digital: 
+        # Digital suele tener arranques muy bajos. Mantenemos logica simple o 0 si prefieres.
         return int(n * 0.02), 10 
     
-    if n < 100: return 5, 100
-    if n < 200: return 10, 120
-    if n < 600: return 20, 150
-    if n < 1000: return 30, 200
+    # Lógica OFFSET según tabla proporcionada
+    if n < 100: return 10, 150
+    if n < 200: return 20, 175
+    if n < 600: return 30, 200
+    if n < 1000: return 40, 220
     if n < 2000: return 50, 250
-    return int(n*0.03), 300
+    # Para 2000 o más
+    return int(n * 0.03), 300
 
 # --- 3. INICIALIZACIÓN ---
 st.set_page_config(page_title="MAINSA ADMIN V33", layout="wide")
@@ -344,7 +348,7 @@ if not modo_comercial:
             st.session_state.costes_embalaje_manual[q] = val
     else: st.warning("Define primero las cantidades en el panel lateral.")
 
-    # --- SECCIÓN 4: MERMAS MANUALES DIVIDIDAS (CON DISEÑO NUEVO) ---
+    # --- SECCIÓN 4: MERMAS MANUALES DETALLADAS ---
     st.divider()
     st.subheader("⚙️ 4. Gestión de Mermas (Manual)")
     
