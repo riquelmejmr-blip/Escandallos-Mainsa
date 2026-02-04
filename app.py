@@ -35,6 +35,9 @@ PRECIOS_BASE = {
         "Pequeño (< 1000x700)": {"arranque": 48.19, "tiro": 0.06},
         "Mediano (Estándar)":   {"arranque": 80.77, "tiro": 0.09},
         "Grande (> 1000x700)":  {"arranque": 107.80, "tiro": 0.135}
+    },
+    "plotter": {
+        "precio_hoja": 2.03 # <--- ACTUALIZADO A 2.03
     }
 }
 
@@ -55,7 +58,12 @@ FORMATOS_STD = {
 
 # --- 2. MOTORES TÉCNICOS ---
 def calcular_mermas_estandar(n, es_digital=False):
-    if es_digital: return int(n * 0.02), 10 
+    """
+    Devuelve tupla: (merma_procesos_unidades, merma_impresion_hojas)
+    """
+    if es_digital: 
+        return int(n * 0.02), 10 
+    
     if n < 100: return 10, 150
     if n < 200: return 20, 175
     if n < 600: return 30, 200
@@ -64,7 +72,7 @@ def calcular_mermas_estandar(n, es_digital=False):
     return int(n*0.03), 300
 
 # --- 3. INICIALIZACIÓN ---
-st.set_page_config(page_title="MAINSA ADMIN V22", layout="wide")
+st.set_page_config(page_title="MAINSA ADMIN V24", layout="wide")
 
 # Inicialización de la Base de Datos de Precios Editable
 if 'db_precios' not in st.session_state:
@@ -107,7 +115,7 @@ tab_calculadora, tab_costes = st.tabs(["🧮 Calculadora", "💰 Base de Datos d
 # ==============================================================================
 with tab_costes:
     st.header("Gestión de Costes de Materia Prima y Procesos")
-    st.info("💡 Los cambios se aplican al instante. Recuerda guardar el proyecto para conservar estos precios.")
+    st.info("💡 Los cambios se aplican al instante y se guardan con el proyecto.")
     
     col_c1, col_c2 = st.columns(2)
     
@@ -139,7 +147,6 @@ with tab_costes:
             lam_dig = st.number_input("Laminado Digital (€/m²)", value=float(st.session_state.db_precios.get("laminado_digital", 3.5)), key="cost_lam_dig")
             st.session_state.db_precios["laminado_digital"] = lam_dig
 
-        # --- NUEVA SECCIÓN DE TROQUELADO EDITABLE ---
         with st.expander("🔪 Troquelado (Arranque y Tiro)", expanded=True):
             if "troquelado" not in st.session_state.db_precios:
                 st.session_state.db_precios["troquelado"] = PRECIOS_BASE["troquelado"]
@@ -147,13 +154,19 @@ with tab_costes:
             for k, v in st.session_state.db_precios["troquelado"].items():
                 st.markdown(f"**{k}**")
                 c_arr, c_tir = st.columns(2)
-                
                 n_arr = c_arr.number_input(f"Arranque (€)", value=float(v["arranque"]), format="%.2f", key=f"trq_arr_{k}")
                 n_tir = c_tir.number_input(f"Tiro (€/hoja)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}")
-                
                 st.session_state.db_precios["troquelado"][k]["arranque"] = n_arr
                 st.session_state.db_precios["troquelado"][k]["tiro"] = n_tir
                 st.divider()
+
+        # --- SECCIÓN PLOTTER (ACTUALIZADO A 2.03) ---
+        with st.expander("✂️ Plotter de Corte", expanded=True):
+            if "plotter" not in st.session_state.db_precios:
+                st.session_state.db_precios["plotter"] = PRECIOS_BASE["plotter"]
+            
+            val_plot = st.number_input("Precio Corte (€/hoja)", value=float(st.session_state.db_precios["plotter"]["precio_hoja"]), format="%.3f", key="cost_plotter_base")
+            st.session_state.db_precios["plotter"]["precio_hoja"] = val_plot
 
         with st.expander("🧩 Extras y Accesorios (€/ud)", expanded=False):
             for k, v in st.session_state.db_precios["extras_base"].items():
@@ -212,9 +225,11 @@ with tab_calculadora:
                     # CARGAR DB DE PRECIOS PERSONALIZADA
                     if "db_precios" in di:
                         st.session_state.db_precios = di["db_precios"]
-                        # Asegurar que troquelado existe (retrocompatibilidad)
+                        # Retrocompatibilidad
                         if "troquelado" not in st.session_state.db_precios:
                             st.session_state.db_precios["troquelado"] = PRECIOS_BASE["troquelado"]
+                        if "plotter" not in st.session_state.db_precios:
+                            st.session_state.db_precios["plotter"] = PRECIOS_BASE["plotter"]
 
                     raw_ext = di.get("extras", [])
                     clean_ext = []
@@ -518,19 +533,25 @@ with tab_calculadora:
                 c_pel_f = (hp*m2*db["peliculado"][p["pel"]]) + (hp*m2*db.get("laminado_digital", 3.5) if p.get("ld") else 0)
                 c_pel_d = (hp*m2*db["peliculado"].get(p.get('pel_d','Sin Peliculado'), 0)) + (hp*m2*db.get("laminado_digital", 3.5) if p.get("ld_d") else 0)
                 
-                # --- NUEVA LÓGICA DE TROQUEL DINÁMICO ---
+                # --- LÓGICA DE CORTE DINÁMICA ---
                 l_p, w_p = p['h'], p['w']
-                t_db = db.get("troquelado", PRECIOS_BASE["troquelado"])
                 
-                if l_p > 1000 or w_p > 700:
-                    v_arr, v_tir = t_db["Grande (> 1000x700)"]["arranque"], t_db["Grande (> 1000x700)"]["tiro"]
-                elif l_p < 1000 and w_p < 700:
-                    v_arr, v_tir = t_db["Pequeño (< 1000x700)"]["arranque"], t_db["Pequeño (< 1000x700)"]["tiro"]
-                else:
-                    v_arr, v_tir = t_db["Mediano (Estándar)"]["arranque"], t_db["Mediano (Estándar)"]["tiro"]
+                if p["cor"] == "Troquelado":
+                    t_db = db.get("troquelado", PRECIOS_BASE["troquelado"])
+                    if l_p > 1000 or w_p > 700:
+                        v_arr, v_tir = t_db["Grande (> 1000x700)"]["arranque"], t_db["Grande (> 1000x700)"]["tiro"]
+                    elif l_p < 1000 and w_p < 700:
+                        v_arr, v_tir = t_db["Pequeño (< 1000x700)"]["arranque"], t_db["Pequeño (< 1000x700)"]["tiro"]
+                    else:
+                        v_arr, v_tir = t_db["Mediano (Estándar)"]["arranque"], t_db["Mediano (Estándar)"]["tiro"]
+                    
+                    c_arr = v_arr if p.get('cobrar_arreglo', True) else 0
+                    c_tir = (hp * v_tir)
                 
-                c_arr = v_arr if (p["cor"]=="Troquelado" and p.get('cobrar_arreglo', True)) else 0
-                c_tir = (hp * v_tir) if p["cor"]=="Troquelado" else hp*1.5
+                else: # PLOTTER
+                    coste_plotter = db.get("plotter", {"precio_hoja": 1.5}).get("precio_hoja", 1.5)
+                    c_arr = 0
+                    c_tir = hp * coste_plotter
                 
                 s_imp = c_if + c_id; s_narba = c_pel_f + c_pel_d + c_peg + c_arr + c_tir; s_mat = c_cf + c_pla + c_cd
                 sub = s_imp + s_narba + s_mat; coste_f += sub
