@@ -10,7 +10,6 @@ from copy import deepcopy
 # =========================================================
 st.set_page_config(page_title="MAINSA ADMIN V44", layout="wide")
 
-
 # =========================================================
 # 2) DATOS CATÁLOGO (FLEXICO) + BASE DE PRECIOS
 # =========================================================
@@ -97,7 +96,6 @@ PRODUCTOS_FLEXICO = {
     "172078": {"desc": "GANCHO DOBLE METALICO 300mm", "precio": 0.0690},
     "950221": {"desc": "BASE GIRATORIA Ø 150 MM", "precio": 1.9400}
 }
-
 OPCIONES_FLEXICO = [f"{k} - {v['desc']}" for k, v in PRODUCTOS_FLEXICO.items()]
 
 PRECIOS_BASE = {
@@ -154,7 +152,6 @@ FORMATOS_STD = {
     "800x550": (800, 550), "700x500": (700, 500)
 }
 
-
 # =========================================================
 # 3) ESTADO INICIAL + HELPERS
 # =========================================================
@@ -176,7 +173,6 @@ def crear_forma_vacia(index: int) -> dict:
         "pv_troquel": 0.0,
         "pl_dif": False, "pl_h": 0, "pl_w": 0
     }
-
 
 if "db_precios" not in st.session_state:
     st.session_state.db_precios = deepcopy(PRECIOS_BASE)
@@ -203,11 +199,10 @@ if "cli" not in st.session_state:
 if "desc" not in st.session_state:
     st.session_state.desc = ""
 
-
 def parse_cantidades(texto: str) -> list[int]:
     if not texto:
         return []
-    out = []
+    out: list[int] = []
     for x in texto.split(","):
         x = x.strip()
         if x.isdigit():
@@ -216,11 +211,8 @@ def parse_cantidades(texto: str) -> list[int]:
                 out.append(v)
     return out
 
-
 def f_offset(nb: float) -> float:
-    # tu función original, sin tocar
     return 60 if nb < 100 else (120 if nb > 500 else 60 + 0.15 * (nb - 100))
-
 
 def categoria_troquel(h: float, w: float) -> str:
     if (h > 1000 or w > 700):
@@ -228,7 +220,6 @@ def categoria_troquel(h: float, w: float) -> str:
     if (h < 1000 and w < 700):
         return "Pequeño (< 1000x700)"
     return "Mediano (Estándar)"
-
 
 # =========================================================
 # 4) ESTILOS + TÍTULO
@@ -244,9 +235,7 @@ st.markdown(
     </style>""",
     unsafe_allow_html=True
 )
-
 st.title("🛡️ PANEL ADMIN - ESCANDALLO")
-
 
 # =========================================================
 # 5) SIDEBAR
@@ -282,7 +271,6 @@ with st.sidebar:
                     st.session_state.mermas_imp_manual = di["mermas_imp"]
                 if "mermas_proc" in di:
                     st.session_state.mermas_proc_manual = di["mermas_proc"]
-
                 st.rerun()
             except Exception as e:
                 st.error(f"Error importando JSON: {e}")
@@ -335,7 +323,6 @@ with st.sidebar:
         nombre_archivo
     )
 
-
 # =========================================================
 # 6) TABS
 # =========================================================
@@ -344,7 +331,6 @@ if st.session_state.is_admin:
 else:
     tab_calculadora, = st.tabs(["🧮 Calculadora Técnica"])
     tab_costes, tab_debug = None, None
-
 
 # =========================================================
 # 7) TAB BASE DE DATOS (ADMIN)
@@ -405,7 +391,6 @@ if tab_costes:
                     db["troquelado"][k]["arranque"] = c_arr.number_input(
                         "Arranque (€)", value=float(v["arranque"]), key=f"trq_arr_{k}"
                     )
-                    # FIX: label correcto (€/hoja)
                     db["troquelado"][k]["tiro"] = c_tir.number_input(
                         "Tiro (€/hoja)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}"
                     )
@@ -416,7 +401,6 @@ if tab_costes:
                     value=float(db["plotter"]["precio_hoja"]),
                     key="plt_price"
                 )
-
 
 # =========================================================
 # 8) TAB CALCULADORA
@@ -438,7 +422,6 @@ with tab_calculadora:
             st.session_state.lista_extras_grabados = []
             st.rerun()
 
-        # Callbacks (mantengo tu idea, pero sin duplicar lógica rara)
         def callback_cambio_frontal(pid: int):
             new_mat = st.session_state.get(f"pf_{pid}", "Ninguno")
             if new_mat != "Ninguno":
@@ -464,7 +447,6 @@ with tab_calculadora:
                     st.session_state[f"plh_{pid}"] = nh
                     st.session_state[f"plw_{pid}"] = nw
 
-        # Render piezas
         for p_id, p in list(st.session_state.piezas_dict.items()):
             with st.expander(f"🛠 {p.get('nombre', 'Forma')} - {p.get('h',0)}x{p.get('w',0)} mm", expanded=True):
                 col1, col2, col3 = st.columns(3)
@@ -512,7 +494,6 @@ with tab_calculadora:
 
                     st.divider()
 
-                    # Base / rígido
                     opts_base = ["Ondulado/Cartón", "Material Rígido"]
                     idx_base = opts_base.index(p.get("tipo_base", "Ondulado/Cartón")) if p.get("tipo_base") in opts_base else 0
                     p["tipo_base"] = st.selectbox("Tipo Soporte", opts_base, index=idx_base, key=f"tb_{p_id}")
@@ -541,6 +522,10 @@ with tab_calculadora:
                         p["ap"] = st.selectbox("Calidad Ondulado", opts_ap, index=idx_ap, key=f"ap_{p_id}")
 
                     else:
+                        # IMPORTANTE: limpiamos ondulado para evitar confusiones en cálculo
+                        p["pl"] = "Ninguna"
+                        p["ap"] = "B/C"
+
                         opts_rig = list(db["rigidos"].keys())
                         val_rig = p.get("mat_rigido", "Ninguno")
                         idx_rig = opts_rig.index(val_rig) if val_rig in opts_rig else 0
@@ -548,14 +533,15 @@ with tab_calculadora:
 
                         if p["mat_rigido"] != "Ninguno":
                             im_r = db["rigidos"][p["mat_rigido"]]
-                            if p["w"] > 0 and p["h"] > 0:
-                                y1 = (im_r["w"] // p["w"]) * (im_r["h"] // p["h"])
-                                y2 = (im_r["w"] // p["h"]) * (im_r["h"] // p["w"])
-                                by = max(y1, y2)
-                                if by > 0:
-                                    st.info(f"Caben {by} uds/plancha")
-                                else:
-                                    st.error("Pieza muy grande para esa plancha")
+                            mw, mh = int(im_r["w"]), int(im_r["h"])
+                            pw, ph = int(p.get("w", 0)), int(p.get("h", 0))
+                            fit1 = (mw // pw) * (mh // ph) if pw > 0 and ph > 0 else 0
+                            fit2 = (mw // ph) * (mh // pw) if pw > 0 and ph > 0 else 0
+                            by = max(fit1, fit2)
+                            if by > 0:
+                                st.info(f"Caben {by} uds/plancha")
+                            else:
+                                st.error("Pieza muy grande para esa plancha")
 
                     st.divider()
 
@@ -601,7 +587,6 @@ with tab_calculadora:
                     else:
                         p["im_d"], p["nt_d"], p["ba_d"], p["ld_d"], p["pel_d"] = "No", 0, False, False, "Sin Peliculado"
 
-                    # FIX: no permitir dejar el dict vacío
                     if st.button("🗑 Borrar Forma", key=f"del_{p_id}"):
                         if len(st.session_state.piezas_dict) > 1:
                             del st.session_state.piezas_dict[p_id]
@@ -609,7 +594,6 @@ with tab_calculadora:
                             st.warning("Debe existir al menos una forma.")
                         st.rerun()
 
-                # Importante: persistimos cambios del dict de pieza
                 st.session_state.piezas_dict[p_id] = p
 
         st.divider()
@@ -688,7 +672,6 @@ with tab_calculadora:
         st.divider()
         st.subheader("⚙️ 4. Gestión de Mermas")
 
-        # FIX: etiquetas coherentes -> HOJAS (porque las sumas como hojas)
         if lista_cants:
             for q in lista_cants:
                 c1, c2, c3 = st.columns([1, 2, 2])
@@ -705,7 +688,7 @@ with tab_calculadora:
                 )
 
     # =========================================================
-    # 9) MOTOR DE CÁLCULO (SEPARADO Y MÁS ROBUSTO)
+    # 9) MOTOR DE CÁLCULO (con FIX de plancha rígida)
     # =========================================================
     def calcular_para_cantidad(q_n: int) -> dict:
         piezas = st.session_state.piezas_dict
@@ -727,7 +710,6 @@ with tab_calculadora:
         tech_planchas_rigidas = 0
 
         for pid, p in piezas.items():
-            # básicos
             pliegos = float(p.get("pliegos", 1.0))
             nb = q_n * pliegos
 
@@ -744,28 +726,46 @@ with tab_calculadora:
 
             debug_log.append(f"<br><b>🔹 PIEZA: {p.get('nombre','(sin nombre)')}</b>")
 
-            # SOPORTE: rígido o ondulado
+            # -------------------------------------------------
+            # SOPORTE: RÍGIDO (FIX)
+            # -------------------------------------------------
             if p.get("tipo_base") == "Material Rígido" and p.get("mat_rigido") != "Ninguno":
-                im_r = db["rigidos"][p["mat_rigido"]]
-                mw, mh = float(im_r["w"]), float(im_r["h"])
-                if w > 0 and h > 0 and mw > 0 and mh > 0:
-                    by = max((mw // w) * (mh // h), (mw // h) * (mh // w))
-                    if by > 0:
-                        n_pl = int(math.ceil(hp_produccion / by))
-                        tech_planchas_rigidas += n_pl
-                        c_pl = n_pl * float(im_r["precio_ud"])
-                        debug_log.append(f"🏗️ <b>Rígido:</b> {n_pl} planchas x {float(im_r['precio_ud']):.2f}€ = {c_pl:.2f}€")
-
-                        # pegado si hay cartoncillo frontal
-                        if p.get("pf") != "Ninguno" and m2_papel > 0:
-                            c_peg = hp_produccion * m2_papel * float(db["planchas"]["Microcanal / Canal 3"]["peg"])
-                            debug_log.append(f"🧬 <b>Pegado:</b> {c_peg:.2f}€")
-                    else:
-                        debug_log.append("⚠️ ERROR: Pieza excede tamaño plancha")
+                im_r = db["rigidos"].get(p["mat_rigido"])
+                if not im_r:
+                    debug_log.append("⚠️ ERROR: Material rígido no encontrado en BD")
                 else:
-                    debug_log.append("⚠️ ERROR: Medidas inválidas en rígido")
+                    mw = int(im_r.get("w", 0))
+                    mh = int(im_r.get("h", 0))
+                    pw = int(p.get("w", 0))
+                    ph = int(p.get("h", 0))
+
+                    if mw <= 0 or mh <= 0 or pw <= 0 or ph <= 0:
+                        debug_log.append("⚠️ ERROR: Medidas inválidas para cálculo de rígido")
+                    else:
+                        fit1 = (mw // pw) * (mh // ph)
+                        fit2 = (mw // ph) * (mh // pw)
+                        by = max(fit1, fit2)
+
+                        if by <= 0:
+                            debug_log.append(f"⚠️ Pieza {pw}x{ph} no cabe en plancha {mw}x{mh}")
+                        else:
+                            n_pl = int(math.ceil(float(hp_produccion) / float(by)))
+                            tech_planchas_rigidas += n_pl
+                            c_pl = n_pl * float(im_r.get("precio_ud", 0.0))
+
+                            debug_log.append(
+                                f"🏗️ <b>Rígido:</b> {n_pl} planchas ({mw}x{mh}) | "
+                                f"rend {by} uds/plancha | {float(im_r.get('precio_ud',0.0)):.2f}€/pl = {c_pl:.2f}€"
+                            )
+
+                            if p.get("pf") != "Ninguno" and m2_papel > 0:
+                                c_peg = hp_produccion * m2_papel * float(db["planchas"]["Microcanal / Canal 3"]["peg"])
+                                debug_log.append(f"🧬 <b>Pegado:</b> {c_peg:.2f}€")
+
+            # -------------------------------------------------
+            # SOPORTE: ONDULADO / CARTÓN
+            # -------------------------------------------------
             else:
-                # ondulado
                 if p.get("pl_dif", False) and float(p.get("pl_h", 0)) > 0 and float(p.get("pl_w", 0)) > 0:
                     m2_plancha = (float(p["pl_w"]) * float(p["pl_h"])) / 1_000_000
                 else:
@@ -776,7 +776,7 @@ with tab_calculadora:
                     c_peg = hp_produccion * m2_plancha * float(db["planchas"][p["pl"]]["peg"]) * (1 if p.get("pf") != "Ninguno" else 0)
                     debug_log.append(f"📦 <b>Ondulado:</b> {hp_produccion:.0f}h x {m2_plancha:.4f}m² = {c_pl:.2f}€")
 
-            # MATERIALES (cartoncillo)
+            # MATERIALES
             pf = p.get("pf", "Ninguno")
             gf = float(p.get("gf", 0))
             c_cf = hp_papel_f * m2_papel * (gf / 1000) * float(db["cartoncillo"][pf]["precio_kg"])
@@ -842,7 +842,7 @@ with tab_calculadora:
             })
 
         # Extras + mano de obra
-        c_ext = sum(float(e.get("coste", 0)) * float(e.get("cantidad", 0)) * q_n for e in st.session_state.lista_extras_grabados)
+        c_ext = sum(float(e.get("coste", 0)) * float(e.get("cantidad", 0)) * q_n for e in extras)
         c_mo = ((float(seg_man_total) / 3600) * 18 * q_n) + (q_n * float(dif_ud))
 
         pvp_total_todo = ((coste_total_piezas + c_ext + c_mo) * float(margen)) + float(imp_fijo_pvp) + pv_emb_total + tot_pv_trq
@@ -893,9 +893,7 @@ with tab_calculadora:
                 "extras": r["extras"]
             }
 
-    # =========================================================
-    # 10) SALIDA VISUAL
-    # =========================================================
+    # SALIDA VISUAL
     if st.session_state.is_admin:
         if modo_comercial and res_final:
             desc_html = """<div style='text-align: left; margin-bottom: 20px; color: #444;'>
@@ -936,7 +934,6 @@ with tab_calculadora:
         if res_tecnico:
             st.success("✅ Cálculo Realizado")
             st.table(pd.DataFrame(res_tecnico))
-
 
 # =========================================================
 # 11) TAB DEBUG (ADMIN)
