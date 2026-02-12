@@ -3,7 +3,93 @@ import pandas as pd
 import json
 import re
 
-# --- 1. BASE DE DATOS INICIAL (PRECIOS POR DEFECTO) ---
+# --- 1. BASE DE DATOS FLEXICO (TARIFA 2024 COMPLETA) ---
+PRODUCTOS_FLEXICO = {
+    "172018": {"desc": "GANCHO EXTENSIBLE MAXI 0,5kg", "precio": 0.0397},
+    "137018": {"desc": "PORTAETIQUETA GANCHO 28x30 mm", "precio": 0.0742},
+    "142201": {"desc": "GANCHO PERFORANTE SIMPLE 200mm", "precio": 0.1480},
+    "142203": {"desc": "GANCHO PERFORANTE SIMPLE 150mm", "precio": 0.1290},
+    "142205": {"desc": "GANCHO PERFORANTE SIMPLE 100mm", "precio": 0.1080},
+    "142206": {"desc": "GANCHO PERFORADOR SIMPLE 5 CM", "precio": 0.1530},
+    "142412": {"desc": "GANCHO PERFORANTE DOBLE 100mm", "precio": 0.1260},
+    "142413": {"desc": "GANCHO PERFORANTE DOBLE 150mm", "precio": 0.1280},
+    "142414": {"desc": "PERFORANTE DOBLE 200mm GANCHO", "precio": 0.1710},
+    "142415": {"desc": "PERFORANTE DOBLE 250mm GANCHO", "precio": 0.1800},
+    "142422": {"desc": "GANCHO PERFO DOBLE NEGRO 100mm", "precio": 0.1020},
+    "142424": {"desc": "GANCHO PERFO DOBLE NEGRO 200mm", "precio": 0.1880},
+    "145104": {"desc": "TIRA CROSS MERCH METALICA", "precio": 3.1100},
+    "145110": {"desc": "TIRA CROSS MERCH-740 MM", "precio": 0.3310},
+    "145150": {"desc": "PINZA PARA CROSS-MERCHANDISING", "precio": 0.1072},
+    "172594": {"desc": "ANILLA LLAVERO - 20 MM", "precio": 0.0600},
+    "262041": {"desc": "SUJETADOR PERFIL PP 30-40mm", "precio": 0.0500},
+    "752012": {"desc": "BISTUCADOR Ø12mm CIER14mm NEGR", "precio": 0.0400},
+    "752013": {"desc": "BISTUCADOR Ø12mm CIER14mm TRSP", "precio": 0.0410},
+    "752015": {"desc": "BISTUCADOR Ø12mm CIER7mm TRSP", "precio": 0.0370},
+    "753007": {"desc": "SOP PORTACARTEL ADH TRSP 56X25", "precio": 0.1770},
+    "792010": {"desc": "GANCHO SUSPENSION + HILO 1,2m", "precio": 0.1160},
+    "792032": {"desc": "HILO NYLON- BOBINA 200M", "precio": 5.4800},
+    "792071": {"desc": "TWISTER METAL 2 ADH 75mm", "precio": 0.0538},
+    "792301": {"desc": "BASE DE PLAS EXPOSITOR TRSP", "precio": 0.1840},
+    "792421": {"desc": "GANCHO S METAL 24MM DIAM 2MM", "precio": 0.0215},
+    "792425": {"desc": "ESSE 32MM BOUCLE DIA 6 & 14MM", "precio": 0.0360},
+    "792427": {"desc": "GANCHO S METAL30MM DIAM 2MM", "precio": 0.0267},
+    "792432": {"desc": "GANCHO S 36 MM 014", "precio": 0.0300},
+    "792436": {"desc": "GANCHO S METAL ASYMETRICO 45MM", "precio": 0.0394},
+    "792437": {"desc": "GANCHO S METAL ASYMETRICO 40MM", "precio": 0.0428},
+    "792451": {"desc": "GANCHO S METAL 59MM DIAM 2MM", "precio": 0.0365},
+    "792452": {"desc": "GANCHO S METAL 65MM DIAM 2,5MM", "precio": 0.0540},
+    "792542": {"desc": "TWISTER PET 75MM-2 ADHESIVOS", "precio": 0.0460},
+    "792546": {"desc": "WOBBLER PET 150MM 2 ADH", "precio": 0.0411},
+    "792550": {"desc": "WOBBLER PET 150MM 2 ADH REMOV", "precio": 0.0613},
+    "792570": {"desc": "MEGA TWISTER METAL 2 ADH", "precio": 0.0897},
+    "792571": {"desc": "TWISTER METAL 2 ADH", "precio": 0.0400},
+    "792573": {"desc": "TWISTER METAL 3 ADH", "precio": 0.0543},
+    "792582": {"desc": "TWISTER MET 75MM 2 ADH EN HOJA", "precio": 0.0600},
+    "793075": {"desc": "TWISTER 2 ADH CLEAN", "precio": 0.0650},
+    "793240": {"desc": "1100 ALMOH AUTOADH MACHO-19mm", "precio": 15.6000},
+    "793242": {"desc": "1100 ALMOH AUTOADH HEMBRA-19mm", "precio": 15.6000},
+    "793249": {"desc": "1500ALMOH AUTOAD HEMBR 13 NEGR", "precio": 11.8000},
+    "793250": {"desc": "1500ALMOH AUTOAD MACH 13 NEGR", "precio": 11.8000},
+    "793301": {"desc": "PLETINA PVC ADH 20X20mm", "precio": 0.0382},
+    "793303": {"desc": "PLETINA PVC ADH 20X40mm", "precio": 0.0680},
+    "796007": {"desc": "TORNILLO Ø15mm MAXI 9mm BLCO", "precio": 0.0299},
+    "796043": {"desc": "TORNILLO Ø28mm MAXI 22mm BLCO", "precio": 0.0534},
+    "796307": {"desc": "TORNILLO Ø 15mm MAXI 9mm NEGRO", "precio": 0.0300},
+    "796309": {"desc": "TORNILLO Ø28mm MAXI 15mm NEGRO", "precio": 0.0320},
+    "796343": {"desc": "TORNILLO Ø28mm MAXI 22mm NEGRO", "precio": 0.0525},
+    "796407": {"desc": "TORNILLO Ø15mm MAXI 9mm TRSP", "precio": 0.0294},
+    "796409": {"desc": "TORNILLO Ø28 mm MAXI15 mm TRSP", "precio": 0.0325},
+    "796443": {"desc": "TORNILLO Ø 28mm MAXI 22mm TRSP", "precio": 0.0570},
+    "796445": {"desc": "TORNILLO Ø 28mm MAXI 38mm TRSP", "precio": 0.0597},
+    "797133": {"desc": "GRIPADOR 2 ENTRADAS EN L 25mm", "precio": 0.0579},
+    "797148": {"desc": "GRIPADOR T13mm LG 76mm ADH", "precio": 0.0821},
+    "797150": {"desc": "GRIPADOR T 28mm LG 25mm ADH", "precio": 0.0398},
+    "797193": {"desc": "GRIPADOR 2 ENTRADAS EN J", "precio": 0.1080},
+    "797786": {"desc": "PINZA MULTI ANGULO", "precio": 0.1460},
+    "797885": {"desc": "BRIDA NYLON 300MM", "precio": 0.0434},
+    "797910": {"desc": "PISTOLA", "precio": 10.5000},
+    "797911": {"desc": "SET DE 5 AGUJERAS", "precio": 7.8000},
+    "797915": {"desc": "ATADURAS NYLON 40MM", "precio": 0.0020},
+    "797917": {"desc": "ATADURAS NYLON 65MM", "precio": 0.0024},
+    "797921": {"desc": "ATADURAS EXTR ESTR 125mm", "precio": 0.0037},
+    "841201": {"desc": "PESCANTE MULTIMAG", "precio": 1.8000},
+    "841211": {"desc": "PESCANTE MULTIMAG PLUS", "precio": 1.9400},
+    "950101": {"desc": "GANCHO FONDO PERF SIMPLE 50MM", "precio": 0.1384},
+    "950235": {"desc": "CABLE ACIER ANTIRROBO PLACA", "precio": 2.6000},
+    "950341": {"desc": "PORTA VISUAL BASE MADERA - A5", "precio": 5.5000},
+    "950790": {"desc": "SUPER VENTOSA CON TORNILLON", "precio": 3.0100},
+    "142002": {"desc": "GANCHO UNIVERSAL SIMPLE 100mm", "precio": 0.1101},
+    "145101": {"desc": "TIRA CROSS MERCH DBLE FLJ 780", "precio": 0.4424},
+    "145103": {"desc": "TIRA CROSS MERCH PNZA METL 790", "precio": 2.3700},
+    "145111": {"desc": "TIRA CROSSMERCH 600 PE85X100mm", "precio": 0.2830},
+    "163401": {"desc": "PINZA PORTA ETIQ ARTICUL TRSP", "precio": 0.3474},
+    "172012": {"desc": "GANCHO SUSPENSION +HILO 1,2M", "precio": 0.1500},
+    "172078": {"desc": "GANCHO DOBLE METALICO 300mm", "precio": 0.0690},
+    "950221": {"desc": "BASE GIRATORIA Ø 150 MM", "precio": 1.9400}
+}
+OPCIONES_FLEXICO = [f"{k} - {v['desc']}" for k, v in PRODUCTOS_FLEXICO.items()]
+
+# --- 2. BASE DE DATOS INICIAL (PRECIOS POR DEFECTO) ---
 PRECIOS_BASE = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0.0, "gramaje": 0},
@@ -67,7 +153,7 @@ def calcular_mermas_estandar(n, es_digital=False):
     return int(n*0.03), 300
 
 # --- 3. INICIALIZACIÓN ---
-st.set_page_config(page_title="MAINSA ADMIN V27", layout="wide")
+st.set_page_config(page_title="MAINSA ADMIN V28", layout="wide")
 
 if 'db_precios' not in st.session_state:
     st.session_state.db_precios = PRECIOS_BASE.copy()
@@ -81,7 +167,7 @@ def crear_forma_vacia(index):
         "im_d": "No", "nt_d": 0, "ba_d": False, "pel": "Sin Peliculado", 
         "pel_d": "Sin Peliculado", "ld": False, "ld_d": False, 
         "cor": "Troquelado", "cobrar_arreglo": True, "pv_troquel": 0.0,
-        # NUEVOS CAMPOS V27
+        # NUEVOS CAMPOS V27 (Plancha diferente)
         "pl_dif": False, "pl_h": 0, "pl_w": 0 
     }
 
@@ -407,13 +493,29 @@ with tab_calculadora:
                     if st.button("🗑 Borrar Forma", key=f"del_{p_id}"): del st.session_state.piezas_dict[p_id]; st.rerun()
 
         st.divider(); st.subheader("📦 2. Almacén de Accesorios")
-        opts_extra = ["---"] + list(st.session_state.db_precios["extras_base"].keys())
-        ex_sel = st.selectbox("Añadir extra:", opts_extra)
-        if st.button("➕ Añadir Accesorio") and ex_sel != "---":
-            coste_actual = st.session_state.db_precios["extras_base"][ex_sel]
-            st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": coste_actual, "cantidad": 1.0}); st.rerun()
+        
+        # --- MODIFICACIÓN V28: COLUMNAS PARA SELECTOR FLEXICO ---
+        c_add_main, c_add_flex = st.columns(2)
+        
+        with c_add_main:
+            st.markdown("**Extras Mainsa**")
+            opts_extra = ["---"] + list(st.session_state.db_precios["extras_base"].keys())
+            ex_sel = st.selectbox("Añadir extra estándar:", opts_extra, key="sel_extra_mainsa")
+            if st.button("➕ Añadir Mainsa", key="btn_add_mainsa") and ex_sel != "---":
+                coste_actual = st.session_state.db_precios["extras_base"][ex_sel]
+                st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": coste_actual, "cantidad": 1.0}); st.rerun()
+        
+        with c_add_flex:
+            st.markdown("**Catálogo FLEXICO**")
+            OPCIONES_FLEXICO = [f"{k} - {v['desc']}" for k, v in PRODUCTOS_FLEXICO.items()]
+            flx_sel = st.selectbox("Buscar Ref/Desc:", ["---"] + OPCIONES_FLEXICO, key="sel_extra_flexico") 
+            if st.button("➕ Añadir Flexico", key="btn_add_flexico") and flx_sel != "---":
+                cod = flx_sel.split(" - ")[0]
+                prod = PRODUCTOS_FLEXICO[cod]
+                st.session_state.lista_extras_grabados.append({"nombre": f"FLEXICO: {prod['desc']}", "coste": prod['precio'], "cantidad": 1.0}); st.rerun()
+
         for i, ex in enumerate(st.session_state.lista_extras_grabados):
-            ca, cb, cc, cd = st.columns([3, 2, 2, 1]); ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud compra", value=float(ex['coste']), key=f"exc_{i}"); ex['cantidad'] = cc.number_input("Cant/Ud prod", value=float(ex['cantidad']), key=f"exq_{i}")
+            ca, cb, cc, cd = st.columns([3, 2, 2, 1]); ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud compra", value=float(ex['coste']), key=f"exc_{i}", format="%.4f"); ex['cantidad'] = cc.number_input("Cant/Ud prod", value=float(ex['cantidad']), key=f"exq_{i}")
             if cd.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
         st.divider(); st.subheader("📦 3. Cálculo de Embalaje")
@@ -475,7 +577,7 @@ with tab_calculadora:
                     st.session_state.mermas_proc_manual[q] = val_proc
         else: st.warning("Define primero las cantidades en el panel lateral.")
 
-    # --- 6. MOTOR DE CÁLCULO (V27 - MEDIDAS DESACOPLADAS) ---
+    # --- 6. MOTOR DE CÁLCULO (LÓGICA ACTUALIZADA CON DOBLE MEDIDA) ---
     res_final, desc_full = [], {}
     if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         total_pv_troqueles = sum(float(pz.get('pv_troquel', 0.0)) for pz in st.session_state.piezas_dict.values())
