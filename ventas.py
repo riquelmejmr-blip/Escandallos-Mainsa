@@ -4,7 +4,8 @@ import json
 import re
 import math
 
-# --- 1. BASE DE DATOS FLEXICO (COMPLETA) ---
+# --- 1. BASE DE DATOS FLEXICO (TARIFA 2024 COMPLETA) ---
+# Añadida para que funcione el buscador en la sección de accesorios
 PRODUCTOS_FLEXICO = {
     "172018": {"desc": "GANCHO EXTENSIBLE MAXI 0,5kg", "precio": 0.0397},
     "137018": {"desc": "PORTAETIQUETA GANCHO 28x30 mm", "precio": 0.0742},
@@ -90,7 +91,7 @@ PRODUCTOS_FLEXICO = {
 }
 OPCIONES_FLEXICO = [f"{k} - {v['desc']}" for k, v in PRODUCTOS_FLEXICO.items()]
 
-# --- 2. BASE DE DATOS INICIAL ---
+# --- 2. BASE DE DATOS INICIAL (PRECIOS POR DEFECTO) ---
 PRECIOS_BASE = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0.0, "gramaje": 0},
@@ -132,16 +133,27 @@ PRECIOS_BASE = {
         "Mediano (Estándar)":   {"arranque": 80.77, "tiro": 0.09},
         "Grande (> 1000x700)":  {"arranque": 107.80, "tiro": 0.135}
     },
-    "plotter": { "precio_hoja": 2.03 }
+    "plotter": {
+        "precio_hoja": 2.03
+    }
 }
 
+# --- LISTA DE FORMATOS COMUNES ---
 FORMATOS_STD = {
-    "Personalizado": (0, 0), "1600x1200": (1600, 1200), "1600x1100": (1600, 1100),
-    "1400x1000": (1400, 1000), "1300x900": (1300, 900), "1200x800": (1200, 800),
-    "1100x800": (1100, 800), "1000x700": (1000, 700), "900x650": (900, 650),
-    "800x550": (800, 550), "700x500": (700, 500)
+    "Personalizado": (0, 0),
+    "1600x1200": (1600, 1200),
+    "1600x1100": (1600, 1100),
+    "1400x1000": (1400, 1000),
+    "1300x900": (1300, 900),
+    "1200x800": (1200, 800),
+    "1100x800": (1100, 800),
+    "1000x700": (1000, 700),
+    "900x650": (900, 650),
+    "800x550": (800, 550),
+    "700x500": (700, 500)
 }
 
+# --- 2. MOTORES TÉCNICOS ---
 def calcular_mermas_estandar(n, es_digital=False):
     if es_digital: return int(n * 0.02), 10 
     if n < 100: return 10, 150
@@ -342,24 +354,25 @@ with tab_calculadora:
         st.divider(); st.subheader("📦 2. Almacén de Accesorios")
         ca, cb = st.columns(2)
         with ca:
-            ex_m = st.selectbox("Extras Mainsa:", ["---"] + list(st.session_state.db_precios["extras_base"].keys()))
+            st.markdown("**Extras Mainsa**")
+            ex_m = st.selectbox("Añadir extra estándar:", ["---"] + list(st.session_state.db_precios["extras_base"].keys()), key="sel_main")
             if st.button("➕ Añadir Mainsa") and ex_m != "---":
                 st.session_state.lista_extras_grabados.append({"nombre": ex_m, "coste": st.session_state.db_precios["extras_base"][ex_m], "cantidad": 1.0}); st.rerun()
         with cb:
-            ex_f = st.selectbox("Catálogo FLEXICO:", ["---"] + OPCIONES_FLEXICO)
+            st.markdown("**Catálogo FLEXICO**")
+            ex_f = st.selectbox("Buscar Ref/Desc:", ["---"] + OPCIONES_FLEXICO, key="sel_flex")
             if st.button("➕ Añadir Flexico") and ex_f != "---":
                 cod = ex_f.split(" - ")[0]
                 prod = PRODUCTOS_FLEXICO[cod]
                 st.session_state.lista_extras_grabados.append({"nombre": f"FLEXICO: {prod['desc']}", "coste": prod['precio'], "cantidad": 1.0}); st.rerun()
+        
         for i, ex in enumerate(st.session_state.lista_extras_grabados):
             c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
             c1.write(f"**{ex['nombre']}**")
-            # OPERARIO NO PUEDE EDITAR PRECIOS, SOLO CANTIDADES
             if st.session_state.is_admin:
                 ex['coste'] = c2.number_input("€ Compra", value=float(ex['coste']), key=f"exc_{i}", format="%.4f")
             else:
-                c2.write(f"{ex['coste']:.4f}€") # Solo lectura
-            
+                c2.write(f"{ex['coste']:.4f}€")
             ex['cantidad'] = c3.number_input("Cant/Ud", value=float(ex['cantidad']), key=f"exq_{i}")
             if c4.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
@@ -502,7 +515,6 @@ with tab_calculadora:
         else:
             st.info("Introduce cantidades y piezas para calcular.")
 
-# --- PESTAÑA 3: AUDITORÍA (SOLO ADMIN) ---
 if tab_debug:
     with tab_debug:
         st.header("🔍 Auditoría")
