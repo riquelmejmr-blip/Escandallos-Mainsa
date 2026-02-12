@@ -67,7 +67,7 @@ def calcular_mermas_estandar(n, es_digital=False):
     return int(n*0.03), 300
 
 # --- 3. INICIALIZACIÓN ---
-st.set_page_config(page_title="MAINSA ADMIN V25", layout="wide")
+st.set_page_config(page_title="MAINSA ADMIN V26", layout="wide")
 
 if 'db_precios' not in st.session_state:
     st.session_state.db_precios = PRECIOS_BASE.copy()
@@ -88,6 +88,10 @@ if 'lista_extras_grabados' not in st.session_state: st.session_state.lista_extra
 if 'costes_embalaje_manual' not in st.session_state: st.session_state.costes_embalaje_manual = {}
 if 'mermas_imp_manual' not in st.session_state: st.session_state.mermas_imp_manual = {}
 if 'mermas_proc_manual' not in st.session_state: st.session_state.mermas_proc_manual = {}
+
+# Variables para embalaje automático
+if 'emb_tipo' not in st.session_state: st.session_state.emb_tipo = "Manual"
+if 'emb_dims' not in st.session_state: st.session_state.emb_dims = {"L": 0, "W": 0, "H": 0}
 
 st.markdown("""<style>
     .comercial-box { background-color: white; padding: 30px; border: 2px solid #1E88E5; border-radius: 10px; color: #333; }
@@ -207,6 +211,10 @@ with tab_calculadora:
                         st.session_state.db_precios = di["db_precios"]
                         if "troquelado" not in st.session_state.db_precios: st.session_state.db_precios["troquelado"] = PRECIOS_BASE["troquelado"]
                         if "plotter" not in st.session_state.db_precios: st.session_state.db_precios["plotter"] = PRECIOS_BASE["plotter"]
+                    
+                    # Cargar config de embalaje si existe
+                    if "emb_tipo" in di: st.session_state.emb_tipo = di["emb_tipo"]
+                    if "emb_dims" in di: st.session_state.emb_dims = di["emb_dims"]
 
                     raw_ext = di.get("extras", [])
                     clean_ext = []
@@ -283,6 +291,7 @@ with tab_calculadora:
             "brf": st.session_state.brf, "cli": st.session_state.cli, "desc": st.session_state.desc,
             "piezas": st.session_state.piezas_dict, 
             "extras": st.session_state.lista_extras_grabados, "costes_emb": st.session_state.costes_embalaje_manual,
+            "emb_tipo": st.session_state.emb_tipo, "emb_dims": st.session_state.emb_dims,
             "mermas_imp": st.session_state.mermas_imp_manual, "mermas_proc": st.session_state.mermas_proc_manual,
             "imp_fijo": imp_fijo_pvp, "margen": margen, "cantidades": lista_cants, 
             "tiempo_manipulacion": t_input, "dificultad": dif_ud, "unidad_manipulacion": unidad_t,
@@ -379,14 +388,47 @@ with tab_calculadora:
             ca, cb, cc, cd = st.columns([3, 2, 2, 1]); ca.write(f"**{ex['nombre']}**"); ex['coste'] = cb.number_input("€/ud compra", value=float(ex['coste']), key=f"exc_{i}"); ex['cantidad'] = cc.number_input("Cant/Ud prod", value=float(ex['cantidad']), key=f"exq_{i}")
             if cd.button("🗑", key=f"exd_{i}"): st.session_state.lista_extras_grabados.pop(i); st.rerun()
 
-        st.divider(); st.subheader("📦 3. Embalaje Manual")
-        st.info("Introduce el coste de compra UNITARIO (por caja/unidad) para cada cantidad.")
+        st.divider(); st.subheader("📦 3. Cálculo de Embalaje")
+        
+        # SELECTOR DE TIPO DE EMBALAJE
+        tipos_emb = ["Manual", "Embalaje Guaina (Automático)", "Embalaje en Plano (Pendiente)", "Embalaje en Volumen (Pendiente)"]
+        idx_emb = tipos_emb.index(st.session_state.emb_tipo) if st.session_state.emb_tipo in tipos_emb else 0
+        st.session_state.emb_tipo = st.selectbox("Selecciona el tipo de embalaje:", tipos_emb, index=idx_emb)
+
         if lista_cants:
-            cols_emb = st.columns(len(lista_cants))
-            for i, q in enumerate(lista_cants):
-                current_val = st.session_state.costes_embalaje_manual.get(q, 0.0)
-                val = cols_emb[i].number_input(f"Coste UNITARIO Compra {q} uds (€)", value=float(current_val), format="%.4f", key=f"emb_man_{q}")
-                st.session_state.costes_embalaje_manual[q] = val
+            # LÓGICA AUTOMÁTICA (GUAINA)
+            if st.session_state.emb_tipo == "Embalaje Guaina (Automático)":
+                st.info("💡 **Fórmula Vallter:** `(Superficie * 0.70) + (30€ / Cantidad)`")
+                c_dim1, c_dim2, c_dim3 = st.columns(3)
+                st.session_state.emb_dims["L"] = c_dim1.number_input("Largo Caja (mm)", value=st.session_state.emb_dims.get("L", 0))
+                st.session_state.emb_dims["W"] = c_dim2.number_input("Ancho Caja (mm)", value=st.session_state.emb_dims.get("W", 0))
+                st.session_state.emb_dims["H"] = c_dim3.number_input("Alto Caja (mm)", value=st.session_state.emb_dims.get("H", 0))
+                
+                # Calcular automáticamente
+                L, W, H = st.session_state.emb_dims["L"], st.session_state.emb_dims["W"], st.session_state.emb_dims["H"]
+                if L > 0 and W > 0 and H > 0:
+                    sup_m2 = ((2 * (L + W) * H) + (L * W)) / 1_000_000
+                    st.write(f"📏 Superficie Cartón: **{sup_m2:.4f} m²**")
+                    cols_emb = st.columns(len(lista_cants))
+                    for i, q in enumerate(lista_cants):
+                        if q > 0:
+                            coste_auto = (sup_m2 * 0.70) + (30 / q)
+                            st.session_state.costes_embalaje_manual[q] = coste_auto
+                            cols_emb[i].metric(f"{q} uds", f"{coste_auto:.3f}€")
+                else:
+                    st.warning("Introduce las medidas de la caja para calcular el precio.")
+
+            # LÓGICA MANUAL (O FALLBACK PARA PENDIENTES)
+            else:
+                if "Pendiente" in st.session_state.emb_tipo:
+                    st.warning("⚠️ Fórmula no disponible aún. Introduce el precio manualmente.")
+                
+                st.info("Introduce el coste de compra UNITARIO (por caja/unidad) para cada cantidad.")
+                cols_emb = st.columns(len(lista_cants))
+                for i, q in enumerate(lista_cants):
+                    current_val = st.session_state.costes_embalaje_manual.get(q, 0.0)
+                    val = cols_emb[i].number_input(f"Coste {q} uds (€)", value=float(current_val), format="%.4f", key=f"emb_man_{q}")
+                    st.session_state.costes_embalaje_manual[q] = val
         else: st.warning("Define primero las cantidades en el panel lateral.")
 
         st.divider(); st.subheader("⚙️ 4. Gestión de Mermas (Manual)")
