@@ -399,13 +399,13 @@ with tab_calculadora:
                     std_proc, std_imp = calcular_mermas_estandar(q, tiene_dig)
                     curr_imp = st.session_state.mermas_imp_manual.get(q, std_imp)
                     curr_proc = st.session_state.mermas_proc_manual.get(q, std_proc)
-                    val_imp = c_imp.number_input(f"🖨️ Arranque (Hojas)", value=int(curr_imp), key=f"mi_{q}", help="Hojas fijas de puesta a punto")
-                    val_proc = c_proc.number_input(f"⚙️ Rodaje (Unidades)", value=int(curr_proc), key=f"mp_{q}", help="Piezas perdidas durante el proceso")
+                    val_imp = c_imp.number_input(f"🖨️ Arranque (Hojas Fijas)", value=int(curr_imp), key=f"mi_{q}", help="Hojas fijas de puesta a punto (se tiran al inicio)")
+                    val_proc = c_proc.number_input(f"⚙️ Merma Rodaje (Hojas Extra)", value=int(curr_proc), key=f"mp_{q}", help="Hojas extra para cubrir roturas en producción")
                     st.session_state.mermas_imp_manual[q] = val_imp
                     st.session_state.mermas_proc_manual[q] = val_proc
         else: st.warning("Define primero las cantidades en el panel lateral.")
 
- # --- 6. MOTOR DE CÁLCULO ---
+    # --- 6. MOTOR DE CÁLCULO (LÓGICA ACTUALIZADA) ---
     res_final, desc_full = [], {}
     if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         total_pv_troqueles = sum(float(pz.get('pv_troquel', 0.0)) for pz in st.session_state.piezas_dict.values())
@@ -416,13 +416,13 @@ with tab_calculadora:
             merma_proc_hojas = st.session_state.mermas_proc_manual.get(q_n, 0) 
             
             coste_f, det_f, debug_log = 0.0, [], []
-            qp_labor = q_n 
+            qp_labor = q_n # La mano de obra se cobra sobre las unidades buenas (cliente)
             
             for p_id, p in st.session_state.piezas_dict.items():
                 # VARIABLES DE CANTIDAD
                 nb = q_n * p["pliegos"] # Netas
-                hp_produccion = nb + merma_proc_hojas # Base Acabados
-                hp_papel = hp_produccion + merma_imp_hojas # Base Compra Papel
+                hp_produccion = nb + merma_proc_hojas # Base Acabados (Netas + Merma Rodaje)
+                hp_papel = hp_produccion + merma_imp_hojas # Base Compra Papel (Todo lo anterior + Arranque)
                 
                 m2 = (p["w"]*p["h"])/1_000_000
                 db = st.session_state.db_precios
@@ -444,7 +444,7 @@ with tab_calculadora:
                     debug_log.append(f"📦 <b>Papel Frontal:</b> {hp_papel:.0f}h x {m2:.4f}m² x {p.get('gf',0)/1000:.3f}kg x {p_kg_f}€ = <b>{c_cf:.2f}€</b>")
 
                 # ---------------------------------------------------------
-                # 2. IMPRESIÓN (Detalle Barniz incluido)
+                # 2. IMPRESIÓN (Offset=Netas | Digital=Totales)
                 # ---------------------------------------------------------
                 def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
                 
@@ -494,7 +494,7 @@ with tab_calculadora:
                     debug_log.append(f"🧬 <b>Contracolado:</b> {hp_produccion:.0f}h x {m2:.4f}m² x {p_peg}€ x {pas} pases = <b>{c_peg:.2f}€</b>")
                 
                 # ---------------------------------------------------------
-                # 4. PELICULADO (Desglose solicitado)
+                # 4. PELICULADO
                 # ---------------------------------------------------------
                 c_pel_f, c_pel_d = 0.0, 0.0
                 # Frontal
@@ -503,7 +503,6 @@ with tab_calculadora:
                     c_pel_base = hp_produccion * m2 * precio_pel
                     c_lam_dig = (hp_produccion * m2 * db.get("laminado_digital", 3.5)) if p.get("ld") else 0
                     c_pel_f = c_pel_base + c_lam_dig
-                    
                     desc_lam = f" + {c_lam_dig:.2f}€ (Lam.Dig)" if c_lam_dig > 0 else ""
                     debug_log.append(f"✨ <b>Peliculado F ({p['pel']}):</b> {hp_produccion:.0f}h x {m2:.4f}m² x {precio_pel}€{desc_lam} = <b>{c_pel_f:.2f}€</b>")
                 
@@ -513,7 +512,6 @@ with tab_calculadora:
                     c_pel_base_d = hp_produccion * m2 * precio_pel_d
                     c_lam_dig_d = (hp_produccion * m2 * db.get("laminado_digital", 3.5)) if p.get("ld_d") else 0
                     c_pel_d = c_pel_base_d + c_lam_dig_d
-                    
                     desc_lam_d = f" + {c_lam_dig_d:.2f}€ (Lam.Dig)" if c_lam_dig_d > 0 else ""
                     debug_log.append(f"✨ <b>Peliculado D ({p['pel_d']}):</b> {hp_produccion:.0f}h x {m2:.4f}m² x {precio_pel_d}€{desc_lam_d} = <b>{c_pel_d:.2f}€</b>")
                 
@@ -583,7 +581,7 @@ with tab_calculadora:
             st.dataframe(pd.DataFrame(res_final), use_container_width=True)
             for q, info in desc_full.items():
                 with st.expander(f"🔍 Auditoría Taller {q} uds (Taller: {info['qp']} uds)"):
-                    st.info(f"**CONTROL DE MERMAS:**\n🔹 **Arranque Impresión:** {info['m_imp']} hojas fijas\n🔹 **Merma Procesos:** {info['m_proc']} unidades perdidas\n✅ **Total a Manipular (Taller):** {q} + {info['m_proc']} = **{info['qp']} unidades**")
+                    st.info(f"**CONTROL DE MERMAS:**\n🔹 **Arranque Impresión:** {info['m_imp']} hojas fijas\n🔹 **Merma Procesos:** {info['m_proc']} hojas extra\n✅ **Base Cálculo Acabados:** {info['qp']*st.session_state.piezas_dict[0]['pliegos'] + info['m_proc']} hojas")
                     df_raw = pd.DataFrame(info["det"])
                     cols_order = ["Pieza", "Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Total Mat", "Imp. Cara", "Imp. Dorso", "Total Imp", "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte", "Total Narba", "Subtotal"]
                     cols_final = [c for c in cols_order if c in df_raw.columns]
