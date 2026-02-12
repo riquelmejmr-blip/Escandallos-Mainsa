@@ -5,7 +5,7 @@ import re
 import math
 
 # --- 1. CONFIGURACIÓN Y DATOS INICIALES ---
-st.set_page_config(page_title="MAINSA ADMIN V39", layout="wide")
+st.set_page_config(page_title="MAINSA ADMIN V40", layout="wide")
 
 PRODUCTOS_FLEXICO = {
     "172018": {"desc": "GANCHO EXTENSIBLE MAXI 0,5kg", "precio": 0.0397},
@@ -108,7 +108,6 @@ PRECIOS_BASE = {
         "Doble Micro / Doble Doble": {"C/C": 1.046, "B/C": 1.1, "B/B": 1.276, "peg": 0.263},
         "AC (Cuero/Cuero)": {"C/C": 2.505, "peg": 0.217}
     },
-    # NOMBRES ACTUALIZADOS PARA MOSTRAR MEDIDAS
     "rigidos": {
         "Ninguno": {"precio_ud": 0.0, "w": 0, "h": 0},
         "Compacto 1.5mm (1000x700)": {"precio_ud": 3.20, "w": 1000, "h": 700},
@@ -136,9 +135,7 @@ PRECIOS_BASE = {
         "Mediano (Estándar)":   {"arranque": 80.77, "tiro": 0.09},
         "Grande (> 1000x700)":  {"arranque": 107.80, "tiro": 0.135}
     },
-    "plotter": {
-        "precio_hoja": 2.03
-    }
+    "plotter": { "precio_hoja": 2.03 }
 }
 
 FORMATOS_STD = {
@@ -158,7 +155,7 @@ def calcular_mermas_estandar(n, es_digital=False):
     return int(n*0.03), 300
 
 # --- 3. INICIALIZACIÓN ---
-st.set_page_config(page_title="MAINSA ADMIN V39", layout="wide")
+st.set_page_config(page_title="MAINSA ADMIN V40", layout="wide")
 
 if 'db_precios' not in st.session_state: st.session_state.db_precios = PRECIOS_BASE.copy()
 if 'is_admin' not in st.session_state: st.session_state.is_admin = False 
@@ -166,12 +163,10 @@ if 'is_admin' not in st.session_state: st.session_state.is_admin = False
 def crear_forma_vacia(index):
     return {
         "nombre": f"Forma {index + 1}", "pliegos": 1.0, "w": 0, "h": 0, 
-        "pf": "Ninguno", "gf": 0, 
-        "tipo_base": "Ondulado (A medida)", 
+        "pf": "Ninguno", "gf": 0, "tipo_base": "Ondulado (A medida)", 
         "pl": "Ninguna", "ap": "B/C", "mat_rigido": "Ninguno",
         "pd": "Ninguno", "gd": 0, 
-        "im": "No", "nt": 0, "ba": False, 
-        "im_d": "No", "nt_d": 0, "ba_d": False, 
+        "im": "No", "nt": 0, "ba": False, "im_d": "No", "nt_d": 0, "ba_d": False, 
         "pel": "Sin Peliculado", "pel_d": "Sin Peliculado", "ld": False, "ld_d": False, 
         "cor": "Troquelado", "cobrar_arreglo": True, "pv_troquel": 0.0, "pl_dif": False, "pl_h": 0, "pl_w": 0 
     }
@@ -269,7 +264,7 @@ if tab_costes:
                 for k, v in st.session_state.db_precios["cartoncillo"].items():
                     if k != "Ninguno":
                         st.session_state.db_precios["cartoncillo"][k]["precio_kg"] = st.number_input(f"{k} (€/kg)", value=float(v["precio_kg"]), key=f"cost_cart_{k}")
-            with st.expander("🧱 Ondulado y Rígidos", expanded=True):
+            with st.expander("🧱 Ondulado y Rígidos (€/u)", expanded=True):
                 st.markdown("##### Ondulado (Base variable)")
                 for k, v in st.session_state.db_precios["planchas"].items():
                     if k != "Ninguna":
@@ -296,7 +291,6 @@ if tab_costes:
                     st.session_state.db_precios["troquelado"][k]["tiro"] = c_tir.number_input(f"Tiro (€/h)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}")
             with st.expander("✂️ Plotter", expanded=True):
                  st.session_state.db_precios["plotter"]["precio_hoja"] = st.number_input("Corte Plotter (€/hoja)", value=float(st.session_state.db_precios["plotter"]["precio_hoja"]))
-
 
 with tab_calculadora:
     if not modo_comercial:
@@ -486,12 +480,12 @@ with tab_calculadora:
     # --- MOTOR DE CÁLCULO ---
     res_final, desc_full, res_tecnico = [], {}, []
     if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
-        # BUG FIXED: Using correct variable name tot_pv_trq
         tot_pv_trq = sum(float(pz.get('pv_troquel', 0.0)) for pz in st.session_state.piezas_dict.values())
         
         for q_n in lista_cants:
             merma_imp_hojas = st.session_state.mermas_imp_manual.get(q_n, 0)        
             merma_proc_hojas = st.session_state.mermas_proc_manual.get(q_n, 0) 
+            
             coste_f, det_f, debug_log = 0.0, [], []
             qp_labor = q_n 
             tech_hojas_papel = 0
@@ -597,16 +591,31 @@ with tab_calculadora:
 
                 sub = c_cf + c_cd + c_imp + c_pl + c_peg + c_pel + c_trq + c_plot
                 coste_f += sub
-                det_f.append({"Pieza": p["nombre"], "Mat. Frontal": c_cf, "Mat. Dorso": c_cd, "Mat. Ondulado": c_pl, "Imp. Cara": c_imp_f, "Imp. Dorso": c_imp_d, "Acab. Peliculado": c_pel, "Acab. Contracolado": c_peg, "Acab. Troquel/Corte": c_trq + c_plot, "Subtotal": sub})
+                det_f.append({"Pieza": p["nombre"], "Mat. Frontal": c_cf, "Mat. Dorso": c_cd, "Mat. Ondulado": c_pl, "Imp. Cara": c_if, "Imp. Dorso": c_id, "Acab. Peliculado": c_pel, "Acab. Contracolado": c_peg, "Acab. Troquel/Corte": c_trq + c_plot, "Subtotal": sub})
 
             c_ext_tot = sum(e["coste"] * e["cantidad"] * qp_labor for e in st.session_state.lista_extras_grabados)
             c_mo = ((seg_man_total/3600)*18*q_n) + (q_n*dif_ud)
-            pv_emb_total = st.session_state.costes_embalaje_manual.get(q_n, 0.0) * 1.4 * q_n
             
-            # BUG FIXED: Using tot_pv_trq instead of total_pv_troqueles
-            pvp_total_todo = ((coste_f + c_ext_tot + c_mo) * margen) + imp_fijo_pvp + pv_emb_total + tot_pv_trq
+            # Packaging
+            coste_emb_unit_compra = st.session_state.costes_embalaje_manual.get(q_n, 0.0)
+            pv_emb_ud = coste_emb_unit_compra * 1.4
+            pv_emb_total = pv_emb_ud * q_n
             
-            res_final.append({"Cantidad": q_n, "Precio Venta Unitario": f"{pvp_producto_base/q_n:.3f}€", "Precio Embalaje Unitario": f"{pv_emb_ud:.3f}€", "Precio Troquel (Total)": f"{total_pv_troqueles:.2f}€", "Precio Venta Total": f"{pvp_total_todo:.2f}€", "Unitario (Todo Incluido)": f"{pvp_total_todo/q_n:.3f}€"})
+            # Base PVP (Product + Extras + Labor + Fixed)
+            pvp_producto_base = ((coste_f + c_ext_tot + c_mo) * margen) + imp_fijo_pvp
+            
+            # Total PVP
+            pvp_total_todo = pvp_producto_base + pv_emb_total + tot_pv_trq
+            
+            # Append results
+            res_final.append({
+                "Cantidad": q_n,
+                "Precio Venta Unitario": f"{pvp_producto_base/q_n:.3f}€",
+                "Precio Embalaje Unitario": f"{pv_emb_ud:.3f}€",
+                "Precio Troquel (Total)": f"{tot_pv_trq:.2f}€",
+                "Precio Venta Total": f"{pvp_total_todo:.2f}€",
+                "Unitario (Todo Incluido)": f"{pvp_total_todo/q_n:.3f}€"
+            })
             
             # Resultado técnico para operarios
             res_tecnico.append({
@@ -627,14 +636,12 @@ with tab_calculadora:
             for p in st.session_state.piezas_dict.values():
                 mat_f = f"<b>Frontal:</b> {p['pf']} ({p.get('gf',0)}g)" if p['pf'] != "Ninguno" else ""
                 mat_d = f" | <b>Dorso:</b> {p['pd']} ({p.get('gd',0)}g)" if p.get('pd', "Ninguno") != "Ninguno" else ""
+                mat_pl = f" | <b>Base:</b> {p['pl']}" if p.get('pl', "Ninguna") != "Ninguna" else ""
                 
-                # BASE LOGIC DISPLAY
-                if p.get("tipo_base") == "Material Rígido":
-                    mat_pl = f" | <b>Rígido:</b> {p.get('mat_rigido')}"
-                else:
-                    mat_pl = f" | <b>Base:</b> {p['pl']} ({p['ap']})" if p.get('pl', "Ninguna") != "Ninguna" else ""
-                    if p.get('pl_dif', False):
-                        mat_pl += f" <span style='color: #d32f2f; font-size: 0.9em;'>(Medida Optimizada: {p['pl_h']}x{p['pl_w']}mm)</span>"
+                # --- MODIFICACIÓN VISUAL: MOSTRAR SI HAY PLANCHA DIFERENTE ---
+                if p.get('pl_dif', False):
+                    mat_pl += f" <span style='color: #d32f2f; font-size: 0.9em;'>(Medida Optimizada: {p['pl_h']}x{p['pl_w']}mm)</span>"
+                # -------------------------------------------------------------
 
                 info_imp = ""; info_pliegos = f" | <b>Pliegos/Ud:</b> {p['pliegos']}" if p['pliegos'] != 1 else ""
                 if p['im'] == "Offset": info_imp = f" | <b>Imp:</b> Offset {p['nt']} tintas" + (" + Barniz" if p['ba'] else "")
@@ -651,9 +658,6 @@ with tab_calculadora:
             # Use 'Unitario (Todo Incluido)' key from res_final dictionary construction above
             rows_html = ""
             for r in res_final: 
-                # Note: Dictionary keys are slightly different in loop construction vs display
-                # Let's fix the loop construction above to match standard or adapt here.
-                # In loop: "Precio Venta Unitario" ... "Unitario (Todo Incluido)"
                 rows_html += f"""<tr><td style='font-weight:bold;'>{r['Cantidad']}</td><td>{r['Precio Venta Unitario']}</td><td>{r['Precio Embalaje Unitario']}</td><td>{r['Precio Troquel (Total)']}</td><td style='background-color: #f0f8ff;'>{r['Precio Venta Total']}</td><td style='font-weight:bold; color: #1E88E5;'>{r['Unitario (Todo Incluido)']}</td></tr>"""
                 
             st.markdown(f"""<div class="comercial-box"><h2 class="comercial-header">OFERTA COMERCIAL - {st.session_state.cli}</h2><p class="comercial-ref">Ref. Briefing: {st.session_state.brf}</p>{desc_html}<table class="comercial-table"><tr><th>Cantidad</th><th>P. Venta Unitario</th><th>P. Emb. Unitario</th><th>Troqueles (Total)</th><th>PRECIO VENTA TOTAL</th><th>UNITARIO (TODO)</th></tr>{rows_html}</table><p style='text-align: right; font-size: 0.9em; color: #777; margin-top: 15px;'>* Oferta válida salvo error tipográfico. IVA no incluido.</p></div>""", unsafe_allow_html=True)
