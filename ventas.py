@@ -4,7 +4,7 @@ import json
 import re
 import math
 
-# --- 1. BASE DE DATOS FLEXICO ---
+# --- 1. BASE DE DATOS FLEXICO (COMPLETA) ---
 PRODUCTOS_FLEXICO = {
     "172018": {"desc": "GANCHO EXTENSIBLE MAXI 0,5kg", "precio": 0.0397},
     "137018": {"desc": "PORTAETIQUETA GANCHO 28x30 mm", "precio": 0.0742},
@@ -152,10 +152,10 @@ def calcular_mermas_estandar(n, es_digital=False):
     return int(n*0.03), 300
 
 # --- 3. INICIALIZACIÓN ---
-st.set_page_config(page_title="MAINSA ADMIN V30", layout="wide")
+st.set_page_config(page_title="MAINSA ADMIN V31", layout="wide")
 
 if 'db_precios' not in st.session_state: st.session_state.db_precios = PRECIOS_BASE.copy()
-if 'is_admin' not in st.session_state: st.session_state.is_admin = False # NUEVO V30
+if 'is_admin' not in st.session_state: st.session_state.is_admin = False 
 
 def crear_forma_vacia(index):
     return {
@@ -188,7 +188,7 @@ st.markdown("""<style>
 
 st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 
-# --- CONTROL DE PESTAÑAS (V30: VISIBILIDAD CONDICIONAL) ---
+# --- CONTROL DE PESTAÑAS (VISIBILIDAD CONDICIONAL) ---
 if st.session_state.is_admin:
     tab_calculadora, tab_costes, tab_debug = st.tabs(["🧮 Calculadora", "💰 Base de Datos", "🔍 Desglose"])
 else:
@@ -237,7 +237,7 @@ with tab_calculadora:
     with st.sidebar:
         st.header("⚙️ Configuración")
         
-        # --- LOGIN V30 ---
+        # --- LOGIN V31 ---
         pwd = st.text_input("🔑 Contraseña Admin", type="password")
         if pwd == "mainsa2024": 
             st.session_state.is_admin = True
@@ -399,18 +399,25 @@ with tab_calculadora:
                 st.session_state.mermas_proc_manual[q] = c_mp.number_input("Merma Rodaje (h)", value=st.session_state.mermas_proc_manual.get(q, 30), key=f"mp_{q}")
 
     # --- MOTOR DE CÁLCULO ---
-    res_final, desc_full = [], {}
+    res_final, desc_full, res_tecnico = [], {}, []
     if lista_cants and st.session_state.piezas_dict and sum(lista_cants)>0:
         tot_pv_trq = sum(float(pz['pv_troquel']) for pz in st.session_state.piezas_dict.values())
         for q_n in lista_cants:
             m_imp = st.session_state.mermas_imp_manual.get(q_n, 0)
             m_proc = st.session_state.mermas_proc_manual.get(q_n, 0)
             cost_f, det_f, logs = 0.0, [], []
+            
+            # Variables acumuladas para informe técnico
+            tech_hojas_papel = 0
+            tech_planchas_rigidas = 0
+            
             for pid, p in st.session_state.piezas_dict.items():
                 nb = q_n * p['pliegos']
                 hp_p = nb + m_proc + m_imp # Para Impresion/Papel
                 hp_a = nb + m_proc         # Para Procesos
                 m2_p = (p['w']*p['h'])/1_000_000
+                
+                tech_hojas_papel += hp_p
                 
                 # --- CALCULO BASE ---
                 c_pl, c_peg = 0.0, 0.0
@@ -429,7 +436,6 @@ with tab_calculadora:
                         info_mat = st.session_state.db_precios["rigidos"][p['mat_rigido']]
                         mw, mh = info_mat['w'], info_mat['h']
                         pw, ph = p['w'], p['h']
-                        # Yield
                         yield_1 = (mw // pw) * (mh // ph)
                         yield_2 = (mw // ph) * (mh // pw)
                         best_yield = max(yield_1, yield_2)
@@ -437,6 +443,7 @@ with tab_calculadora:
                         if best_yield > 0:
                             num_planchas = math.ceil(hp_a / best_yield)
                             c_pl = num_planchas * info_mat['precio_ud']
+                            tech_planchas_rigidas += num_planchas
                             if p['pf'] != "Ninguno":
                                 precio_pegado = st.session_state.db_precios["planchas"]["Microcanal / Canal 3"]["peg"]
                                 c_peg = hp_a * m2_p * precio_pegado 
@@ -469,7 +476,15 @@ with tab_calculadora:
             pv_emb = st.session_state.costes_embalaje_manual.get(q_n,0)*1.4*q_n
             pvp_b = ((cost_f + c_ext + c_mo)*margen) + imp_fijo_pvp
             pvp_t = pvp_b + pv_emb + tot_pv_trq
+            
+            # --- GUARDAR RESULTADOS ---
             res_final.append({"Cant": q_n, "Unitario": f"{pvp_t/q_n:.3f}€", "Total": f"{pvp_t:.2f}€"})
+            res_tecnico.append({
+                "Cantidad": q_n,
+                "Hojas Papel (Total)": f"{tech_hojas_papel:.0f}",
+                "Planchas Rígidas": f"{tech_planchas_rigidas}" if tech_planchas_rigidas > 0 else "-",
+                "Extras": f"{len(st.session_state.lista_extras_grabados)} tipos"
+            })
             desc_full[q_n] = {"debug": logs, "taller": cost_f+c_ext+c_mo}
 
     if st.session_state.is_admin:
@@ -479,8 +494,15 @@ with tab_calculadora:
         else:
             if res_final: st.dataframe(pd.DataFrame(res_final))
     else:
-        st.info("✅ Datos técnicos completados. Solicita validación a administración para ver costes.")
+        # VISTA OPERARIO (SIN PRECIOS)
+        if res_tecnico:
+            st.success("✅ Cálculo Realizado Correctamente")
+            st.subheader("📋 Resumen de Producción")
+            st.table(pd.DataFrame(res_tecnico))
+        else:
+            st.info("Introduce cantidades y piezas para calcular.")
 
+# --- PESTAÑA 3: AUDITORÍA (SOLO ADMIN) ---
 if tab_debug:
     with tab_debug:
         st.header("🔍 Auditoría")
