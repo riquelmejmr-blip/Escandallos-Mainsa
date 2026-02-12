@@ -4,9 +4,7 @@ import json
 import re
 import math
 
-# --- 1. CONFIGURACIÓN Y DATOS INICIALES ---
-st.set_page_config(page_title="MAINSA ADMIN V42", layout="wide")
-
+# --- 1. BASE DE DATOS FLEXICO ---
 PRODUCTOS_FLEXICO = {
     "172018": {"desc": "GANCHO EXTENSIBLE MAXI 0,5kg", "precio": 0.0397},
     "137018": {"desc": "PORTAETIQUETA GANCHO 28x30 mm", "precio": 0.0742},
@@ -112,7 +110,6 @@ PRECIOS_BASE = {
         "Ninguno": {"precio_ud": 0.0, "w": 0, "h": 0},
         "Compacto 1.5mm (1000x700)": {"precio_ud": 3.20, "w": 1000, "h": 700},
         "Compacto 2mm (1050x750)": {"precio_ud": 4.50, "w": 1050, "h": 750},
-        "Compacto 3mm (1050x750)": {"precio_ud": 5.80, "w": 1050, "h": 750},
         "PVC 3mm (2000x1000)": {"precio_ud": 18.00, "w": 2000, "h": 1000},
         "PVC 5mm (3000x2000)": {"precio_ud": 45.00, "w": 3000, "h": 2000},
         "PET 1mm (1200x800)": {"precio_ud": 9.80, "w": 1200, "h": 800},
@@ -156,7 +153,7 @@ def calcular_mermas_estandar(n, es_digital=False):
     return int(n*0.03), 300
 
 # --- 3. INICIALIZACIÓN ---
-st.set_page_config(page_title="MAINSA ADMIN V42", layout="wide")
+st.set_page_config(page_title="MAINSA ADMIN V43", layout="wide")
 
 if 'db_precios' not in st.session_state: st.session_state.db_precios = PRECIOS_BASE.copy()
 if 'is_admin' not in st.session_state: st.session_state.is_admin = False 
@@ -165,7 +162,7 @@ def crear_forma_vacia(index):
     return {
         "nombre": f"Forma {index + 1}", "pliegos": 1.0, "w": 0, "h": 0, 
         "pf": "Ninguno", "gf": 0, 
-        "tipo_base": "Ondulado (A medida)", 
+        "tipo_base": "Ondulado/Cartón", 
         "pl": "Ninguna", "ap": "B/C", "mat_rigido": "Ninguno",
         "pd": "Ninguno", "gd": 0, 
         "im": "No", "nt": 0, "ba": False, 
@@ -227,7 +224,6 @@ with st.sidebar:
     t_input = st.number_input("Tiempo/ud", key="t_input_widget")
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
     
-    # FINANZAS (VISIBLES SOLO PARA ADMIN)
     if st.session_state.is_admin:
         st.divider()
         st.markdown("### 💰 Finanzas")
@@ -237,7 +233,7 @@ with st.sidebar:
     else:
         dif_ud, imp_fijo_pvp, margen = 0.091, 500.0, 2.2
     
-    # CHECKBOX VISTA OFERTA (VISIBLE PARA TODOS AHORA)
+    # VISIBLE PARA TODOS
     modo_comercial = st.checkbox("🌟 VISTA OFERTA", value=False)
         
     st.divider()
@@ -261,7 +257,7 @@ else:
     tab_calculadora, = st.tabs(["🧮 Calculadora Técnica"])
     tab_costes, tab_debug = None, None
 
-# --- CONTENIDO PESTAÑAS (BD) ---
+# --- CONTENIDO PESTAÑAS ---
 if tab_costes:
     with tab_costes:
         col_c1, col_c2 = st.columns(2)
@@ -358,11 +354,11 @@ with tab_calculadora:
                     st.divider()
                     
                     # --- NUEVA LÓGICA RÍGIDOS ---
-                    opts_base = ["Ondulado (A medida)", "Material Rígido"]
-                    idx_base = opts_base.index(p.get("tipo_base", "Ondulado (A medida)")) if p.get("tipo_base") in opts_base else 0
+                    opts_base = ["Ondulado/Cartón", "Material Rígido"]
+                    idx_base = opts_base.index(p.get("tipo_base", "Ondulado/Cartón")) if p.get("tipo_base") in opts_base else 0
                     p['tipo_base'] = st.selectbox("Tipo Soporte", opts_base, index=idx_base, key=f"tb_{p_id}")
                     
-                    if p['tipo_base'] == "Ondulado (A medida)":
+                    if p['tipo_base'] == "Ondulado/Cartón":
                         opts_pl = list(st.session_state.db_precios["planchas"].keys())
                         val_pl = p.get('pl', 'Ninguna'); idx_pl = opts_pl.index(val_pl) if val_pl in opts_pl else 0
                         p['pl'] = st.selectbox("Plancha Base", opts_pl, index=idx_pl, key=f"pl_{p_id}")
@@ -494,26 +490,18 @@ with tab_calculadora:
             coste_f, det_f, debug_log = 0.0, [], []
             qp_labor = q_n 
             tech_hojas_papel = 0
+            tech_planchas_rigidas = 0
 
             for pid, p in st.session_state.piezas_dict.items():
-                # INICIALIZAR TODAS LAS VARIABLES A 0
                 c_cf = c_cd = c_imp = c_pl = c_peg = c_pel_f = c_pel_d = c_pel = c_trq = c_plot = 0.0
 
                 nb = q_n * p["pliegos"]
                 hp_produccion = nb + merma_proc_hojas
-                
-                # --- MERMAS DIFERENCIADAS (FRONTAL vs DORSO vs IMPRESIÓN) ---
-                hp_papel_f = hp_produccion + merma_imp_hojas if p["im"] != "No" else hp_produccion
-                hp_papel_d = hp_produccion + merma_imp_hojas if p.get("im_d", "No") != "No" else hp_produccion
-                
+                hp_papel = hp_produccion + merma_imp_hojas
                 m2_papel = (p["w"]*p["h"])/1_000_000
-                tech_hojas_papel += hp_papel_f 
+                tech_hojas_papel += hp_papel
 
                 db = st.session_state.db_precios
-                
-                # --- CABECERA LOG ---
-                debug_log.append(f"<br><b>🔹 PIEZA: {p['nombre']}</b>")
-                debug_log.append(f"• Dim Papel: {p['h']}x{p['w']}mm = <b>{m2_papel:.4f} m²</b>")
                 
                 # --- SOPORTE (RIGIDO vs ONDULADO) ---
                 if p.get("tipo_base") == "Material Rígido" and p.get("mat_rigido") != "Ninguno":
@@ -523,12 +511,12 @@ with tab_calculadora:
                          by = max((mw//p['w'])*(mh//p['h']), (mw//p['h'])*(mh//p['w']))
                          if by > 0:
                              n_pl = math.ceil(hp_produccion / by)
+                             tech_planchas_rigidas += n_pl
                              c_pl = n_pl * im['precio_ud']
                              debug_log.append(f"🏗️ <b>Rígido:</b> {n_pl} planchas x {im['precio_ud']}€ = {c_pl:.2f}€")
                              if p["pf"] != "Ninguno":
                                  c_peg = hp_produccion * m2_papel * db["planchas"]["Microcanal / Canal 3"]["peg"]
                                  debug_log.append(f"🧬 <b>Pegado:</b> {c_peg:.2f}€")
-                         else: debug_log.append("⚠️ ERROR: Pieza excede tamaño plancha")
                 else:
                     if p.get("pl_dif", False) and p.get("pl_h", 0) > 0:
                         m2_plancha = (p["pl_w"]*p["pl_h"])/1_000_000
@@ -539,22 +527,13 @@ with tab_calculadora:
                         c_peg = hp_produccion * m2_plancha * db["planchas"][p["pl"]]["peg"] * (1 if p["pf"]!="Ninguno" else 0)
                         debug_log.append(f"📦 <b>Ondulado:</b> {hp_produccion:.0f}h x {m2_plancha:.4f}m² x Coste = {c_pl:.2f}€")
 
-                # --- MATERIALES ---
-                c_cf = (hp_papel_f * m2_papel * (p['gf']/1000) * db["cartoncillo"][p["pf"]]["precio_kg"])
+                c_cf = (hp_papel * m2_papel * (p['gf']/1000) * db["cartoncillo"][p["pf"]]["precio_kg"])
                 if p.get("pd") != "Ninguno":
-                     c_cd = (hp_papel_d * m2_papel * (p['gd']/1000) * db["cartoncillo"][p.get("pd","Ninguno")]["precio_kg"]) 
-                debug_log.append(f"📄 <b>Papel F:</b> {c_cf:.2f}€ | <b>Papel D:</b> {c_cd:.2f}€")
+                     c_cd = (hp_papel * m2_papel * (p['gd']/1000) * db["cartoncillo"][p.get("pd","Ninguno")]["precio_kg"]) 
 
-                # --- IMPRESION ---
                 def f_o(n): return 60 if n < 100 else (120 if n > 500 else 60 + 0.15*(n-100))
-                c_imp = hp_papel_f * m2_papel * 6.5 if p["im"]=="Digital" else f_o(nb)*(p.get('nt',0) + (1 if p.get('ba') else 0))
-                c_imp += hp_papel_d * m2_papel * 6.5 if p.get("im_d")=="Digital" else f_o(nb)*(p.get('nt_d',0) + (1 if p.get('ba_d') else 0))
-                debug_log.append(f"🖨️ <b>Impresión:</b> {c_imp:.2f}€")
-
-                # --- ACABADOS ---
-                c_pel_f = (hp_produccion * m2_papel * db["peliculado"][p["pel"]]) if p["pel"] != "Sin Peliculado" else 0
-                c_pel_d = (hp_produccion * m2_papel * db["peliculado"][p.get("pel_d","Sin Peliculado")]) if p.get("pel_d") != "Sin Peliculado" else 0
-                c_pel = c_pel_f + c_pel_d
+                c_imp = hp_papel * m2_papel * 6.5 if p["im"]=="Digital" else f_o(nb)*(p.get('nt',0) + (1 if p.get('ba') else 0))
+                c_pel = (hp_produccion * m2_papel * db["peliculado"][p["pel"]])
                 
                 t_db = db.get("troquelado", PRECIOS_BASE["troquelado"])
                 cat = "Grande (> 1000x700)" if (p['h']>1000 or p['w']>700) else ("Pequeño (< 1000x700)" if (p['h']<1000 and p['w']<700) else "Mediano (Estándar)")
@@ -564,63 +543,55 @@ with tab_calculadora:
 
                 sub = c_cf + c_cd + c_imp + c_pl + c_peg + c_pel + c_trq + c_plot
                 coste_f += sub
-                
-                det_f.append({"Pieza": p["nombre"], "Mat. Frontal": c_cf, "Mat. Dorso": c_cd, "Mat. Ondulado": c_pl, "Total Mat": c_cf+c_cd+c_pl, "Imp. Total": c_imp, "Acab. Peliculado": c_pel, "Acab. Contracolado": c_peg, "Acab. Troquel/Corte": c_trq + c_plot, "Total Narba": c_pel+c_peg+c_trq+c_plot, "Subtotal": sub})
+                det_f.append({"Pieza": p["nombre"], "Mat. Frontal": c_cf, "Mat. Dorso": c_cd, "Mat. Ondulado": c_pl, "Imp. Cara": c_imp, "Imp. Dorso": 0, "Acab. Peliculado": c_pel, "Acab. Contracolado": c_peg, "Acab. Troquel/Corte": c_trq + c_plot, "Total Narba": c_pel+c_peg+c_trq+c_plot, "Subtotal": sub})
 
             c_ext = sum(e["coste"] * e["cantidad"] * qp_labor for e in st.session_state.lista_extras_grabados)
             c_mo = ((seg_man_total/3600)*18*q_n) + (q_n*dif_ud)
             pv_emb = st.session_state.costes_embalaje_manual.get(q_n, 0.0) * 1.4 * q_n
             pvp = ((coste_f + c_ext + c_mo) * margen) + imp_fijo_pvp + pv_emb + tot_pv_trq
             
-            res_final.append({"Cantidad": q_n, "PVP Total": f"{pvp:.2f}€", "Unitario": f"{pvp/q_n:.3f}€"})
-            res_tecnico.append({"Cant": q_n, "Hojas Papel": f"{tech_hojas_papel:.0f}", "Extras": f"{len(st.session_state.lista_extras_grabados)}"})
+            res_final.append({"Cantidad": q_n, "Precio Venta Unitario": f"{pvp/q_n:.3f}€", "Precio Embalaje Unitario": f"{pv_emb/q_n:.3f}€", "Precio Troquel (Total)": f"{tot_pv_trq:.2f}€", "Precio Venta Total": f"{pvp:.2f}€", "Unitario (Todo Incluido)": f"{pvp/q_n:.3f}€"})
+            
+            res_tecnico.append({
+                "Cantidad": q_n,
+                "Precio Venta Unitario": f"{pvp/q_n:.3f}€", # Operario ve precios venta unitarios
+                "Precio Venta Total": f"{pvp:.2f}€",
+                "Hojas Papel": f"{tech_hojas_papel:.0f} hojas",
+                "Planchas Rígidas": f"{tech_planchas_rigidas}",
+                "Embalaje": f"{coste_emb_unit_compra:.2f}€/u"
+            })
+            
             desc_full[q_n] = {"det": det_f, "mo": c_mo, "extras": c_ext, "taller": coste_f + c_mo + c_ext, "debug": debug_log}
 
-    # --- SALIDA ---
-    if st.session_state.is_admin:
-        if modo_comercial:
-            st.header(f"Oferta Comercial: {st.session_state.cli}")
-            html_piezas = ""
-            for p in st.session_state.piezas_dict.values():
-                 base_info = f"Rígido: {p['mat_rigido']}" if p.get("tipo_base") == "Material Rígido" else f"Base: {p['pl']} ({p['ap']})"
-                 html_piezas += f"<li><b>{p['nombre']}</b>: {p['h']}x{p['w']}mm | {p['pf']} | {base_info} | {p['pel']}</li>"
-            
-            st.markdown(f"""
-            <div class="comercial-box">
-                <h2 class="comercial-header">PRESUPUESTO: {st.session_state.cli}</h2>
-                <p style="text-align:center;">Ref: {st.session_state.brf} | {st.session_state.desc}</p>
-                <hr>
-                <h4>📋 Especificaciones</h4>
-                <ul>{html_piezas}</ul>
-                <p><b>Accesorios:</b> {', '.join([e['nombre'] for e in st.session_state.lista_extras_grabados])}</p>
-            </div>
-            """, unsafe_allow_html=True)
-            st.table(pd.DataFrame(res_final))
-        else:
-            if res_final: 
-                st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
-                simple_res = []
-                for r in res_final:
-                    simple_res.append({"Cant": r['Cantidad'], "PVP Total": r['Precio Venta Total'], "Unitario": r['Unitario (Todo Incluido)']})
-                st.dataframe(pd.DataFrame(simple_res), use_container_width=True)
-                
-                for q, info in desc_full.items():
-                    with st.expander(f"🔍 Auditoría Taller {q} uds"):
-                        df_raw = pd.DataFrame(info["det"])
-                        cols_order = ["Pieza", "Mat. Frontal", "Mat. Dorso", "Mat. Ondulado", "Total Mat", "Imp. Total", "Acab. Peliculado", "Acab. Contracolado", "Acab. Troquel/Corte", "Total Narba", "Subtotal"]
-                        cols_final = [c for c in cols_order if c in df_raw.columns]
-                        df_sorted = df_raw[cols_final]
-                        row_mo = {c: 0 for c in cols_final[1:]}; row_mo["Pieza"] = "MANO DE OBRA"; row_mo["Subtotal"] = info['mo']
-                        row_ext = {c: 0 for c in cols_final[1:]}; row_ext["Pieza"] = "MATERIALES EXTRA"; row_ext["Subtotal"] = info['extras']
-                        df_audit = pd.concat([df_sorted, pd.DataFrame([row_mo, row_ext])], ignore_index=True)
-                        st.table(df_audit.style.format("{:.2f}€", subset=df_audit.columns[1:]).set_properties(**{'background-color': '#e3f2fd', 'font-weight': 'bold'}, subset=["Total Mat","Imp. Total","Total Narba","Subtotal"]))
-                        st.metric("COSTO TALLER", f"{info['taller']:.2f}€")
-    else:
-        if res_tecnico:
-            st.success("✅ Cálculo Realizado")
-            st.table(pd.DataFrame(res_final)) # OPERARIOS VEN PRECIOS FINALES (NO COSTES)
-            st.table(pd.DataFrame(res_tecnico))
+    # VISUALIZACIÓN
+    if modo_comercial and res_final:
+        desc_html = """<div style='text-align: left; margin-bottom: 20px; color: #444;'>
+        <h4 style='color: #1E88E5; margin-bottom: 5px;'>📋 Especificaciones del Proyecto</h4>
+        <ul style='list-style-type: none; padding-left: 0;'>"""
+        for p in st.session_state.piezas_dict.values():
+            base_info = f"Rígido: {p['mat_rigido']}" if p.get("tipo_base") == "Material Rígido" else f"Base: {p['pl']} ({p['ap']})"
+            desc_html += f"<li>🔹 <b>{p['nombre']}</b>: {p['h']}x{p['w']}mm | {base_info}</li>"
+        desc_html += "</ul></div>"
+        
+        rows_html = ""
+        for r in res_final:
+             rows_html += f"""<tr><td>{r['Cantidad']}</td><td>{r['Precio Venta Unitario']}</td><td>{r['Precio Embalaje Unitario']}</td><td>{r['Precio Troquel (Total)']}</td><td>{r['Precio Venta Total']}</td><td>{r['Unitario (Todo Incluido)']}</td></tr>"""
 
+        st.markdown(f"""<div class="comercial-box"><h2 class="comercial-header">OFERTA: {st.session_state.cli}</h2>{desc_html}<table class="comercial-table"><tr><th>Cant</th><th>Unitario</th><th>Emb. Unit</th><th>Troquel</th><th>TOTAL</th><th>UNITARIO FINAL</th></tr>{rows_html}</table></div>""", unsafe_allow_html=True)
+    else:
+        if res_final:
+            st.success("✅ Cálculo Realizado")
+            st.table(pd.DataFrame(res_tecnico)) # Tabla resumen para todos
+
+    if st.session_state.is_admin and res_final:
+        st.header("📊 Auditoría de Costes (Solo Admin)")
+        for q, info in desc_full.items():
+            with st.expander(f"🔍 Desglose {q} uds"):
+                df_audit = pd.DataFrame(info["det"])
+                st.table(df_audit.style.format("{:.2f}€", subset=df_audit.columns[1:]))
+                st.metric("COSTO TALLER (Sin Margen)", f"{info['taller']:.2f}€")
+
+# --- AUDITORIA ---
 if tab_debug:
     with tab_debug:
         if lista_cants and desc_full:
