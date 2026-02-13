@@ -382,11 +382,7 @@ with st.sidebar:
     )
 
 # =========================================================
-# AUTO-RELLENO DE MERMAS (AQUÍ ESTÁ EL CAMBIO)
-# - Se calcula una vez por cantidad en base a la tabla.
-# - El modo digital se aplica si EXISTE alguna cara en digital en cualquier pieza.
-# - Solo rellena si NO hay valor ya guardado para esa cantidad (no pisa lo manual).
-# - Hay un botón para forzar “Recalcular mermas estándar”.
+# AUTO-RELLENO DE MERMAS
 # =========================================================
 def hay_digital_en_proyecto() -> bool:
     for p in st.session_state.piezas_dict.values():
@@ -397,14 +393,12 @@ def hay_digital_en_proyecto() -> bool:
 def autorrellenar_mermas(lista_cants: list[int], force: bool = False):
     es_dig = hay_digital_en_proyecto()
     for q in lista_cants:
+        mp, mi = calcular_mermas_estandar(q, es_digital=es_dig)  # (proceso, impresión)
         if force or (q not in st.session_state.mermas_proc_manual):
-            mp, mi = calcular_mermas_estandar(q, es_digital=es_dig)  # (proceso, impresión)
             st.session_state.mermas_proc_manual[q] = mp
         if force or (q not in st.session_state.mermas_imp_manual):
-            mp, mi = calcular_mermas_estandar(q, es_digital=es_dig)
             st.session_state.mermas_imp_manual[q] = mi
 
-# relleno automático “silencioso” cada vez que haya cantidades
 if lista_cants:
     autorrellenar_mermas(lista_cants, force=False)
 
@@ -726,7 +720,7 @@ with tab_calculadora:
         else:
             st.warning("Define cantidades primero.")
 
-        # ------------------ MERMAS (ahora con autorrelleno y botón) ------------------
+        # ------------------ MERMAS ------------------
         st.divider()
         st.subheader("⚙️ 4. Gestión de Mermas (AUTO + editable)")
 
@@ -745,8 +739,6 @@ with tab_calculadora:
             for q in lista_cants:
                 c1, c2, c3 = st.columns([1, 2, 2])
                 c1.markdown(f"**{q} uds**")
-
-                # IMPORTANTE: ya están autorrellenadas arriba, aquí solo se editan
                 st.session_state.mermas_imp_manual[q] = c2.number_input(
                     "Merma impresión (hojas)",
                     value=int(st.session_state.mermas_imp_manual.get(q, 0)),
@@ -772,6 +764,8 @@ with tab_calculadora:
 
         coste_emb_unit_compra = float(st.session_state.costes_embalaje_manual.get(q_n, 0.0))
         pv_emb_total = coste_emb_unit_compra * 1.4 * q_n
+
+        # Troquel (VENTA) -> suma de pv_troquel por forma (lo metéis a mano)
         tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in piezas.values())
 
         coste_total_piezas = 0.0
@@ -781,40 +775,10 @@ with tab_calculadora:
         tech_hojas_papel = 0.0
         tech_planchas_rigidas = 0
 
-        def _fmt(x, nd=4):
-            try:
-                return f"{float(x):.{nd}f}"
-            except Exception:
-                return str(x)
-
-        def _fmt_eur(x):
-            try:
-                return f"{float(x):.2f}€"
-            except Exception:
-                return f"{x}€"
-
-        def dbg_title(txt):
-            debug_log.append("<hr style='margin:10px 0'>")
-            debug_log.append(f"<h4 style='margin:4px 0'>🧩 {txt}</h4>")
-
-        def dbg_step(label, formula, calc, result=None):
-            if result is None:
-                debug_log.append(
-                    f"<div style='font-family:monospace; line-height:1.35; margin:2px 0;'>"
-                    f"<b>{label}</b><br>"
-                    f"  • Fórmula: {formula}<br>"
-                    f"  • Cálculo: {calc}"
-                    f"</div>"
-                )
-            else:
-                debug_log.append(
-                    f"<div style='font-family:monospace; line-height:1.35; margin:2px 0;'>"
-                    f"<b>{label}</b><br>"
-                    f"  • Fórmula: {formula}<br>"
-                    f"  • Cálculo: {calc}<br>"
-                    f"  • Resultado: <b>{result}</b>"
-                    f"</div>"
-                )
+        # --- buckets (costes taller) para luego sacar VENTA operario ---
+        # Nota: el troquel de taller NO se muestra como "troquel venta"; el troquel venta es tot_pv_trq.
+        coste_taller_piezas_sin_troquel = 0.0  # todo lo de pieza/taller EXCEPTO corte/troquel de taller
+        coste_taller_troquel_y_corte = 0.0     # corte/troquel de taller (troquelado + plotter)
 
         for pid, p in piezas.items():
             c_cf = c_cd = c_pl = c_peg = c_imp = c_pel = c_trq = c_plot = 0.0
@@ -831,9 +795,6 @@ with tab_calculadora:
             m2_papel = (w * h) / 1_000_000 if (w > 0 and h > 0) else 0.0
 
             tech_hojas_papel += hp_papel_f
-
-            dbg_title(f"PIEZA: {p.get('nombre','(sin nombre)')}")
-            dbg_step("Datos mermas", "merma_imp, merma_proc", f"merma_imp={_fmt(merma_imp,0)} hojas | merma_proc={_fmt(merma_proc,0)} hojas")
 
             # SOPORTE RÍGIDO
             if p.get("tipo_base") == "Material Rígido" and p.get("mat_rigido") != "Ninguno":
@@ -855,11 +816,6 @@ with tab_calculadora:
                         n_pl = int(math.ceil(hojas_con_merma / float(by)))
                         c_pl = n_pl * precio_pl
                         tech_planchas_rigidas += n_pl
-
-                        dbg_step("Rígido: hojas a comprar", "ceil((hp_produccion*(1+merma%))/by)", f"ceil(({_fmt(hp_produccion,2)}*(1+{_fmt(MERMA_RIGIDO_PCT,4)}))/{by})={n_pl}", f"{n_pl} hojas")
-                        dbg_step("Rígido: coste", "c_pl=n_pl*€/hoja", f"{n_pl}*{_fmt(precio_pl,2)}={_fmt(c_pl,2)}", _fmt_eur(c_pl))
-                    else:
-                        dbg_step("Rígido: ERROR", "by debe ser >=1", f"Hoja {mw}x{mh} vs pieza {pw}x{ph} => by={by}", "NO CABE")
 
             # SOPORTE ONDULADO
             else:
@@ -917,7 +873,7 @@ with tab_calculadora:
             c_pel_d = 0.0 if pel_d == "Sin Peliculado" else (hp_produccion * m2_papel * float(db["peliculado"][pel_d]))
             c_pel = c_pel_f + c_pel_d
 
-            # CORTE
+            # CORTE (TALLER)
             cat = categoria_troquel(h, w)
             if p.get("cor") == "Troquelado":
                 arr = float(db["troquelado"][cat]["arranque"]) if p.get("cobrar_arreglo", True) else 0.0
@@ -930,9 +886,13 @@ with tab_calculadora:
             sub = c_cf + c_cd + c_pl + c_imp + c_peg + c_pel + c_trq + c_plot
             coste_total_piezas += sub
 
+            # buckets
+            corte_taller = (c_trq + c_plot)
+            coste_taller_troquel_y_corte += corte_taller
+            coste_taller_piezas_sin_troquel += (sub - corte_taller)
+
             total_mat = c_cf + c_cd + c_pl
             total_narba = c_peg + c_pel + c_trq + c_plot
-
             det_f.append({
                 "Pieza": p.get("nombre", f"Forma {pid+1}"),
                 "Mat. Papel": (c_cf + c_cd),
@@ -943,18 +903,42 @@ with tab_calculadora:
                 "Subtotal": sub,
             })
 
-        # EXTRAS
+        # EXTRAS (coste taller)
         c_ext = sum(float(e.get("coste", 0)) * float(e.get("cantidad", 0)) * q_n for e in extras)
 
-        # MO
+        # MO (coste taller)
         c_mo = ((float(seg_man_total) / 3600.0) * 18.0 * q_n) + (q_n * float(dif_ud))
 
-        # Taller
+        # Taller total
         taller = coste_total_piezas + c_ext + c_mo
 
-        # PVP
+        # PVP total (igual que antes)
         pvp_total = (taller * float(margen)) + float(imp_fijo_pvp) + pv_emb_total + tot_pv_trq
         unitario = (pvp_total / q_n) if q_n > 0 else 0.0
+
+        # ===========================
+        # DESGLOSE VENTA (OPERARIO)
+        # Separación explícita:
+        # - Pieza (incluye MO + coste de pieza SIN el corte/troquel de taller)
+        # - Accesorios
+        # - Embalaje (venta)
+        # - Troquel (venta)
+        # - Fijo PVP
+        #
+        # Regla: el margen SOLO se aplica al taller (pieza+acc+mo+corte), tal como hace tu fórmula.
+        # Embalaje y Troquel van fuera (suma directa).
+        # ===========================
+        venta_pieza = (coste_taller_piezas_sin_troquel + c_mo) * float(margen)
+        venta_accesorios = c_ext * float(margen)
+        venta_corte_taller = coste_taller_troquel_y_corte * float(margen)  # por si queréis verlo, no lo piden explícito
+        venta_fijo = float(imp_fijo_pvp)
+        venta_embalaje = pv_emb_total
+        venta_troquel = tot_pv_trq
+
+        # Para cumplir literal tu petición ("pieza, accesorios, embalaje y troquel"),
+        # "Pieza" aquí NO incluye corte taller (porque el troquel venta lo separas aparte).
+        # Si quieres incluir también el corte taller dentro de "Pieza", dímelo y lo ajusto.
+        pvp_check = venta_pieza + venta_accesorios + venta_corte_taller + venta_fijo + venta_embalaje + venta_troquel
 
         return {
             "q": q_n,
@@ -968,32 +952,61 @@ with tab_calculadora:
             "detalle": det_f,
             "debug": debug_log,
             "taller": taller,
+            "venta_operario": {
+                "Venta Pieza": venta_pieza,
+                "Venta Accesorios": venta_accesorios,
+                "Venta Embalaje": venta_embalaje,
+                "Venta Troquel": venta_troquel,
+                "Venta Fijo": venta_fijo,
+                "Venta Corte Taller": venta_corte_taller,  # extra informativo
+                "Venta Total (check)": pvp_check,
+            },
         }
 
     # Ejecutar cálculo
-    res_final = []
+    res_final_admin = []
     res_tecnico = []
+    res_operario_venta = []
     desc_full = {}
 
     if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         for q_n in lista_cants:
             r = calcular_para_cantidad(q_n)
-            res_final.append({
+
+            # ADMIN tabla (igual)
+            res_final_admin.append({
                 "Cantidad": q_n,
                 "Precio Venta Total": f"{r['pvp_total']:.2f}€",
                 "Unitario (Todo Incluido)": f"{r['unitario']:.3f}€",
             })
+
+            # Operario técnico (sigue)
             res_tecnico.append({
                 "Cantidad": q_n,
                 "Hojas Papel": f"{r['tech']['Hojas Papel']:.0f}",
                 "Hojas Rígidas": f"{r['tech']['Hojas Rígidas (compradas)']}",
                 "Embalaje": f"{r['tech']['Embalaje_u']:.2f}€/u",
             })
+
+            # Operario: desglose de VENTA (lo nuevo)
+            vo = r["venta_operario"]
+            total = r["pvp_total"]
+            res_operario_venta.append({
+                "Cantidad": q_n,
+                "VENTA TOTAL": f"{total:.2f}€",
+                "UNITARIO": f"{(total/q_n):.3f}€",
+                "Pieza (venta)": f"{vo['Venta Pieza']:.2f}€",
+                "Accesorios (venta)": f"{vo['Venta Accesorios']:.2f}€",
+                "Embalaje (venta)": f"{vo['Venta Embalaje']:.2f}€",
+                "Troquel (venta)": f"{vo['Venta Troquel']:.2f}€",
+                "Fijo (venta)": f"{vo['Venta Fijo']:.2f}€",
+            })
+
             desc_full[q_n] = {"det": r["detalle"], "debug": r["debug"], "taller": r["taller"]}
 
     # Salida visual
     if st.session_state.is_admin:
-        if modo_comercial and res_final:
+        if modo_comercial and res_final_admin:
             desc_html = """<div style='text-align: left; margin-bottom: 20px; color: #444;'>
             <h4 style='color: #1E88E5; margin-bottom: 5px;'>📋 Especificaciones del Proyecto</h4>
             <ul style='list-style-type: none; padding-left: 0;'>"""
@@ -1006,7 +1019,7 @@ with tab_calculadora:
             desc_html += "</ul></div>"
 
             rows_html = ""
-            for r in res_final:
+            for r in res_final_admin:
                 rows_html += f"<tr><td>{r['Cantidad']}</td><td>{r['Precio Venta Total']}</td><td>{r['Unitario (Todo Incluido)']}</td></tr>"
 
             st.markdown(
@@ -1021,9 +1034,9 @@ with tab_calculadora:
                 unsafe_allow_html=True
             )
         else:
-            if res_final:
+            if res_final_admin:
                 st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
-                df_simple = pd.DataFrame(res_final)[["Cantidad", "Precio Venta Total", "Unitario (Todo Incluido)"]]
+                df_simple = pd.DataFrame(res_final_admin)[["Cantidad", "Precio Venta Total", "Unitario (Todo Incluido)"]]
                 st.dataframe(df_simple, use_container_width=True)
 
                 for q, info in desc_full.items():
@@ -1032,9 +1045,20 @@ with tab_calculadora:
                         st.table(df_raw.style.format("{:.2f}€", subset=[c for c in df_raw.columns if c != "Pieza"]))
                         st.metric("COSTO TALLER", f"{info['taller']:.2f}€")
     else:
+        # ===========================
+        # MODO OPERARIO
+        # 1) tabla técnica (ya estaba)
+        # 2) NUEVO: tabla de VENTA con desglose (pieza, accesorios, embalaje y troquel)
+        # ===========================
         if res_tecnico:
-            st.success("✅ Cálculo Realizado")
+            st.success("✅ Cálculo Realizado (Técnico)")
             st.table(pd.DataFrame(res_tecnico))
+
+        if res_operario_venta:
+            st.subheader("💶 Venta (Operario) — Desglose explícito")
+            st.caption("Se muestra el precio de venta separado en: pieza, accesorios, embalaje y troquel (más fijo).")
+            df_venta = pd.DataFrame(res_operario_venta)
+            st.dataframe(df_venta, use_container_width=True)
 
 # =========================================================
 # TAB DEBUG (ADMIN)
