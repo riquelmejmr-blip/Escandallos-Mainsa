@@ -10,7 +10,26 @@ from copy import deepcopy
 # =========================================================
 st.set_page_config(page_title="MAINSA ADMIN V44", layout="wide")
 
-MERMA_RIGIDO_PCT = 0.02  # 2% adicional SOLO para consumo de hojas rígidas
+MERMA_RIGIDO_PCT = 0.02  # 2% adicional SOLO para consumo de hojas rígidas (compra)
+
+# =========================================================
+# MERMAS ESTÁNDAR (AUTO)
+# Devuelve: (merma_proceso_hojas, merma_impresion_hojas)
+# =========================================================
+def calcular_mermas_estandar(n: int, es_digital: bool = False):
+    if es_digital:
+        return int(n * 0.02), 10  # (proceso, impresión)
+    if n < 100:
+        return 10, 150
+    if n < 200:
+        return 20, 175
+    if n < 600:
+        return 30, 200
+    if n < 1000:
+        return 40, 220
+    if n < 2000:
+        return 50, 250
+    return int(n * 0.03), 300
 
 # =========================================================
 # CATÁLOGO FLEXICO
@@ -101,7 +120,7 @@ PRODUCTOS_FLEXICO = {
 OPCIONES_FLEXICO = [f"{k} - {v['desc']}" for k, v in PRODUCTOS_FLEXICO.items()]
 
 # =========================================================
-# BASE DE PRECIOS (ACTUALIZADA: RÍGIDOS)
+# BASE DE PRECIOS
 # =========================================================
 PRECIOS_BASE = {
     "cartoncillo": {
@@ -216,67 +235,25 @@ def crear_forma_vacia(index: int) -> dict:
         "pliegos": 1.0,
         "w": 0, "h": 0,
 
-        # Papel frontal/dorso
         "pf": "Ninguno", "gf": 0,
         "pd": "Ninguno", "gd": 0,
 
-        # Soporte
         "tipo_base": "Ondulado/Cartón",
         "pl": "Ninguna", "ap": "B/C",
         "pl_dif": False, "pl_h": 0, "pl_w": 0,
 
-        # Rígido
         "mat_rigido": "Ninguno",
 
-        # Impresión
         "im": "No", "nt": 0, "ba": False,
         "im_d": "No", "nt_d": 0, "ba_d": False,
 
-        # Acabados
         "pel": "Sin Peliculado", "pel_d": "Sin Peliculado",
         "ld": False, "ld_d": False,
 
-        # Corte
         "cor": "Troquelado",
         "cobrar_arreglo": True,
         "pv_troquel": 0.0,
     }
-
-# ---- DEBUG HELPERS (ultra explícito) ----
-def _fmt(x, nd=4):
-    try:
-        return f"{float(x):.{nd}f}"
-    except Exception:
-        return str(x)
-
-def _fmt_eur(x):
-    try:
-        return f"{float(x):.2f}€"
-    except Exception:
-        return f"{x}€"
-
-def dbg_title(debug_log, txt):
-    debug_log.append("<hr style='margin:10px 0'>")
-    debug_log.append(f"<h4 style='margin:4px 0'>🧩 {txt}</h4>")
-
-def dbg_step(debug_log, label, formula, calc, result=None):
-    if result is None:
-        debug_log.append(
-            f"<div style='font-family:monospace; line-height:1.35; margin:2px 0;'>"
-            f"<b>{label}</b><br>"
-            f"  • Fórmula: {formula}<br>"
-            f"  • Cálculo: {calc}"
-            f"</div>"
-        )
-    else:
-        debug_log.append(
-            f"<div style='font-family:monospace; line-height:1.35; margin:2px 0;'>"
-            f"<b>{label}</b><br>"
-            f"  • Fórmula: {formula}<br>"
-            f"  • Cálculo: {calc}<br>"
-            f"  • Resultado: <b>{result}</b>"
-            f"</div>"
-        )
 
 # =========================================================
 # SESSION STATE INIT
@@ -405,6 +382,33 @@ with st.sidebar:
     )
 
 # =========================================================
+# AUTO-RELLENO DE MERMAS (AQUÍ ESTÁ EL CAMBIO)
+# - Se calcula una vez por cantidad en base a la tabla.
+# - El modo digital se aplica si EXISTE alguna cara en digital en cualquier pieza.
+# - Solo rellena si NO hay valor ya guardado para esa cantidad (no pisa lo manual).
+# - Hay un botón para forzar “Recalcular mermas estándar”.
+# =========================================================
+def hay_digital_en_proyecto() -> bool:
+    for p in st.session_state.piezas_dict.values():
+        if p.get("im") == "Digital" or p.get("im_d") == "Digital":
+            return True
+    return False
+
+def autorrellenar_mermas(lista_cants: list[int], force: bool = False):
+    es_dig = hay_digital_en_proyecto()
+    for q in lista_cants:
+        if force or (q not in st.session_state.mermas_proc_manual):
+            mp, mi = calcular_mermas_estandar(q, es_digital=es_dig)  # (proceso, impresión)
+            st.session_state.mermas_proc_manual[q] = mp
+        if force or (q not in st.session_state.mermas_imp_manual):
+            mp, mi = calcular_mermas_estandar(q, es_digital=es_dig)
+            st.session_state.mermas_imp_manual[q] = mi
+
+# relleno automático “silencioso” cada vez que haya cantidades
+if lista_cants:
+    autorrellenar_mermas(lista_cants, force=False)
+
+# =========================================================
 # TABS
 # =========================================================
 if st.session_state.is_admin:
@@ -480,6 +484,8 @@ with tab_calculadora:
         if c_btns[1].button("🗑 Reiniciar"):
             st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
             st.session_state.lista_extras_grabados = []
+            st.session_state.mermas_imp_manual = {}
+            st.session_state.mermas_proc_manual = {}
             st.rerun()
 
         def callback_medida_estandar(pid: int):
@@ -508,16 +514,11 @@ with tab_calculadora:
                 st.session_state[f"gd_{pid}"] = db["cartoncillo"][new_mat]["gramaje"]
 
         def callback_rigido_set_medidas(pid: int):
-            """
-            REQUISITO: cuando se selecciona un material rígido, la medida de la forma
-            (h, w) se rellena automáticamente con el tamaño de la HOJA fija del material.
-            """
             mat = st.session_state.get(f"mrig_{pid}", "Ninguno")
             if mat and mat != "Ninguno" and mat in db["rigidos"]:
                 mw = int(db["rigidos"][mat].get("w", 0))
                 mh = int(db["rigidos"][mat].get("h", 0))
                 if mw > 0 and mh > 0:
-                    # Ojo: en tu UI, h = Largo, w = Ancho
                     st.session_state[f"w_{pid}"] = mw
                     st.session_state[f"h_{pid}"] = mh
 
@@ -587,8 +588,6 @@ with tab_calculadora:
                         opts_ap = ["C/C", "B/C", "B/B"]
                         val_ap = p.get("ap", "B/C")
                         p["ap"] = st.selectbox("Calidad Ondulado", opts_ap, index=(opts_ap.index(val_ap) if val_ap in opts_ap else 1), key=f"ap_{p_id}")
-
-                        # si vuelves a ondulado, no forzamos medidas
                     else:
                         opts_rig = list(db["rigidos"].keys())
                         val_rig = p.get("mat_rigido", "Ninguno")
@@ -605,7 +604,6 @@ with tab_calculadora:
                             im_r = db["rigidos"][p["mat_rigido"]]
                             mw, mh = int(im_r["w"]), int(im_r["h"])
                             st.info(f"Hoja fija: {mw}x{mh} mm | Precio: {float(im_r['precio_ud']):.2f}€ / hoja")
-                            st.caption("✅ Al seleccionar este material se han aplicado automáticamente estas medidas a la forma.")
 
                     st.divider()
 
@@ -728,18 +726,42 @@ with tab_calculadora:
         else:
             st.warning("Define cantidades primero.")
 
-        # ------------------ MERMAS ------------------
+        # ------------------ MERMAS (ahora con autorrelleno y botón) ------------------
         st.divider()
-        st.subheader("⚙️ 4. Gestión de Mermas")
+        st.subheader("⚙️ 4. Gestión de Mermas (AUTO + editable)")
+
         if lista_cants:
+            col_a, col_b = st.columns([1, 2])
+            with col_a:
+                st.caption("Autorrelleno según tabla estándar")
+                if st.button("♻️ Recalcular mermas estándar (pisar todo)"):
+                    autorrellenar_mermas(lista_cants, force=True)
+                    st.rerun()
+
+            with col_b:
+                es_dig = hay_digital_en_proyecto()
+                st.info(f"Modo de tabla aplicado: {'DIGITAL' if es_dig else 'OFFSET/GENERAL'} (si hay alguna cara Digital en el proyecto => DIGITAL)")
+
             for q in lista_cants:
                 c1, c2, c3 = st.columns([1, 2, 2])
                 c1.markdown(f"**{q} uds**")
-                st.session_state.mermas_imp_manual[q] = c2.number_input("Merma impresión (hojas)", value=float(st.session_state.mermas_imp_manual.get(q, 150)), key=f"mi_{q}")
-                st.session_state.mermas_proc_manual[q] = c3.number_input("Merma proceso (hojas)", value=float(st.session_state.mermas_proc_manual.get(q, 30)), key=f"mp_{q}")
+
+                # IMPORTANTE: ya están autorrellenadas arriba, aquí solo se editan
+                st.session_state.mermas_imp_manual[q] = c2.number_input(
+                    "Merma impresión (hojas)",
+                    value=int(st.session_state.mermas_imp_manual.get(q, 0)),
+                    key=f"mi_{q}"
+                )
+                st.session_state.mermas_proc_manual[q] = c3.number_input(
+                    "Merma proceso (hojas)",
+                    value=int(st.session_state.mermas_proc_manual.get(q, 0)),
+                    key=f"mp_{q}"
+                )
+        else:
+            st.warning("Define cantidades primero.")
 
     # =========================================================
-    # MOTOR DE CÁLCULO (sin cambios funcionales extra)
+    # MOTOR DE CÁLCULO
     # =========================================================
     def calcular_para_cantidad(q_n: int) -> dict:
         piezas = st.session_state.piezas_dict
@@ -759,6 +781,41 @@ with tab_calculadora:
         tech_hojas_papel = 0.0
         tech_planchas_rigidas = 0
 
+        def _fmt(x, nd=4):
+            try:
+                return f"{float(x):.{nd}f}"
+            except Exception:
+                return str(x)
+
+        def _fmt_eur(x):
+            try:
+                return f"{float(x):.2f}€"
+            except Exception:
+                return f"{x}€"
+
+        def dbg_title(txt):
+            debug_log.append("<hr style='margin:10px 0'>")
+            debug_log.append(f"<h4 style='margin:4px 0'>🧩 {txt}</h4>")
+
+        def dbg_step(label, formula, calc, result=None):
+            if result is None:
+                debug_log.append(
+                    f"<div style='font-family:monospace; line-height:1.35; margin:2px 0;'>"
+                    f"<b>{label}</b><br>"
+                    f"  • Fórmula: {formula}<br>"
+                    f"  • Cálculo: {calc}"
+                    f"</div>"
+                )
+            else:
+                debug_log.append(
+                    f"<div style='font-family:monospace; line-height:1.35; margin:2px 0;'>"
+                    f"<b>{label}</b><br>"
+                    f"  • Fórmula: {formula}<br>"
+                    f"  • Cálculo: {calc}<br>"
+                    f"  • Resultado: <b>{result}</b>"
+                    f"</div>"
+                )
+
         for pid, p in piezas.items():
             c_cf = c_cd = c_pl = c_peg = c_imp = c_pel = c_trq = c_plot = 0.0
 
@@ -775,83 +832,49 @@ with tab_calculadora:
 
             tech_hojas_papel += hp_papel_f
 
-            dbg_title(debug_log, f"PIEZA: {p.get('nombre','(sin nombre)')}")
-            dbg_step(debug_log, "Datos pieza", "w, h, pliegos", f"w={p.get('w',0)} mm | h={p.get('h',0)} mm | pliegos={_fmt(pliegos,4)}")
-            dbg_step(debug_log, "Área", "m2_papel=(w*h)/1_000_000", f"({p.get('w',0)}*{p.get('h',0)})/1_000_000={_fmt(m2_papel,6)}", f"{_fmt(m2_papel,6)} m²")
-            dbg_step(debug_log, "Hojas netas", "nb=q*pliegos", f"{q_n}*{_fmt(pliegos,4)}={_fmt(nb,2)}", f"{_fmt(nb,2)} hojas")
-            dbg_step(debug_log, "Hojas producción", "hp_produccion=nb+merma_proc", f"{_fmt(nb,2)}+{_fmt(merma_proc,2)}={_fmt(hp_produccion,2)}", f"{_fmt(hp_produccion,2)} hojas")
-            dbg_step(debug_log, "Hojas impresión cara", "hp_papel_f=hp_produccion+merma_imp (si im!='No')", f"{_fmt(hp_produccion,2)}+{_fmt(merma_imp,2)} (im='{p.get('im','No')}') => {_fmt(hp_papel_f,2)}", f"{_fmt(hp_papel_f,2)} hojas")
-            dbg_step(debug_log, "Hojas impresión dorso", "hp_papel_d=hp_produccion+merma_imp (si im_d!='No')", f"{_fmt(hp_produccion,2)}+{_fmt(merma_imp,2)} (im_d='{p.get('im_d','No')}') => {_fmt(hp_papel_d,2)}", f"{_fmt(hp_papel_d,2)} hojas")
+            dbg_title(f"PIEZA: {p.get('nombre','(sin nombre)')}")
+            dbg_step("Datos mermas", "merma_imp, merma_proc", f"merma_imp={_fmt(merma_imp,0)} hojas | merma_proc={_fmt(merma_proc,0)} hojas")
 
             # SOPORTE RÍGIDO
             if p.get("tipo_base") == "Material Rígido" and p.get("mat_rigido") != "Ninguno":
                 im_r = db["rigidos"].get(p["mat_rigido"])
-                if not im_r:
-                    dbg_step(debug_log, "Rígido: ERROR", "material debe existir en db['rigidos']", f"mat_rigido='{p.get('mat_rigido')}' no encontrado", "NO CALCULADO")
-                else:
+                if im_r:
                     mw = int(im_r.get("w", 0))
                     mh = int(im_r.get("h", 0))
                     pw = int(p.get("w", 0))
                     ph = int(p.get("h", 0))
                     precio_pl = float(im_r.get("precio_ud", 0.0))
 
-                    dbg_step(debug_log, "Rígido: hoja fija", "mw,mh y €/hoja", f"mw={mw}, mh={mh} | €/hoja={_fmt(precio_pl,2)}", f"{mw}x{mh} mm")
+                    fit1 = (mw // pw) * (mh // ph) if pw and ph else 0
+                    fit2 = (mw // ph) * (mh // pw) if pw and ph else 0
+                    by = max(fit1, fit2)
 
-                    if mw <= 0 or mh <= 0 or pw <= 0 or ph <= 0:
-                        dbg_step(debug_log, "Rígido: ERROR medidas", "mw,mh,pw,ph > 0", f"mw={mw}, mh={mh}, pw={pw}, ph={ph}", "NO CALCULADO")
+                    if by > 0:
+                        hojas_base = float(hp_produccion)
+                        hojas_con_merma = hojas_base * (1.0 + MERMA_RIGIDO_PCT)
+                        n_pl = int(math.ceil(hojas_con_merma / float(by)))
+                        c_pl = n_pl * precio_pl
+                        tech_planchas_rigidas += n_pl
+
+                        dbg_step("Rígido: hojas a comprar", "ceil((hp_produccion*(1+merma%))/by)", f"ceil(({_fmt(hp_produccion,2)}*(1+{_fmt(MERMA_RIGIDO_PCT,4)}))/{by})={n_pl}", f"{n_pl} hojas")
+                        dbg_step("Rígido: coste", "c_pl=n_pl*€/hoja", f"{n_pl}*{_fmt(precio_pl,2)}={_fmt(c_pl,2)}", _fmt_eur(c_pl))
                     else:
-                        fit1 = (mw // pw) * (mh // ph)
-                        fit2 = (mw // ph) * (mh // pw)
-                        by = max(fit1, fit2)
-
-                        dbg_step(debug_log, "Rígido: imposición sin girar", "fit1=(mw//pw)*(mh//ph)", f"({mw}//{pw})*({mh}//{ph})={(mw//pw)}*{(mh//ph)}={fit1}", f"{fit1} uds/hoja")
-                        dbg_step(debug_log, "Rígido: imposición girada", "fit2=(mw//ph)*(mh//pw)", f"({mw}//{ph})*({mh}//{pw})={(mw//ph)}*{(mh//pw)}={fit2}", f"{fit2} uds/hoja")
-                        dbg_step(debug_log, "Rígido: rendimiento", "by=max(fit1,fit2)", f"max({fit1},{fit2})={by}", f"{by} uds/hoja")
-
-                        if by <= 0:
-                            dbg_step(debug_log, "Rígido: ERROR no cabe", "by>=1", f"pieza {pw}x{ph} en hoja {mw}x{mh} => by={by}", "NO CABE")
-                        else:
-                            hojas_base = float(hp_produccion)
-                            hojas_con_merma = hojas_base * (1.0 + MERMA_RIGIDO_PCT)
-                            n_pl = int(math.ceil(hojas_con_merma / float(by)))
-                            c_pl = n_pl * precio_pl
-                            tech_planchas_rigidas += n_pl
-
-                            dbg_step(debug_log, "Rígido: hojas base", "hojas_base=hp_produccion", f"{_fmt(hp_produccion,2)}", f"{_fmt(hojas_base,2)} hojas")
-                            dbg_step(debug_log, "Rígido: merma %", "hojas_con_merma=hojas_base*(1+MERMA_RIGIDO_PCT)", f"{_fmt(hojas_base,2)}*(1+{_fmt(MERMA_RIGIDO_PCT,4)})={_fmt(hojas_con_merma,2)}", f"{_fmt(hojas_con_merma,2)} hojas")
-                            dbg_step(debug_log, "Rígido: nº hojas a comprar", "n_pl=ceil(hojas_con_merma/by)", f"ceil({_fmt(hojas_con_merma,2)}/{by})={n_pl}", f"{n_pl} hojas")
-                            dbg_step(debug_log, "Rígido: coste soporte", "c_pl=n_pl*€/hoja", f"{n_pl}*{_fmt(precio_pl,2)}={_fmt(c_pl,2)}", _fmt_eur(c_pl))
-
-                            # Pegado si contracolado
-                            if p.get("pf") != "Ninguno" and m2_papel > 0:
-                                peg_m2 = float(db["planchas"]["Microcanal / Canal 3"]["peg"])
-                                c_peg = hojas_base * m2_papel * peg_m2
-                                dbg_step(debug_log, "Pegado (sobre rígido)", "c_peg=hojas_base*m2*peg€/m²", f"{_fmt(hojas_base,2)}*{_fmt(m2_papel,6)}*{_fmt(peg_m2,4)}={_fmt(c_peg,2)}", _fmt_eur(c_peg))
-                            else:
-                                dbg_step(debug_log, "Pegado (sobre rígido)", "Solo si pf!='Ninguno'", f"pf='{p.get('pf','Ninguno')}' => 0", _fmt_eur(0))
+                        dbg_step("Rígido: ERROR", "by debe ser >=1", f"Hoja {mw}x{mh} vs pieza {pw}x{ph} => by={by}", "NO CABE")
 
             # SOPORTE ONDULADO
             else:
                 if p.get("pl_dif", False) and float(p.get("pl_h", 0)) > 0 and float(p.get("pl_w", 0)) > 0:
                     m2_plancha = (float(p["pl_w"]) * float(p["pl_h"])) / 1_000_000
-                    dbg_step(debug_log, "Ondulado: área plancha dif.", "m2_plancha=(pl_w*pl_h)/1_000_000", f"({p.get('pl_w',0)}*{p.get('pl_h',0)})/1_000_000={_fmt(m2_plancha,6)}", f"{_fmt(m2_plancha,6)} m²")
                 else:
                     m2_plancha = m2_papel
-                    dbg_step(debug_log, "Ondulado: área plancha", "m2_plancha=m2_papel", f"{_fmt(m2_papel,6)}", f"{_fmt(m2_plancha,6)} m²")
 
                 if p.get("pl") != "Ninguna" and m2_plancha > 0:
                     precio_m2 = float(db["planchas"][p["pl"]][p.get("ap", "B/C")])
                     c_pl = hp_produccion * m2_plancha * precio_m2
-                    dbg_step(debug_log, "Ondulado: coste soporte", "c_pl=hp_produccion*m2_plancha*€/m²", f"{_fmt(hp_produccion,2)}*{_fmt(m2_plancha,6)}*{_fmt(precio_m2,4)}={_fmt(c_pl,2)}", _fmt_eur(c_pl))
 
                     peg_m2 = float(db["planchas"][p["pl"]]["peg"])
                     if p.get("pf") != "Ninguno":
                         c_peg = hp_produccion * m2_plancha * peg_m2
-                        dbg_step(debug_log, "Pegado (ondulado)", "c_peg=hp_produccion*m2_plancha*peg€/m²", f"{_fmt(hp_produccion,2)}*{_fmt(m2_plancha,6)}*{_fmt(peg_m2,4)}={_fmt(c_peg,2)}", _fmt_eur(c_peg))
-                    else:
-                        dbg_step(debug_log, "Pegado (ondulado)", "Solo si pf!='Ninguno'", f"pf='{p.get('pf','Ninguno')}' => 0", _fmt_eur(0))
-                else:
-                    dbg_step(debug_log, "Ondulado: coste soporte", "Solo si pl!='Ninguna' y m2_plancha>0", f"pl='{p.get('pl','Ninguna')}' | m2_plancha={_fmt(m2_plancha,6)}", _fmt_eur(0))
 
             # PAPEL
             pf = p.get("pf", "Ninguno")
@@ -859,95 +882,56 @@ with tab_calculadora:
             if pf != "Ninguno" and m2_papel > 0:
                 precio_kg_pf = float(db["cartoncillo"][pf]["precio_kg"])
                 c_cf = hp_papel_f * m2_papel * (gf / 1000.0) * precio_kg_pf
-                dbg_step(debug_log, "Papel frontal", "c_cf=hp_papel_f*m2*(gf/1000)*€/kg", f"{_fmt(hp_papel_f,2)}*{_fmt(m2_papel,6)}*({_fmt(gf,0)}/1000)*{_fmt(precio_kg_pf,4)}={_fmt(c_cf,2)}", _fmt_eur(c_cf))
-            else:
-                dbg_step(debug_log, "Papel frontal", "Solo si pf!='Ninguno' y m2>0", f"pf='{pf}' | m2={_fmt(m2_papel,6)}", _fmt_eur(0))
 
             pd_ = p.get("pd", "Ninguno")
             gd = float(p.get("gd", 0))
             if pd_ != "Ninguno" and m2_papel > 0:
                 precio_kg_pd = float(db["cartoncillo"][pd_]["precio_kg"])
                 c_cd = hp_papel_d * m2_papel * (gd / 1000.0) * precio_kg_pd
-                dbg_step(debug_log, "Papel dorso", "c_cd=hp_papel_d*m2*(gd/1000)*€/kg", f"{_fmt(hp_papel_d,2)}*{_fmt(m2_papel,6)}*({_fmt(gd,0)}/1000)*{_fmt(precio_kg_pd,4)}={_fmt(c_cd,2)}", _fmt_eur(c_cd))
-            else:
-                dbg_step(debug_log, "Papel dorso", "Solo si pd!='Ninguno' y m2>0", f"pd='{pd_}' | m2={_fmt(m2_papel,6)}", _fmt_eur(0))
 
             # IMPRESIÓN
             c_imp_f = 0.0
             if p.get("im") == "Digital":
                 c_imp_f = hp_papel_f * m2_papel * 6.5
-                dbg_step(debug_log, "Imp. cara (Digital)", "c_imp_f=hp_papel_f*m2*6.5", f"{_fmt(hp_papel_f,2)}*{_fmt(m2_papel,6)}*6.5={_fmt(c_imp_f,2)}", _fmt_eur(c_imp_f))
             elif p.get("im") == "Offset":
                 base = f_offset(nb)
                 nt = int(p.get("nt", 0))
                 barn = 1 if p.get("ba", False) else 0
                 c_imp_f = base * (nt + barn)
-                dbg_step(debug_log, "Imp. cara (Offset)", "c_imp_f=f_offset(nb)*(nt+barniz)", f"f_offset({_fmt(nb,2)})={_fmt(base,2)} ; ({nt}+{barn}) => {_fmt(base,2)}*{nt+barn}={_fmt(c_imp_f,2)}", _fmt_eur(c_imp_f))
-            else:
-                dbg_step(debug_log, "Imp. cara", "Si im=='No' => 0", f"im='{p.get('im','No')}'", _fmt_eur(0))
 
             c_imp_d = 0.0
             if p.get("im_d") == "Digital":
                 c_imp_d = hp_papel_d * m2_papel * 6.5
-                dbg_step(debug_log, "Imp. dorso (Digital)", "c_imp_d=hp_papel_d*m2*6.5", f"{_fmt(hp_papel_d,2)}*{_fmt(m2_papel,6)}*6.5={_fmt(c_imp_d,2)}", _fmt_eur(c_imp_d))
             elif p.get("im_d") == "Offset":
                 base = f_offset(nb)
                 nt = int(p.get("nt_d", 0))
                 barn = 1 if p.get("ba_d", False) else 0
                 c_imp_d = base * (nt + barn)
-                dbg_step(debug_log, "Imp. dorso (Offset)", "c_imp_d=f_offset(nb)*(nt_d+barniz_d)", f"f_offset({_fmt(nb,2)})={_fmt(base,2)} ; ({nt}+{barn}) => {_fmt(base,2)}*{nt+barn}={_fmt(c_imp_d,2)}", _fmt_eur(c_imp_d))
-            else:
-                dbg_step(debug_log, "Imp. dorso", "Si im_d=='No' => 0", f"im_d='{p.get('im_d','No')}'", _fmt_eur(0))
 
             c_imp = c_imp_f + c_imp_d
-            dbg_step(debug_log, "Impresión total", "c_imp=c_imp_f+c_imp_d", f"{_fmt(c_imp_f,2)}+{_fmt(c_imp_d,2)}={_fmt(c_imp,2)}", _fmt_eur(c_imp))
 
             # PELICULADO
             pel_f = p.get("pel", "Sin Peliculado")
             pel_d = p.get("pel_d", "Sin Peliculado")
-
-            c_pel_f = 0.0
-            if pel_f != "Sin Peliculado":
-                precio_pel_f = float(db["peliculado"][pel_f])
-                c_pel_f = hp_produccion * m2_papel * precio_pel_f
-                dbg_step(debug_log, "Peliculado cara", "c_pel_f=hp_produccion*m2*€/m²", f"{_fmt(hp_produccion,2)}*{_fmt(m2_papel,6)}*{_fmt(precio_pel_f,4)}={_fmt(c_pel_f,2)}", _fmt_eur(c_pel_f))
-            else:
-                dbg_step(debug_log, "Peliculado cara", "Si pel=='Sin' => 0", f"pel='{pel_f}'", _fmt_eur(0))
-
-            c_pel_d = 0.0
-            if pel_d != "Sin Peliculado":
-                precio_pel_d = float(db["peliculado"][pel_d])
-                c_pel_d = hp_produccion * m2_papel * precio_pel_d
-                dbg_step(debug_log, "Peliculado dorso", "c_pel_d=hp_produccion*m2*€/m²", f"{_fmt(hp_produccion,2)}*{_fmt(m2_papel,6)}*{_fmt(precio_pel_d,4)}={_fmt(c_pel_d,2)}", _fmt_eur(c_pel_d))
-            else:
-                dbg_step(debug_log, "Peliculado dorso", "Si pel_d=='Sin' => 0", f"pel_d='{pel_d}'", _fmt_eur(0))
-
+            c_pel_f = 0.0 if pel_f == "Sin Peliculado" else (hp_produccion * m2_papel * float(db["peliculado"][pel_f]))
+            c_pel_d = 0.0 if pel_d == "Sin Peliculado" else (hp_produccion * m2_papel * float(db["peliculado"][pel_d]))
             c_pel = c_pel_f + c_pel_d
-            dbg_step(debug_log, "Peliculado total", "c_pel=c_pel_f+c_pel_d", f"{_fmt(c_pel_f,2)}+{_fmt(c_pel_d,2)}={_fmt(c_pel,2)}", _fmt_eur(c_pel))
 
             # CORTE
             cat = categoria_troquel(h, w)
-            dbg_step(debug_log, "Categoría troquel", "por h,w", f"h={_fmt(h,0)} | w={_fmt(w,0)} => '{cat}'", cat)
-
             if p.get("cor") == "Troquelado":
                 arr = float(db["troquelado"][cat]["arranque"]) if p.get("cobrar_arreglo", True) else 0.0
                 tiro = float(db["troquelado"][cat]["tiro"])
                 c_trq = arr + (hp_produccion * tiro)
-                dbg_step(debug_log, "Troquelado", "c_trq=arr+hp_produccion*tiro", f"{_fmt(arr,2)}+{_fmt(hp_produccion,2)}*{_fmt(tiro,4)}={_fmt(c_trq,2)}", _fmt_eur(c_trq))
             else:
                 precio_hoja = float(db["plotter"]["precio_hoja"])
                 c_plot = hp_produccion * precio_hoja
-                dbg_step(debug_log, "Plotter", "c_plot=hp_produccion*€/hoja", f"{_fmt(hp_produccion,2)}*{_fmt(precio_hoja,2)}={_fmt(c_plot,2)}", _fmt_eur(c_plot))
 
             sub = c_cf + c_cd + c_pl + c_imp + c_peg + c_pel + c_trq + c_plot
             coste_total_piezas += sub
 
             total_mat = c_cf + c_cd + c_pl
             total_narba = c_peg + c_pel + c_trq + c_plot
-
-            dbg_step(debug_log, "Resumen MATERIAL", "Total Mat=papel+soporte", f"({_fmt(c_cf,2)}+{_fmt(c_cd,2)})+{_fmt(c_pl,2)}={_fmt(total_mat,2)}", _fmt_eur(total_mat))
-            dbg_step(debug_log, "Resumen NARBA", "Total Narba=pegado+pel+corte", f"{_fmt(c_peg,2)}+{_fmt(c_pel,2)}+{_fmt(c_trq+c_plot,2)}={_fmt(total_narba,2)}", _fmt_eur(total_narba))
-            dbg_step(debug_log, "Subtotal pieza", "sub=Mat+Imp+Narba", f"{_fmt(total_mat,2)}+{_fmt(c_imp,2)}+{_fmt(total_narba,2)}={_fmt(sub,2)}", _fmt_eur(sub))
 
             det_f.append({
                 "Pieza": p.get("nombre", f"Forma {pid+1}"),
@@ -962,45 +946,15 @@ with tab_calculadora:
         # EXTRAS
         c_ext = sum(float(e.get("coste", 0)) * float(e.get("cantidad", 0)) * q_n for e in extras)
 
-        dbg_title(debug_log, "EXTRAS")
-        for e in extras:
-            en = e.get("nombre", "Extra")
-            ec = float(e.get("coste", 0))
-            eq = float(e.get("cantidad", 0))
-            val = ec * eq * q_n
-            dbg_step(debug_log, f"Extra: {en}", "coste=€/ud*cant/ud_prod*q", f"{_fmt(ec,4)}*{_fmt(eq,4)}*{q_n}={_fmt(val,2)}", _fmt_eur(val))
-        dbg_step(debug_log, "Extras total", "c_ext=Σ extras", f"{_fmt(c_ext,2)}", _fmt_eur(c_ext))
-
         # MO
         c_mo = ((float(seg_man_total) / 3600.0) * 18.0 * q_n) + (q_n * float(dif_ud))
-
-        dbg_title(debug_log, "MANO DE OBRA")
-        dbg_step(debug_log, "MO tiempo", "mo_t=(seg/3600)*18€/h*q", f"({_fmt(seg_man_total,2)}/3600)*18*{q_n}={_fmt(((seg_man_total/3600)*18*q_n),2)}", _fmt_eur((seg_man_total/3600)*18*q_n))
-        dbg_step(debug_log, "MO dificultad", "mo_d=q*dif_ud", f"{q_n}*{_fmt(dif_ud,3)}={_fmt(q_n*dif_ud,2)}", _fmt_eur(q_n*dif_ud))
-        dbg_step(debug_log, "MO total", "c_mo=mo_t+mo_d", f"{_fmt((seg_man_total/3600)*18*q_n,2)}+{_fmt(q_n*dif_ud,2)}={_fmt(c_mo,2)}", _fmt_eur(c_mo))
 
         # Taller
         taller = coste_total_piezas + c_ext + c_mo
 
-        dbg_title(debug_log, "TALLER")
-        dbg_step(debug_log, "Coste piezas", "Σ subtotales pieza", f"{_fmt(coste_total_piezas,2)}", _fmt_eur(coste_total_piezas))
-        dbg_step(debug_log, "Taller total", "taller=piezas+extras+MO", f"{_fmt(coste_total_piezas,2)}+{_fmt(c_ext,2)}+{_fmt(c_mo,2)}={_fmt(taller,2)}", _fmt_eur(taller))
-
-        # Embalaje + troqueles PVP
-        dbg_title(debug_log, "EMBALAJE + TROQUELES (PVP)")
-        dbg_step(debug_log, "Embalaje compra unit", "coste_emb_unit_compra", f"{_fmt(coste_emb_unit_compra,4)} €/u", f"{_fmt(coste_emb_unit_compra,4)} €/u")
-        dbg_step(debug_log, "Embalaje venta", "pv_emb_total=coste_emb_unit_compra*1.4*q", f"{_fmt(coste_emb_unit_compra,4)}*1.4*{q_n}={_fmt(pv_emb_total,2)}", _fmt_eur(pv_emb_total))
-        dbg_step(debug_log, "Venta troqueles", "tot_pv_trq=Σ pv_troquel", f"{_fmt(tot_pv_trq,2)}", _fmt_eur(tot_pv_trq))
-
         # PVP
         pvp_total = (taller * float(margen)) + float(imp_fijo_pvp) + pv_emb_total + tot_pv_trq
         unitario = (pvp_total / q_n) if q_n > 0 else 0.0
-
-        dbg_title(debug_log, "PVP FINAL")
-        dbg_step(debug_log, "Escandallo margen", "taller*margen", f"{_fmt(taller,2)}*{_fmt(margen,3)}={_fmt(taller*margen,2)}", _fmt_eur(taller*margen))
-        dbg_step(debug_log, "Fijo PVP", "imp_fijo_pvp", f"{_fmt(imp_fijo_pvp,2)}", _fmt_eur(imp_fijo_pvp))
-        dbg_step(debug_log, "PVP Total", "pvp=taller*margen+fijo+emb+troq", f"{_fmt(taller*margen,2)}+{_fmt(imp_fijo_pvp,2)}+{_fmt(pv_emb_total,2)}+{_fmt(tot_pv_trq,2)}={_fmt(pvp_total,2)}", _fmt_eur(pvp_total))
-        dbg_step(debug_log, "PVP Unitario", "unitario=pvp_total/q", f"{_fmt(pvp_total,2)}/{q_n}={_fmt(unitario,3)}", f"{_fmt(unitario,3)} €/u")
 
         return {
             "q": q_n,
@@ -1088,7 +1042,7 @@ with tab_calculadora:
 if tab_debug:
     with tab_debug:
         if lista_cants and desc_full:
-            st.subheader("🔍 Desglose ultra explícito (fórmula + sustitución + resultado)")
+            st.subheader("🔍 Desglose")
             sq = st.selectbox("Ver detalle para cantidad:", lista_cants)
             for l in desc_full[sq]["debug"]:
                 st.markdown(l, unsafe_allow_html=True)
