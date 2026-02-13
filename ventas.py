@@ -250,6 +250,30 @@ def crear_forma_vacia(index: int) -> dict:
     }
 
 # =========================================================
+# EMBALAJE EN PLANO (COMPRA) - NUEVA FÓRMULA
+# P ≈ ((152 + 20*S)/Q) + 0.15 + (1.02*S)
+# S = (L*W) + 2*H*(L+W)
+# Entradas L,W,H en mm -> metros.
+# =========================================================
+def coste_embalaje_plano_unitario(L_mm: float, W_mm: float, H_mm: float, Q: int):
+    """
+    Devuelve (P_unit, S_m2).
+    Si faltan datos, devuelve (0.0, 0.0).
+    """
+    if Q <= 0:
+        return 0.0, 0.0
+    if L_mm <= 0 or W_mm <= 0 or H_mm <= 0:
+        return 0.0, 0.0
+
+    L = L_mm / 1000.0
+    W = W_mm / 1000.0
+    H = H_mm / 1000.0
+
+    S = (L * W) + 2.0 * H * (L + W)  # m²
+    P = ((152.0 + (20.0 * S)) / float(Q)) + 0.15 + (1.02 * S)
+    return float(P), float(S)
+
+# =========================================================
 # SESSION STATE INIT
 # =========================================================
 if "db_precios" not in st.session_state:
@@ -269,7 +293,7 @@ if "mermas_proc_manual" not in st.session_state:
 if "emb_tipo" not in st.session_state:
     st.session_state.emb_tipo = "Manual"
 if "emb_dims" not in st.session_state:
-    st.session_state.emb_dims = {"L": 0, "W": 0, "H": 0}
+    st.session_state.emb_dims = {"L": 0.0, "W": 0.0, "H": 0.0}
 if "brf" not in st.session_state:
     st.session_state.brf = ""
 if "cli" not in st.session_state:
@@ -509,7 +533,7 @@ with tab_calculadora:
             st.session_state.mermas_imp_manual = {}
             st.session_state.mermas_proc_manual = {}
             st.session_state.costes_embalaje_manual = {}
-            st.session_state.emb_dims = {"L": 0, "W": 0, "H": 0}
+            st.session_state.emb_dims = {"L": 0.0, "W": 0.0, "H": 0.0}
             st.session_state.emb_tipo = "Manual"
             st.session_state.db_precios = deepcopy(PRECIOS_BASE)
             st.rerun()
@@ -540,6 +564,7 @@ with tab_calculadora:
                 mw = int(db["rigidos"][mat].get("w", 0))
                 mh = int(db["rigidos"][mat].get("h", 0))
                 if mw > 0 and mh > 0:
+                    # Al seleccionar rígido: la medida de la forma pasa a ser el tamaño de la hoja fija.
                     st.session_state[f"w_{pid}"] = mw
                     st.session_state[f"h_{pid}"] = mh
 
@@ -683,36 +708,57 @@ with tab_calculadora:
         st.divider()
         st.subheader("📦 3. Embalaje")
 
-        tipos_emb = ["Manual", "Embalaje Guaina (Automático)", "Embalaje en Plano (Pendiente)", "Embalaje en Volumen (Pendiente)"]
+        tipos_emb = ["Manual", "Embalaje Guaina (Automático)", "Embalaje en Plano", "Embalaje en Volumen (Pendiente)"]
         idx_emb = tipos_emb.index(st.session_state.emb_tipo) if st.session_state.emb_tipo in tipos_emb else 0
         st.session_state.emb_tipo = st.selectbox("Selecciona el tipo de embalaje:", tipos_emb, index=idx_emb)
 
         if lista_cants:
-            if st.session_state.emb_tipo == "Embalaje Guaina (Automático)":
+            # Para Guaina y Plano pedimos dimensiones (mm)
+            if st.session_state.emb_tipo in ["Embalaje Guaina (Automático)", "Embalaje en Plano"]:
                 d1, d2, d3 = st.columns(3)
                 L = d1.number_input("Largo mm", value=float(st.session_state.emb_dims["L"]))
                 W = d2.number_input("Ancho mm", value=float(st.session_state.emb_dims["W"]))
                 H = d3.number_input("Alto mm", value=float(st.session_state.emb_dims["H"]))
-                st.session_state.emb_dims = {"L": L, "W": W, "H": H}
+                st.session_state.emb_dims = {"L": float(L), "W": float(W), "H": float(H)}
 
-                sup_m2 = ((2 * (L + W) * H) + (L * W)) / 1_000_000 if (L > 0 and W > 0 and H > 0) else 0.0
-                cols = st.columns(len(lista_cants))
-                for idx, q in enumerate(lista_cants):
-                    coste_auto = (sup_m2 * 0.70) + (30 / q) if q > 0 else 0.0
-                    st.session_state.costes_embalaje_manual[q] = float(coste_auto)
+            cols = st.columns(len(lista_cants))
+            for idx, q in enumerate(lista_cants):
+                if q <= 0:
+                    continue
+
+                if st.session_state.emb_tipo == "Embalaje Guaina (Automático)":
+                    Lmm, Wmm, Hmm = float(st.session_state.emb_dims["L"]), float(st.session_state.emb_dims["W"]), float(st.session_state.emb_dims["H"])
+                    sup_m2 = ((2 * (Lmm + Wmm) * Hmm) + (Lmm * Wmm)) / 1_000_000 if (Lmm > 0 and Wmm > 0 and Hmm > 0) else 0.0
+                    coste_unit_compra = (sup_m2 * 0.70) + (30 / q) if sup_m2 > 0 else (30 / q)
+                    st.session_state.costes_embalaje_manual[q] = float(coste_unit_compra)
+
                     if st.session_state.is_admin:
-                        cols[idx].metric(f"{q} uds", f"{coste_auto:.3f}€")
+                        cols[idx].metric(f"{q} uds", f"{coste_unit_compra:.3f}€")
                     else:
                         cols[idx].write(f"**{q} uds**: Calculado")
-            else:
-                cols = st.columns(len(lista_cants))
-                for idx, q in enumerate(lista_cants):
+
+                elif st.session_state.emb_tipo == "Embalaje en Plano":
+                    Lmm, Wmm, Hmm = float(st.session_state.emb_dims["L"]), float(st.session_state.emb_dims["W"]), float(st.session_state.emb_dims["H"])
+                    coste_unit_compra, S = coste_embalaje_plano_unitario(Lmm, Wmm, Hmm, q)
+                    st.session_state.costes_embalaje_manual[q] = float(coste_unit_compra)
+
+                    if st.session_state.is_admin:
+                        cols[idx].metric(f"{q} uds", f"{coste_unit_compra:.3f}€")
+                        if S > 0:
+                            cols[idx].caption(f"S={S:.3f} m²")
+                    else:
+                        cols[idx].write(f"**{q} uds**: Calculado")
+
+                elif st.session_state.emb_tipo == "Manual":
                     if st.session_state.is_admin:
                         st.session_state.costes_embalaje_manual[q] = cols[idx].number_input(
                             f"Coste {q} uds", value=float(st.session_state.costes_embalaje_manual.get(q, 0.0)), key=f"em_{q}"
                         )
                     else:
                         cols[idx].write(f"**{q} uds**: Manual")
+                else:
+                    cols[idx].write("Pendiente")
+
         else:
             st.warning("Define cantidades primero.")
 
@@ -746,10 +792,10 @@ with tab_calculadora:
 def calcular_costes_con_auditoria(q_n: int) -> dict:
     """
     Devuelve:
-      - costes_totales_taller
       - detalle_por_pieza (lista)
       - auditoria_partidas (dict)
       - debug_formulas (lista de strings con fórmulas SOLO si calculan)
+      - pvp_total (total venta)
     """
     piezas = st.session_state.piezas_dict
     extras = st.session_state.lista_extras_grabados
@@ -760,7 +806,6 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
     detalle = []
     debug = []
 
-    # Acumuladores auditoría (costes taller)
     aud = {
         "MATERIAL_CARTONCILLO": 0.0,
         "MATERIAL_BASE_ONDULADO": 0.0,
@@ -774,7 +819,6 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
         "MANO_DE_OBRA": 0.0,
     }
 
-    # ============ POR PIEZA ============
     for _, p in piezas.items():
         nombre = p.get("nombre", "Pieza")
 
@@ -789,7 +833,6 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
         h = float(p.get("h", 0))
         m2_papel = (w * h) / 1_000_000 if (w > 0 and h > 0) else 0.0
 
-        # Fórmulas (solo si calculan)
         debug.append(f"### 🔹 PIEZA: {nombre}")
         debug.append(f"nb = q_n * pliegos = {q_n} * {pliegos:.4f} = {nb:.2f}")
         debug.append(f"hp_produccion = nb + merma_proc = {nb:.2f} + {merma_proc:.0f} = {hp_produccion:.2f}")
@@ -807,7 +850,7 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
         c_trq = 0.0
         c_plot = 0.0
 
-        # ---- BASE (ONDULADO o RÍGIDO) ----
+        # BASE
         if p.get("tipo_base") == "Material Rígido" and p.get("mat_rigido") != "Ninguno":
             im_r = db["rigidos"].get(p["mat_rigido"])
             if im_r:
@@ -854,7 +897,7 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
                     c_peg = hp_produccion * m2_plancha * peg_m2
                     debug.append(f"c_peg = hp_produccion*m2_plancha*peg_m2 = {hp_produccion:.2f}*{m2_plancha:.6f}*{peg_m2:.3f} = {c_peg:.2f}€")
 
-        # ---- CARTONCILLO (F y D) ----
+        # CARTONCILLO
         pf = p.get("pf", "Ninguno")
         gf = float(p.get("gf", 0))
         if pf != "Ninguno" and m2_papel > 0 and gf > 0:
@@ -875,7 +918,7 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
         else:
             c_cd = 0.0
 
-        # ---- IMPRESIÓN ----
+        # IMPRESIÓN
         c_imp_f = 0.0
         if p.get("im") == "Digital" and m2_papel > 0:
             c_imp_f = hp_papel_f * m2_papel * 6.5
@@ -904,7 +947,7 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
         if c_imp > 0:
             debug.append(f"c_imp = c_imp_f + c_imp_d = {c_imp_f:.2f} + {c_imp_d:.2f} = {c_imp:.2f}€")
 
-        # ---- PELICULADO ----
+        # PELICULADO
         pel_f = p.get("pel", "Sin Peliculado")
         pel_d = p.get("pel_d", "Sin Peliculado")
 
@@ -922,7 +965,7 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
         if c_pel > 0:
             debug.append(f"c_pel = c_pel_f + c_pel_d = {c_pel_f:.2f} + {c_pel_d:.2f} = {c_pel:.2f}€")
 
-        # ---- CORTE (taller) ----
+        # CORTE
         cat = categoria_troquel(h, w)
         if p.get("cor") == "Troquelado":
             arr = float(db["troquelado"][cat]["arranque"]) if p.get("cobrar_arreglo", True) else 0.0
@@ -934,10 +977,11 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
             c_plot = hp_produccion * precio_hoja
             debug.append(f"c_plot = hp_produccion*precio_plotter = {hp_produccion:.2f}*{precio_hoja:.2f} = {c_plot:.2f}€")
 
-        # ---- SUBTOTAL PIEZA ----
         sub = c_carton + c_ond + c_rig + c_peg + c_imp + c_pel + c_trq + c_plot
-        debug.append(f"subtotal_pieza = carton + ond + rig + peg + imp + pel + trq + plot = "
-                     f"{c_carton:.2f}+{c_ond:.2f}+{c_rig:.2f}+{c_peg:.2f}+{c_imp:.2f}+{c_pel:.2f}+{c_trq:.2f}+{c_plot:.2f} = {sub:.2f}€")
+        debug.append(
+            f"subtotal_pieza = carton + ond + rig + peg + imp + pel + trq + plot = "
+            f"{c_carton:.2f}+{c_ond:.2f}+{c_rig:.2f}+{c_peg:.2f}+{c_imp:.2f}+{c_pel:.2f}+{c_trq:.2f}+{c_plot:.2f} = {sub:.2f}€"
+        )
 
         detalle.append({
             "Pieza": nombre,
@@ -952,7 +996,6 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
             "Subtotal Pieza": sub,
         })
 
-        # Auditoría acumulada
         aud["MATERIAL_CARTONCILLO"] += c_carton
         aud["MATERIAL_BASE_ONDULADO"] += c_ond
         aud["MATERIAL_BASE_RIGIDO"] += c_rig
@@ -962,32 +1005,49 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
         aud["CORTE_TROQUEL"] += c_trq
         aud["CORTE_PLOTTER"] += c_plot
 
-    # ============ EXTRAS ============
+    # EXTRAS
     c_ext = sum(float(e.get("coste", 0)) * float(e.get("cantidad", 0)) * q_n for e in extras)
     aud["EXTRAS_ACCESORIOS"] = c_ext
     if c_ext > 0:
         debug.append("### 🔸 EXTRAS")
         debug.append(f"c_ext = Σ(coste*cantidad*q_n) = {c_ext:.2f}€")
 
-    # ============ MANO DE OBRA ============
+    # MANO DE OBRA
     c_mo = ((float(seg_man_total) / 3600.0) * 18.0 * q_n) + (q_n * float(dif_ud))
     aud["MANO_DE_OBRA"] = c_mo
     debug.append("### 🔸 MANO DE OBRA")
-    debug.append(f"c_mo = ((seg_man_total/3600)*18*q_n) + (q_n*dif_ud) = "
-                 f"(({float(seg_man_total):.2f}/3600)*18*{q_n}) + ({q_n}*{float(dif_ud):.3f}) = {c_mo:.2f}€")
+    debug.append(
+        f"c_mo = ((seg_man_total/3600)*18*q_n) + (q_n*dif_ud) = "
+        f"(({float(seg_man_total):.2f}/3600)*18*{q_n}) + ({q_n}*{float(dif_ud):.3f}) = {c_mo:.2f}€"
+    )
 
-    # ============ EMBALAJE (venta) ============
+    # EMBALAJE (venta)
     coste_emb_unit_compra = float(st.session_state.costes_embalaje_manual.get(q_n, 0.0))
     pv_emb_total = coste_emb_unit_compra * 1.4 * q_n
+
     debug.append("### 🔸 EMBALAJE (VENTA)")
     debug.append(f"pv_emb_total = coste_emb_unit_compra*1.4*q_n = {coste_emb_unit_compra:.4f}*1.4*{q_n} = {pv_emb_total:.2f}€")
 
-    # ============ TROQUEL (venta) ============
+    # Si embalaje en plano: mostramos también fórmulas de compra (solo admin auditoría)
+    if st.session_state.emb_tipo == "Embalaje en Plano":
+        Lmm, Wmm, Hmm = float(st.session_state.emb_dims["L"]), float(st.session_state.emb_dims["W"]), float(st.session_state.emb_dims["H"])
+        if Lmm > 0 and Wmm > 0 and Hmm > 0:
+            _, S = coste_embalaje_plano_unitario(Lmm, Wmm, Hmm, q_n)
+            debug.append("### 🔸 EMBALAJE EN PLANO (COMPRA)")
+            debug.append(f"S = (L*W) + 2*H*(L+W) con L,W,H en metros")
+            debug.append(f"L={Lmm/1000:.3f}m, W={Wmm/1000:.3f}m, H={Hmm/1000:.3f}m")
+            debug.append(f"S = ({Lmm/1000:.3f}*{Wmm/1000:.3f}) + 2*{Hmm/1000:.3f}*({Lmm/1000:.3f}+{Wmm/1000:.3f}) = {S:.6f} m²")
+            debug.append(
+                f"P = ((152 + 20*S)/Q) + 0.15 + (1.02*S) = "
+                f"((152 + 20*{S:.6f})/{q_n}) + 0.15 + (1.02*{S:.6f}) = {coste_emb_unit_compra:.4f} €/u"
+            )
+
+    # TROQUEL (venta)
     tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
     debug.append("### 🔸 TROQUEL (VENTA)")
     debug.append(f"tot_pv_trq = Σ(pv_troquel piezas) = {tot_pv_trq:.2f}€")
 
-    # ============ TOTALES ============
+    # TOTALES
     coste_piezas_taller = sum(x["Subtotal Pieza"] for x in detalle)
     taller_total = coste_piezas_taller + c_ext + c_mo
     debug.append("### 🔸 TOTALES")
@@ -995,8 +1055,10 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
     debug.append(f"taller_total = coste_piezas_taller + c_ext + c_mo = {coste_piezas_taller:.2f} + {c_ext:.2f} + {c_mo:.2f} = {taller_total:.2f}€")
 
     pvp_total = (taller_total * float(margen)) + float(imp_fijo_pvp) + pv_emb_total + tot_pv_trq
-    debug.append(f"pvp_total = (taller_total*margen) + fijo + pv_emb_total + tot_pv_trq = "
-                 f"({taller_total:.2f}*{float(margen):.2f}) + {float(imp_fijo_pvp):.2f} + {pv_emb_total:.2f} + {tot_pv_trq:.2f} = {pvp_total:.2f}€")
+    debug.append(
+        f"pvp_total = (taller_total*margen) + fijo + pv_emb_total + tot_pv_trq = "
+        f"({taller_total:.2f}*{float(margen):.2f}) + {float(imp_fijo_pvp):.2f} + {pv_emb_total:.2f} + {tot_pv_trq:.2f} = {pvp_total:.2f}€"
+    )
 
     return {
         "detalle_por_pieza": detalle,
@@ -1018,12 +1080,6 @@ res_admin = []
 res_operario = []
 desc_full = {}
 
-if "lista_cants_runtime" not in st.session_state:
-    st.session_state.lista_cants_runtime = []
-
-if lista_cants:
-    st.session_state.lista_cants_runtime = lista_cants
-
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
         out = calcular_costes_con_auditoria(q_n)
@@ -1031,6 +1087,10 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         # OPERARIO (solo 3 campos)
         cp = out["coste_piezas_taller"]
         c_mo = out["c_mo"]
+
+        # "material producido" = TODO excepto accesorios, embalajes y troqueles
+        # => aquí dejamos fuera extras (c_ext), embalaje (pv_emb_total) y troquel (tot_pv_trq).
+        # Importante: el coste de corte/plotter del taller sigue dentro del "material producido" (es parte del producido).
         pvp_material_producido_total = ((cp + c_mo) * float(margen)) + float(imp_fijo_pvp)
         pvp_material_producido_unit = (pvp_material_producido_total / q_n) if q_n > 0 else 0.0
 
@@ -1064,7 +1124,6 @@ if st.session_state.is_admin:
         st.divider()
         st.subheader("🧾 Auditoría de costes (por partida)")
 
-        # Tabla auditoría acumulada por cantidad
         for q in lista_cants:
             out = desc_full.get(q)
             if not out:
@@ -1073,7 +1132,6 @@ if st.session_state.is_admin:
             with st.expander(f"🔍 Auditoría {q} uds", expanded=False):
                 aud = out["auditoria_partidas"]
 
-                # Auditoría: procesos/materiales + extras + MO (taller)
                 df_aud = pd.DataFrame([{
                     "Partida": "MATERIAL_CARTONCILLO",
                     "Coste (€)": aud["MATERIAL_CARTONCILLO"],
