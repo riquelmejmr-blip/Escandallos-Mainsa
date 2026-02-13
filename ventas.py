@@ -301,27 +301,226 @@ if "cants_str_saved" not in st.session_state:
 db = st.session_state.db_precios
 
 # =========================================================
-# UI STYLE + TITLE
+# GLOBAL CSS (app)
 # =========================================================
 st.markdown(
-    """<style>
-    .offer-wrap { background:#fff; border:2px solid #1E88E5; border-radius:14px; padding:22px; color:#222; font-family: Arial, sans-serif; }
-    .offer-title { font-size:28px; font-weight:800; color:#1E88E5; margin:0; }
-    .offer-sub { font-size:14px; color:#555; margin-top:2px; margin-bottom:16px; }
-    .sec { margin-top:14px; }
-    .sec h3 { margin:0 0 10px 0; font-size:18px; color:#1E88E5; }
-    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
-    .card { border:1px solid #e6e6e6; border-radius:12px; padding:12px; background:#fafafa; }
-    .k { color:#666; font-size:12px; margin-bottom:2px; }
-    .v { font-size:14px; font-weight:600; }
-    .tbl { width:100%; border-collapse:collapse; margin-top:10px; font-size:14px; }
-    .tbl th { background:#1E88E5; color:#fff; padding:10px; text-align:center; }
-    .tbl td { border:1px solid #e6e6e6; padding:10px; text-align:center; }
-    .tbl .rowh { text-align:left; font-weight:700; background:#f5f7ff; }
-    .muted { color:#666; font-size:12px; }
-    </style>""",
+    """
+<style>
+/* App spacing tweak */
+.block-container { padding-top: 1.2rem; }
+
+/* Offer theme */
+:root{
+  --ink:#0f172a;         /* slate-900 */
+  --muted:#64748b;       /* slate-500 */
+  --border:#e2e8f0;      /* slate-200 */
+  --bg:#ffffff;
+  --soft:#f8fafc;        /* slate-50 */
+  --soft2:#f1f5f9;       /* slate-100 */
+  --brand:#1E88E5;
+  --brand2:#0ea5e9;
+}
+
+/* Elegant offer container */
+.offer{
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
+  color: var(--ink);
+  background: linear-gradient(180deg, rgba(30,136,229,.07), rgba(255,255,255,1) 180px);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 22px 22px 18px 22px;
+  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
+}
+
+.offer-head{
+  display:flex;
+  align-items:flex-start;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:14px;
+}
+
+.badge{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  padding:8px 12px;
+  border-radius:999px;
+  background: rgba(30,136,229,.10);
+  border:1px solid rgba(30,136,229,.25);
+  color:#0b4a86;
+  font-weight:700;
+  letter-spacing:.2px;
+  font-size:12px;
+}
+
+.offer-title{
+  font-size:28px;
+  line-height:1.15;
+  font-weight:900;
+  margin:0;
+}
+
+.offer-sub{
+  margin-top:4px;
+  font-size:13px;
+  color: var(--muted);
+}
+
+.offer-meta{
+  text-align:right;
+  color: var(--muted);
+  font-size:12px;
+  white-space:nowrap;
+}
+
+.hr{
+  height:1px;
+  background: linear-gradient(90deg, rgba(30,136,229,.35), rgba(226,232,240,1));
+  margin: 14px 0 10px 0;
+  border:none;
+}
+
+.section{
+  margin-top:14px;
+}
+
+.section h3{
+  margin:0 0 10px 0;
+  font-size:16px;
+  font-weight:900;
+  color: #0b4a86;
+  display:flex;
+  align-items:center;
+  gap:8px;
+}
+
+.icon{
+  width:22px;
+  height:22px;
+  border-radius:10px;
+  background: rgba(14,165,233,.12);
+  border:1px solid rgba(14,165,233,.20);
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  font-size:12px;
+}
+
+.grid{
+  display:grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap:12px;
+}
+@media (max-width: 900px){
+  .grid{ grid-template-columns: 1fr; }
+  .offer-head{ flex-direction:column; }
+  .offer-meta{ text-align:left; }
+}
+
+.card{
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.9);
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 6px 18px rgba(15,23,42,0.06);
+}
+
+.card-top{
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-start;
+  gap:10px;
+  margin-bottom:8px;
+}
+.card-title{
+  font-weight:900;
+  font-size:15px;
+  margin:0;
+}
+.pill{
+  font-size:11px;
+  font-weight:800;
+  color:#0b4a86;
+  background: rgba(30,136,229,.10);
+  border:1px solid rgba(30,136,229,.22);
+  border-radius:999px;
+  padding:4px 10px;
+}
+.muted{
+  color: var(--muted);
+  font-size:12px;
+}
+.kv{
+  display:grid;
+  grid-template-columns: 1fr 1fr;
+  gap:10px;
+  margin-top:10px;
+}
+.k{
+  font-size:11px;
+  color: var(--muted);
+  margin-bottom:2px;
+  font-weight:700;
+  letter-spacing:.15px;
+}
+.v{
+  font-size:13px;
+  font-weight:800;
+  color: var(--ink);
+}
+.row{
+  padding:10px 12px;
+  border:1px solid var(--border);
+  border-radius:14px;
+  background: var(--soft);
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  margin-bottom:8px;
+}
+.row b{ font-weight:900; }
+
+.tbl{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+  overflow:hidden;
+  border-radius:16px;
+  border:1px solid var(--border);
+  background:white;
+}
+.tbl th{
+  background: linear-gradient(90deg, rgba(30,136,229,.95), rgba(14,165,233,.95));
+  color:white;
+  padding:10px;
+  font-size:12px;
+  text-transform:uppercase;
+  letter-spacing:.6px;
+}
+.tbl td{
+  border-top:1px solid var(--border);
+  padding:10px;
+  text-align:center;
+  font-size:13px;
+}
+.tbl tr:nth-child(even) td{ background: var(--soft); }
+.tbl .rowh{
+  text-align:left;
+  font-weight:900;
+  color: var(--ink);
+  white-space:nowrap;
+}
+.note{
+  margin-top:12px;
+  font-size:12px;
+  color: var(--muted);
+}
+</style>
+""",
     unsafe_allow_html=True
 )
+
 st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 
 # =========================================================
@@ -401,7 +600,6 @@ with st.sidebar:
     else:
         dif_ud, imp_fijo_pvp, margen = 0.091, 500.0, 2.2
 
-    # VISTA OFERTA (para pantallazo)
     modo_comercial = st.checkbox("🌟 VISTA OFERTA", value=False)
 
     st.divider()
@@ -448,7 +646,7 @@ def hay_digital_en_proyecto() -> bool:
 def autorrellenar_mermas(lista_cants: list[int], force: bool = False):
     es_dig = hay_digital_en_proyecto()
     for q in lista_cants:
-        mp, mi = calcular_mermas_estandar(q, es_digital=es_dig)  # (proceso, impresión)
+        mp, mi = calcular_mermas_estandar(q, es_digital=es_dig)
         if force or (q not in st.session_state.mermas_proc_manual):
             st.session_state.mermas_proc_manual[q] = mp
         if force or (q not in st.session_state.mermas_imp_manual):
@@ -572,7 +770,6 @@ with tab_calculadora:
                     st.session_state[f"w_{pid}"] = mw
                     st.session_state[f"h_{pid}"] = mh
 
-        # ---- FORMAS UI ----
         for p_id, p in list(st.session_state.piezas_dict.items()):
             with st.expander(f"🛠 {p.get('nombre','Forma')} - {p.get('h',0)}x{p.get('w',0)} mm", expanded=True):
                 col1, col2, col3 = st.columns(3)
@@ -674,7 +871,7 @@ with tab_calculadora:
 
                 st.session_state.piezas_dict[p_id] = p
 
-        # --- EXTRAS ---
+        # EXTRAS
         st.divider()
         st.subheader("📦 2. Almacén de Accesorios")
 
@@ -708,7 +905,7 @@ with tab_calculadora:
                 st.session_state.lista_extras_grabados.pop(i)
                 st.rerun()
 
-        # --- EMBALAJE ---
+        # EMBALAJE
         st.divider()
         st.subheader("📦 3. Embalaje")
 
@@ -761,11 +958,10 @@ with tab_calculadora:
                         cols[idx].write(f"**{q} uds**: Manual")
                 else:
                     cols[idx].write("Pendiente")
-
         else:
             st.warning("Define cantidades primero.")
 
-        # --- MERMAS ---
+        # MERMAS
         st.divider()
         st.subheader("⚙️ 4. Gestión de Mermas (AUTO + editable)")
         if lista_cants:
@@ -790,7 +986,7 @@ with tab_calculadora:
             st.warning("Define cantidades primero.")
 
 # =========================================================
-# MOTOR DE CÁLCULO (AUDITORÍA + OFERTA)
+# MOTOR DE CÁLCULO
 # =========================================================
 def calcular_costes_con_auditoria(q_n: int) -> dict:
     piezas = st.session_state.piezas_dict
@@ -800,7 +996,6 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
     merma_proc = float(st.session_state.mermas_proc_manual.get(q_n, 0))
 
     detalle = []
-
     aud = {
         "MATERIAL_CARTONCILLO": 0.0,
         "MATERIAL_BASE_ONDULADO": 0.0,
@@ -816,7 +1011,6 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
 
     for _, p in piezas.items():
         nombre = p.get("nombre", "Pieza")
-
         pliegos = float(p.get("pliegos", 1.0))
         nb = q_n * pliegos
 
@@ -857,7 +1051,6 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
                     n_hojas = int(math.ceil(hojas_con_merma / float(by)))
                     c_rig = n_hojas * precio_hoja
         else:
-            # Ondulado
             if p.get("pl_dif", False) and float(p.get("pl_h", 0)) > 0 and float(p.get("pl_w", 0)) > 0:
                 m2_plancha = (float(p["pl_w"]) * float(p["pl_h"])) / 1_000_000
             else:
@@ -1032,12 +1225,12 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             })
 
 # =========================================================
-# VISTA OFERTA (LEGIBLE)
-#    - El problema que ves (HTML impreso como texto) pasa porque
-#      st.markdown interpreta la indentación como "bloque de código".
-#    - Solución: renderizar con components.html + dedent.
+# VISTA OFERTA (ELEGANTE)
 # =========================================================
-def render_oferta_html() -> str:
+def eur(x: float, nd: int = 3) -> str:
+    return f"{x:.{nd}f}€"
+
+def render_oferta_html_elegante() -> str:
     piezas = list(st.session_state.piezas_dict.values())
     extras = st.session_state.lista_extras_grabados
     emb_tipo = st.session_state.emb_tipo
@@ -1045,22 +1238,25 @@ def render_oferta_html() -> str:
     W = float(st.session_state.emb_dims.get("W", 0))
     H = float(st.session_state.emb_dims.get("H", 0))
 
+    # ---- Formas ----
     formas_html = ""
-    for p in piezas:
-        nombre = p.get("nombre", "Pieza")
-        size = f"{int(p.get('h',0))}x{int(p.get('w',0))} mm"
+    for idx, p in enumerate(piezas, start=1):
+        nombre = p.get("nombre", f"Forma {idx}")
+        size = f"{int(p.get('h',0))}×{int(p.get('w',0))} mm"
         pliegos = float(p.get("pliegos", 1.0))
 
         if p.get("tipo_base") == "Material Rígido":
-            soporte = f"Rígido: {p.get('mat_rigido','')}"
+            soporte = f"Rígido · {p.get('mat_rigido','')}"
+            tag = "RÍGIDO"
         else:
-            soporte = f"Ondulado: {p.get('pl','')} ({p.get('ap','')})"
+            soporte = f"Ondulado · {p.get('pl','')} ({p.get('ap','')})"
             if p.get("pl_dif", False):
-                soporte += f" | Plancha: {int(p.get('pl_h',0))}x{int(p.get('pl_w',0))} mm"
+                soporte += f" · Plancha {int(p.get('pl_h',0))}×{int(p.get('pl_w',0))} mm"
+            tag = "ONDULADO"
 
-        frontal = p.get("pf", "Ninguno")
+        pf = p.get("pf", "Ninguno")
         gf = int(p.get("gf", 0))
-        dorso = p.get("pd", "Ninguno")
+        pd_ = p.get("pd", "Ninguno")
         gd = int(p.get("gd", 0))
 
         imf = p.get("im", "No")
@@ -1078,33 +1274,37 @@ def render_oferta_html() -> str:
 
         imp_cara_txt = imf
         if imf == "Offset":
-            imp_cara_txt = f"Offset | {ntf} tintas | Barniz: {baf}"
+            imp_cara_txt = f"Offset · {ntf} tintas · Barniz: {baf}"
         imp_dorso_txt = imd
         if imd == "Offset":
-            imp_dorso_txt = f"Offset | {ntd} tintas | Barniz: {bad}"
+            imp_dorso_txt = f"Offset · {ntd} tintas · Barniz: {bad}"
 
         formas_html += f"""
 <div class="card">
-  <div class="v">{nombre}</div>
-  <div class="muted">{size} | Pliegos/ud: {pliegos:.4f}</div>
-
-  <div class="sec">
-    <div class="k">Soporte</div>
-    <div class="v">{soporte}</div>
+  <div class="card-top">
+    <div>
+      <div class="card-title">{idx}. {nombre}</div>
+      <div class="muted">{size} · Pliegos/ud: <b>{pliegos:.4f}</b></div>
+    </div>
+    <div class="pill">{tag}</div>
   </div>
 
-  <div class="grid sec">
+  <div class="row">
+    <div>
+      <div class="k">Soporte</div>
+      <div class="v">{soporte}</div>
+    </div>
+  </div>
+
+  <div class="kv">
     <div>
       <div class="k">Cartoncillo cara</div>
-      <div class="v">{frontal} ({gf} g)</div>
+      <div class="v">{pf} <span class="muted">({gf} g)</span></div>
     </div>
     <div>
       <div class="k">Cartoncillo dorso</div>
-      <div class="v">{dorso} ({gd} g)</div>
+      <div class="v">{pd_} <span class="muted">({gd} g)</span></div>
     </div>
-  </div>
-
-  <div class="grid sec">
     <div>
       <div class="k">Impresión cara</div>
       <div class="v">{imp_cara_txt}</div>
@@ -1115,105 +1315,121 @@ def render_oferta_html() -> str:
       <div class="v">{imp_dorso_txt}</div>
       <div class="muted">Peliculado: {pel_d}</div>
     </div>
-  </div>
-
-  <div class="grid sec">
     <div>
       <div class="k">Corte</div>
       <div class="v">{corte}</div>
     </div>
     <div>
       <div class="k">Troquel (venta)</div>
-      <div class="v">{pv_trq:.2f}€ | Cobrar arreglo: {cobrar_arr}</div>
+      <div class="v">{pv_trq:.2f}€ <span class="muted">· Cobrar arreglo: {cobrar_arr}</span></div>
     </div>
   </div>
 </div>
 """
 
+    # ---- Extras ----
     if extras:
         extras_html = "<table class='tbl'><tr><th>Extra</th><th>€/ud</th><th>Cant/ud prod</th></tr>"
         for e in extras:
-            extras_html += f"<tr><td class='rowh'>{e.get('nombre','')}</td><td>{float(e.get('coste',0)):.4f}€</td><td>{float(e.get('cantidad',0)):.4f}</td></tr>"
+            extras_html += (
+                f"<tr><td class='rowh'>{e.get('nombre','')}</td>"
+                f"<td>{float(e.get('coste',0)):.4f}€</td>"
+                f"<td>{float(e.get('cantidad',0)):.4f}</td></tr>"
+            )
         extras_html += "</table>"
     else:
-        extras_html = "<div class='muted'>Sin extras.</div>"
+        extras_html = "<div class='card'><div class='muted'>Sin extras.</div></div>"
 
-    if emb_tipo in ["Embalaje Guaina (Automático)", "Embalaje en Plano"]:
-        emb_dims_txt = f"{int(L)}x{int(W)}x{int(H)} mm"
-    else:
-        emb_dims_txt = "N/A"
-
+    # ---- Embalaje ----
+    emb_dims_txt = f"{int(L)}×{int(W)}×{int(H)} mm" if emb_tipo in ["Embalaje Guaina (Automático)", "Embalaje en Plano"] else "N/A"
     embalaje_html = f"""
 <div class="card">
-  <div class="k">Tipo de embalaje</div>
-  <div class="v">{emb_tipo}</div>
-  <div class="k" style="margin-top:8px;">Medidas</div>
-  <div class="v">{emb_dims_txt}</div>
+  <div class="row">
+    <div>
+      <div class="k">Tipo</div>
+      <div class="v">{emb_tipo}</div>
+    </div>
+    <div style="text-align:right;">
+      <div class="k">Medidas</div>
+      <div class="v">{emb_dims_txt}</div>
+    </div>
+  </div>
 </div>
 """
 
-    if not oferta_precios:
-        precios_html = "<div class='muted'>Define cantidades para calcular precios.</div>"
+    # ---- Precios ----
+    if not oferta_precios or not lista_cants:
+        precios_html = "<div class='card'><div class='muted'>Define cantidades para calcular precios.</div></div>"
     else:
-        precios_html = "<table class='tbl'>"
-        precios_html += "<tr><th></th>"
-        for q in lista_cants:
-            precios_html += f"<th>{q} uds</th>"
-        precios_html += "</tr>"
+        cols = "".join([f"<th>{q} uds</th>" for q in lista_cants])
 
-        precios_html += "<tr><td class='rowh'>Precio venta material (unitario)</td>"
-        for q in lista_cants:
-            precios_html += f"<td>{oferta_precios[q]['pvp_material_unit']:.3f}€</td>"
-        precios_html += "</tr>"
+        row1 = "".join([f"<td>{eur(oferta_precios[q]['pvp_material_unit'], 3)}</td>" for q in lista_cants])
+        row2 = "".join([f"<td>{eur(oferta_precios[q]['pvp_emb_unit'], 3)}</td>" for q in lista_cants])
+        row3 = "".join([f"<td>{eur(oferta_precios[q]['pvp_troquel_total'], 2)}</td>" for q in lista_cants])
+        row4 = "".join([f"<td><b>{eur(oferta_precios[q]['pvp_total_unit'], 3)}</b></td>" for q in lista_cants])
 
-        precios_html += "<tr><td class='rowh'>Precio venta embalaje (unitario)</td>"
-        for q in lista_cants:
-            precios_html += f"<td>{oferta_precios[q]['pvp_emb_unit']:.3f}€</td>"
-        precios_html += "</tr>"
-
-        precios_html += "<tr><td class='rowh'>Precio venta troquel (TOTAL)</td>"
-        for q in lista_cants:
-            precios_html += f"<td>{oferta_precios[q]['pvp_troquel_total']:.2f}€</td>"
-        precios_html += "</tr>"
-
-        precios_html += "<tr><td class='rowh'>Precio venta unitario (todo incluido)</td>"
-        for q in lista_cants:
-            precios_html += f"<td><b>{oferta_precios[q]['pvp_total_unit']:.3f}€</b></td>"
-        precios_html += "</tr>"
-
-        precios_html += "</table>"
+        precios_html = f"""
+<table class="tbl">
+  <tr>
+    <th></th>
+    {cols}
+  </tr>
+  <tr>
+    <td class="rowh">Precio venta material (unitario)</td>
+    {row1}
+  </tr>
+  <tr>
+    <td class="rowh">Precio venta embalaje (unitario)</td>
+    {row2}
+  </tr>
+  <tr>
+    <td class="rowh">Precio venta troquel (TOTAL)</td>
+    {row3}
+  </tr>
+  <tr>
+    <td class="rowh">Precio venta unitario (todo incluido)</td>
+    {row4}
+  </tr>
+</table>
+"""
 
     html = f"""
-<div class="offer-wrap">
-  <div class="offer-title">OFERTA · {st.session_state.cli or "Cliente"}</div>
-  <div class="offer-sub">
-    Ref: <b>{st.session_state.brf or "-"}</b> · {st.session_state.desc or ""}
+<div class="offer">
+  <div class="offer-head">
+    <div>
+      <div class="badge">OFERTA · {st.session_state.cli or "Cliente"}</div>
+      <h1 class="offer-title">{st.session_state.desc or "Escandallo / Oferta"}</h1>
+      <div class="offer-sub">Briefing: <b>{st.session_state.brf or "-"}</b></div>
+    </div>
+    <div class="offer-meta">
+      <div><b>MAINSA</b> · Escandallo</div>
+      <div>{("Modo Admin" if st.session_state.is_admin else "Modo Operario")}</div>
+    </div>
   </div>
 
-  <div class="sec">
-    <h3>1) Formas</h3>
+  <div class="hr"></div>
+
+  <div class="section">
+    <h3><span class="icon">1</span> Formas</h3>
     <div class="grid">
       {formas_html}
     </div>
   </div>
 
-  <div class="sec">
-    <h3>2) Materiales extra</h3>
+  <div class="section">
+    <h3><span class="icon">2</span> Materiales extra</h3>
     {extras_html}
   </div>
 
-  <div class="sec">
-    <h3>3) Embalaje</h3>
+  <div class="section">
+    <h3><span class="icon">3</span> Embalaje</h3>
     {embalaje_html}
   </div>
 
-  <div class="sec">
-    <h3>4) Precios de venta</h3>
+  <div class="section">
+    <h3><span class="icon">4</span> Precios de venta</h3>
     {precios_html}
-  </div>
-
-  <div class="sec muted">
-    * “Precio venta material” incluye todos los costes del producido excepto extras, embalajes y troqueles.
+    <div class="note">* “Precio venta material” incluye todos los costes del producido excepto extras, embalajes y troqueles.</div>
   </div>
 </div>
 """
@@ -1223,9 +1439,7 @@ def render_oferta_html() -> str:
 # SALIDA PRINCIPAL
 # =========================================================
 if modo_comercial:
-    # Render en HTML real (LEGIBLE) y NO como texto
-    html = render_oferta_html()
-    components.html(html, height=1200, scrolling=True)
+    components.html(render_oferta_html_elegante(), height=1250, scrolling=True)
 else:
     if st.session_state.is_admin:
         if res_admin:
