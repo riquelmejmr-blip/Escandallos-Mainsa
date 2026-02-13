@@ -33,6 +33,7 @@ def calcular_mermas_estandar(n: int, es_digital: bool = False):
         return 50, 250
     return int(n * 0.03), 300
 
+
 # =========================================================
 # CATÁLOGO FLEXICO
 # =========================================================
@@ -240,7 +241,9 @@ def crear_forma_vacia(index: int) -> dict:
 
         "mat_rigido": "Ninguno",
 
+        # Cara
         "im": "No", "nt": 0, "ba": False,
+        # Dorso
         "im_d": "No", "nt_d": 0, "ba_d": False,
 
         "pel": "Sin Peliculado", "pel_d": "Sin Peliculado",
@@ -301,220 +304,115 @@ if "cants_str_saved" not in st.session_state:
 db = st.session_state.db_precios
 
 # =========================================================
-# GLOBAL CSS (app)
+# GLOBAL CSS
 # =========================================================
 st.markdown(
     """
 <style>
-/* App spacing tweak */
 .block-container { padding-top: 1.2rem; }
 
-/* Offer theme */
-:root{
-  --ink:#0f172a;         /* slate-900 */
-  --muted:#64748b;       /* slate-500 */
-  --border:#e2e8f0;      /* slate-200 */
-  --bg:#ffffff;
-  --soft:#f8fafc;        /* slate-50 */
-  --soft2:#f1f5f9;       /* slate-100 */
-  --brand:#1E88E5;
-  --brand2:#0ea5e9;
+/* Offer style: "tipo captura" (limpio, corporativo, fácil pantallazo) */
+.offer2-wrap{
+  border:2px solid #1e88e5;
+  border-radius:8px;
+  padding:16px 18px 18px 18px;
+  background:#fff;
 }
-
-/* Elegant offer container */
-.offer{
-  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Arial, "Helvetica Neue", "Noto Sans", "Liberation Sans", sans-serif;
-  color: var(--ink);
-  background: linear-gradient(180deg, rgba(30,136,229,.07), rgba(255,255,255,1) 180px);
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  padding: 22px 22px 18px 22px;
-  box-shadow: 0 12px 40px rgba(15, 23, 42, 0.08);
-}
-
-.offer-head{
-  display:flex;
-  align-items:flex-start;
-  justify-content:space-between;
-  gap:12px;
+.offer2-head{
+  text-align:center;
+  padding:10px 0 14px 0;
+  border-bottom:1px solid #e5e7eb;
   margin-bottom:14px;
 }
-
-.badge{
-  display:inline-flex;
-  align-items:center;
-  gap:8px;
-  padding:8px 12px;
-  border-radius:999px;
-  background: rgba(30,136,229,.10);
-  border:1px solid rgba(30,136,229,.25);
-  color:#0b4a86;
-  font-weight:700;
-  letter-spacing:.2px;
-  font-size:12px;
-}
-
-.offer-title{
-  font-size:28px;
-  line-height:1.15;
+.offer2-title{
+  font-size:22px;
   font-weight:900;
+  letter-spacing:.6px;
   margin:0;
+  text-transform:uppercase;
 }
-
-.offer-sub{
-  margin-top:4px;
-  font-size:13px;
-  color: var(--muted);
-}
-
-.offer-meta{
-  text-align:right;
-  color: var(--muted);
+.offer2-ref{
+  margin-top:6px;
   font-size:12px;
-  white-space:nowrap;
+  color:#6b7280;
+  font-weight:700;
 }
-
-.hr{
-  height:1px;
-  background: linear-gradient(90deg, rgba(30,136,229,.35), rgba(226,232,240,1));
-  margin: 14px 0 10px 0;
-  border:none;
-}
-
-.section{
-  margin-top:14px;
-}
-
-.section h3{
-  margin:0 0 10px 0;
-  font-size:16px;
-  font-weight:900;
-  color: #0b4a86;
+.offer2-sec-title{
   display:flex;
   align-items:center;
   gap:8px;
+  font-size:16px;
+  font-weight:900;
+  color:#1e88e5;
+  margin:16px 0 8px 0;
 }
-
-.icon{
-  width:22px;
-  height:22px;
-  border-radius:10px;
-  background: rgba(14,165,233,.12);
-  border:1px solid rgba(14,165,233,.20);
+.offer2-icon{
+  width:18px;
+  height:18px;
   display:inline-flex;
   align-items:center;
   justify-content:center;
+  border:1px solid #cfe6fb;
+  background:#eef7ff;
+  border-radius:4px;
   font-size:12px;
 }
-
-.grid{
-  display:grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap:12px;
-}
-@media (max-width: 900px){
-  .grid{ grid-template-columns: 1fr; }
-  .offer-head{ flex-direction:column; }
-  .offer-meta{ text-align:left; }
-}
-
-.card{
-  border: 1px solid var(--border);
-  background: rgba(255,255,255,0.9);
-  border-radius: 16px;
-  padding: 14px;
-  box-shadow: 0 6px 18px rgba(15,23,42,0.06);
-}
-
-.card-top{
-  display:flex;
-  justify-content:space-between;
-  align-items:flex-start;
-  gap:10px;
-  margin-bottom:8px;
-}
-.card-title{
-  font-weight:900;
-  font-size:15px;
+.offer2-spec{
+  padding-left:16px;
   margin:0;
 }
-.pill{
-  font-size:11px;
-  font-weight:800;
-  color:#0b4a86;
-  background: rgba(30,136,229,.10);
-  border:1px solid rgba(30,136,229,.22);
+.offer2-spec li{ margin:10px 0; }
+.offer2-spec small{
+  display:block;
+  color:#6b7280;
+  margin-top:4px;
+  line-height:1.35;
+}
+.offer2-pill{
+  display:inline-block;
+  padding:2px 8px;
   border-radius:999px;
-  padding:4px 10px;
-}
-.muted{
-  color: var(--muted);
-  font-size:12px;
-}
-.kv{
-  display:grid;
-  grid-template-columns: 1fr 1fr;
-  gap:10px;
-  margin-top:10px;
-}
-.k{
-  font-size:11px;
-  color: var(--muted);
-  margin-bottom:2px;
-  font-weight:700;
-  letter-spacing:.15px;
-}
-.v{
-  font-size:13px;
+  background:#eef7ff;
+  border:1px solid #cfe6fb;
+  color:#0b4a86;
   font-weight:800;
-  color: var(--ink);
+  font-size:11px;
+  margin-left:6px;
 }
-.row{
-  padding:10px 12px;
-  border:1px solid var(--border);
-  border-radius:14px;
-  background: var(--soft);
-  display:flex;
-  justify-content:space-between;
-  gap:12px;
-  margin-bottom:8px;
-}
-.row b{ font-weight:900; }
-
-.tbl{
+.offer2-table{
   width:100%;
-  border-collapse:separate;
-  border-spacing:0;
-  overflow:hidden;
-  border-radius:16px;
-  border:1px solid var(--border);
-  background:white;
-}
-.tbl th{
-  background: linear-gradient(90deg, rgba(30,136,229,.95), rgba(14,165,233,.95));
-  color:white;
-  padding:10px;
-  font-size:12px;
-  text-transform:uppercase;
-  letter-spacing:.6px;
-}
-.tbl td{
-  border-top:1px solid var(--border);
-  padding:10px;
-  text-align:center;
+  border-collapse:collapse;
+  margin-top:8px;
   font-size:13px;
 }
-.tbl tr:nth-child(even) td{ background: var(--soft); }
-.tbl .rowh{
+.offer2-table th{
+  background:#1e88e5;
+  color:white;
   text-align:left;
+  padding:10px 10px;
   font-weight:900;
-  color: var(--ink);
-  white-space:nowrap;
+  border-right:1px solid rgba(255,255,255,.15);
 }
-.note{
-  margin-top:12px;
-  font-size:12px;
-  color: var(--muted);
+.offer2-table td{
+  border:1px solid #e5e7eb;
+  padding:10px 10px;
+}
+.offer2-table td.num{
+  text-align:center;
+  font-weight:700;
+}
+.offer2-table td.total{
+  background:#f0f8ff;
+}
+.offer2-table td.hl{
+  color:#0b66ff;
+  font-weight:900;
+}
+.offer2-foot{
+  margin-top:10px;
+  font-size:11px;
+  color:#6b7280;
+  text-align:right;
 }
 </style>
 """,
@@ -741,6 +639,9 @@ with tab_calculadora:
             st.session_state.db_precios = deepcopy(PRECIOS_BASE)
             st.rerun()
 
+        # -----------------------
+        # Callbacks
+        # -----------------------
         def callback_medida_estandar(pid: int):
             fmt = st.session_state.get(f"std_{pid}", "Personalizado")
             if fmt != "Personalizado":
@@ -755,11 +656,25 @@ with tab_calculadora:
             new_mat = st.session_state.get(f"pf_{pid}", "Ninguno")
             if new_mat != "Ninguno":
                 st.session_state[f"gf_{pid}"] = db["cartoncillo"][new_mat]["gramaje"]
-                st.session_state[f"im_{pid}"] = "Offset"
-                st.session_state[f"nt_{pid}"] = 4
+                # si tiene cartoncillo frontal, por defecto imprime en cara
+                if st.session_state.get(f"im_{pid}", "No") == "No":
+                    st.session_state[f"im_{pid}"] = "Offset"
+                    st.session_state[f"nt_{pid}"] = 4
             else:
-                st.session_state[f"im_{pid}"] = "No"
-                st.session_state[f"nt_{pid}"] = 0
+                st.session_state[f"gf_{pid}"] = 0
+                # no tocamos la impresión por si quiere imprimir sobre base u otro caso
+
+        def callback_cambio_dorso(pid: int):
+            new_mat = st.session_state.get(f"pd_{pid}", "Ninguno")
+            if new_mat != "Ninguno":
+                st.session_state[f"gd_{pid}"] = db["cartoncillo"][new_mat]["gramaje"]
+                # si tiene cartoncillo dorso, por defecto permite impresión dorso
+                if st.session_state.get(f"im_d_{pid}", "No") == "No":
+                    st.session_state[f"im_d_{pid}"] = "Offset"
+                    st.session_state[f"nt_d_{pid}"] = 0
+            else:
+                st.session_state[f"gd_{pid}"] = 0
+                # si no hay cartoncillo dorso, dejamos im_d como esté (por si imprime sobre base)
 
         def callback_rigido_set_medidas(pid: int):
             mat = st.session_state.get(f"mrig_{pid}", "Ninguno")
@@ -767,16 +682,24 @@ with tab_calculadora:
                 mw = int(db["rigidos"][mat].get("w", 0))
                 mh = int(db["rigidos"][mat].get("h", 0))
                 if mw > 0 and mh > 0:
+                    # Al elegir rígido: el tamaño de la forma se pone automáticamente al tamaño de la hoja
                     st.session_state[f"w_{pid}"] = mw
                     st.session_state[f"h_{pid}"] = mh
 
+        # -----------------------
+        # Formas UI
+        # -----------------------
         for p_id, p in list(st.session_state.piezas_dict.items()):
             with st.expander(f"🛠 {p.get('nombre','Forma')} - {p.get('h',0)}x{p.get('w',0)} mm", expanded=True):
                 col1, col2, col3 = st.columns(3)
 
+                # -----------------------
+                # Col 1: Medidas + impresión cara + peliculado cara
+                # -----------------------
                 with col1:
                     p["nombre"] = st.text_input("Etiqueta", p.get("nombre", f"Forma {p_id+1}"), key=f"n_{p_id}")
-                    p["pliegos"] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get("pliegos", 1.0)), format="%.4f", key=f"p_{p_id}")
+                    p["pliegos"] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get("pliegos", 1.0)),
+                                                   format="%.4f", key=f"p_{p_id}")
 
                     st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}",
                                  on_change=callback_medida_estandar, args=(p_id,))
@@ -790,11 +713,11 @@ with tab_calculadora:
                     p["im"] = st.selectbox("Sistema Cara", opts_im, index=(opts_im.index(val_im) if val_im in opts_im else 2), key=f"im_{p_id}")
 
                     if p["im"] == "Offset":
-                        p["nt"] = st.number_input("Tintas F.", 0, 6, int(p.get("nt", 4)), key=f"nt_{p_id}")
-                        p["ba"] = st.checkbox("Barniz F.", value=bool(p.get("ba", False)), key=f"ba_{p_id}")
+                        p["nt"] = st.number_input("Tintas Cara", 0, 6, int(p.get("nt", 4)), key=f"nt_{p_id}")
+                        p["ba"] = st.checkbox("Barniz Cara", value=bool(p.get("ba", False)), key=f"ba_{p_id}")
                         p["ld"] = False
                     elif p["im"] == "Digital":
-                        p["ld"] = st.checkbox("Laminado Digital F.", value=bool(p.get("ld", False)), key=f"ld_{p_id}")
+                        p["ld"] = st.checkbox("Laminado Digital Cara", value=bool(p.get("ld", False)), key=f"ld_{p_id}")
                         p["nt"], p["ba"] = 0, False
                     else:
                         p["nt"], p["ba"], p["ld"] = 0, False, False
@@ -803,30 +726,39 @@ with tab_calculadora:
                     val_pel = p.get("pel", "Sin Peliculado")
                     p["pel"] = st.selectbox("Peliculado Cara", opts_pel, index=(opts_pel.index(val_pel) if val_pel in opts_pel else 0), key=f"pel_{p_id}")
 
+                # -----------------------
+                # Col 2: materiales + soporte (ondulado/rigido)
+                #       + cartoncillo dorso (recuperado)
+                # -----------------------
                 with col2:
                     opts_pf = list(db["cartoncillo"].keys())
                     val_pf = p.get("pf", "Ninguno")
-                    p["pf"] = st.selectbox("C. Frontal", opts_pf, index=(opts_pf.index(val_pf) if val_pf in opts_pf else 0),
+                    p["pf"] = st.selectbox("Cartoncillo Cara", opts_pf,
+                                           index=(opts_pf.index(val_pf) if val_pf in opts_pf else 0),
                                            key=f"pf_{p_id}", on_change=callback_cambio_frontal, args=(p_id,))
-                    p["gf"] = st.number_input("Gramaje F.", value=int(p.get("gf", 0)), key=f"gf_{p_id}")
+                    p["gf"] = st.number_input("Gramaje Cara (g)", value=int(p.get("gf", 0)), key=f"gf_{p_id}")
 
                     st.divider()
 
                     opts_base = ["Ondulado/Cartón", "Material Rígido"]
                     val_tb = p.get("tipo_base", "Ondulado/Cartón")
-                    p["tipo_base"] = st.selectbox("Tipo Soporte", opts_base, index=(opts_base.index(val_tb) if val_tb in opts_base else 0), key=f"tb_{p_id}")
+                    p["tipo_base"] = st.selectbox("Tipo Soporte", opts_base,
+                                                  index=(opts_base.index(val_tb) if val_tb in opts_base else 0),
+                                                  key=f"tb_{p_id}")
 
                     if p["tipo_base"] == "Ondulado/Cartón":
                         opts_pl = list(db["planchas"].keys())
                         val_pl = p.get("pl", "Ninguna")
-                        p["pl"] = st.selectbox("Plancha Base", opts_pl, index=(opts_pl.index(val_pl) if val_pl in opts_pl else 0), key=f"pl_{p_id}")
+                        p["pl"] = st.selectbox("Plancha Base", opts_pl,
+                                               index=(opts_pl.index(val_pl) if val_pl in opts_pl else 0),
+                                               key=f"pl_{p_id}")
 
                         if p["pl"] != "Ninguna":
                             p["pl_dif"] = st.checkbox("📏 Medida Plancha Diferente", value=bool(p.get("pl_dif", False)), key=f"pldif_{p_id}")
                             if p["pl_dif"]:
                                 c_ph, c_pw = st.columns(2)
-                                p["pl_h"] = c_ph.number_input("Alto Plancha", 0, 5000, value=int(p.get("pl_h", p["h"])), key=f"plh_{p_id}")
-                                p["pl_w"] = c_pw.number_input("Ancho Plancha", 0, 5000, value=int(p.get("pl_w", p["w"])), key=f"plw_{p_id}")
+                                p["pl_h"] = c_ph.number_input("Alto Plancha (mm)", 0, 5000, value=int(p.get("pl_h", p["h"])), key=f"plh_{p_id}")
+                                p["pl_w"] = c_pw.number_input("Ancho Plancha (mm)", 0, 5000, value=int(p.get("pl_w", p["w"])), key=f"plw_{p_id}")
                             else:
                                 p["pl_h"] = p["h"]
                                 p["pl_w"] = p["w"]
@@ -835,12 +767,14 @@ with tab_calculadora:
 
                         opts_ap = ["C/C", "B/C", "B/B"]
                         val_ap = p.get("ap", "B/C")
-                        p["ap"] = st.selectbox("Calidad Ondulado", opts_ap, index=(opts_ap.index(val_ap) if val_ap in opts_ap else 1), key=f"ap_{p_id}")
+                        p["ap"] = st.selectbox("Calidad Ondulado", opts_ap,
+                                               index=(opts_ap.index(val_ap) if val_ap in opts_ap else 1),
+                                               key=f"ap_{p_id}")
                     else:
                         opts_rig = list(db["rigidos"].keys())
                         val_rig = p.get("mat_rigido", "Ninguno")
                         p["mat_rigido"] = st.selectbox(
-                            "Material Rígido",
+                            "Material Rígido (hoja fija)",
                             opts_rig,
                             index=(opts_rig.index(val_rig) if val_rig in opts_rig else 0),
                             key=f"mrig_{p_id}",
@@ -851,16 +785,56 @@ with tab_calculadora:
                             im_r = db["rigidos"][p["mat_rigido"]]
                             st.info(f"Hoja fija: {int(im_r['w'])}x{int(im_r['h'])} mm | Precio: {float(im_r['precio_ud']):.2f}€ / hoja")
 
+                    st.divider()
+
+                    # ---- RECUPERADO: Cartoncillo dorso + gramaje ----
+                    opts_pd = list(db["cartoncillo"].keys())
+                    val_pd = p.get("pd", "Ninguno")
+                    p["pd"] = st.selectbox("Cartoncillo Dorso", opts_pd,
+                                           index=(opts_pd.index(val_pd) if val_pd in opts_pd else 0),
+                                           key=f"pd_{p_id}", on_change=callback_cambio_dorso, args=(p_id,))
+                    p["gd"] = st.number_input("Gramaje Dorso (g)", value=int(p.get("gd", 0)), key=f"gd_{p_id}")
+
+                # -----------------------
+                # Col 3: corte + troquel venta + impresión dorso + acabado dorso
+                # -----------------------
                 with col3:
                     opts_cor = ["Troquelado", "Plotter"]
                     val_cor = p.get("cor", "Troquelado")
-                    p["cor"] = st.selectbox("Corte", opts_cor, index=(opts_cor.index(val_cor) if val_cor in opts_cor else 0), key=f"cor_{p_id}")
+                    p["cor"] = st.selectbox("Corte", opts_cor,
+                                            index=(opts_cor.index(val_cor) if val_cor in opts_cor else 0),
+                                            key=f"cor_{p_id}")
 
                     if p["cor"] == "Troquelado":
                         p["cobrar_arreglo"] = st.checkbox("¿Cobrar Arreglo?", value=bool(p.get("cobrar_arreglo", True)), key=f"arr_{p_id}")
                         p["pv_troquel"] = st.number_input("Precio Venta Troquel (€)", value=float(p.get("pv_troquel", 0.0)), key=f"pvt_{p_id}")
                     else:
                         p["cobrar_arreglo"] = False
+
+                    st.divider()
+
+                    # ---- Impresión y acabados dorso (igual que cara) ----
+                    opts_imd = ["Offset", "Digital", "No"]
+                    val_imd = p.get("im_d", "No")
+                    p["im_d"] = st.selectbox("Sistema Dorso", opts_imd,
+                                             index=(opts_imd.index(val_imd) if val_imd in opts_imd else 2),
+                                             key=f"im_d_{p_id}")
+
+                    if p["im_d"] == "Offset":
+                        p["nt_d"] = st.number_input("Tintas Dorso", 0, 6, int(p.get("nt_d", 0)), key=f"nt_d_{p_id}")
+                        p["ba_d"] = st.checkbox("Barniz Dorso", value=bool(p.get("ba_d", False)), key=f"ba_d_{p_id}")
+                        p["ld_d"] = False
+                    elif p["im_d"] == "Digital":
+                        p["ld_d"] = st.checkbox("Laminado Digital Dorso", value=bool(p.get("ld_d", False)), key=f"ld_d_{p_id}")
+                        p["nt_d"], p["ba_d"] = 0, False
+                    else:
+                        p["nt_d"], p["ba_d"], p["ld_d"] = 0, False, False
+
+                    opts_pel = list(db["peliculado"].keys())
+                    val_peld = p.get("pel_d", "Sin Peliculado")
+                    p["pel_d"] = st.selectbox("Peliculado Dorso", opts_pel,
+                                              index=(opts_pel.index(val_peld) if val_peld in opts_pel else 0),
+                                              key=f"pel_d_{p_id}")
 
                     if st.button("🗑 Borrar Forma", key=f"del_{p_id}"):
                         if len(st.session_state.piezas_dict) > 1:
@@ -1063,7 +1037,7 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
                     peg_m2 = float(db["planchas"][p["pl"]]["peg"])
                     c_peg = hp_produccion * m2_plancha * peg_m2
 
-        # CARTONCILLO
+        # CARTONCILLO (cara + dorso)
         pf = p.get("pf", "Ninguno")
         gf = float(p.get("gf", 0))
         if pf != "Ninguno" and m2_papel > 0 and gf > 0:
@@ -1076,7 +1050,7 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
             precio_kg_pd = float(db["cartoncillo"][pd_]["precio_kg"])
             c_carton += hp_papel_d * m2_papel * (gd / 1000.0) * precio_kg_pd
 
-        # IMPRESIÓN
+        # IMPRESIÓN (cara + dorso)
         c_imp_f = 0.0
         if p.get("im") == "Digital" and m2_papel > 0:
             c_imp_f = hp_papel_f * m2_papel * 6.5
@@ -1097,15 +1071,18 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
 
         c_imp = c_imp_f + c_imp_d
 
-        # PELICULADO
+        # PELICULADO (cara + dorso)
         pel_f = p.get("pel", "Sin Peliculado")
         pel_d = p.get("pel_d", "Sin Peliculado")
+
         c_pel_f = 0.0
         if pel_f != "Sin Peliculado" and m2_papel > 0:
             c_pel_f = hp_produccion * m2_papel * float(db["peliculado"][pel_f])
+
         c_pel_d = 0.0
         if pel_d != "Sin Peliculado" and m2_papel > 0:
             c_pel_d = hp_produccion * m2_papel * float(db["peliculado"][pel_d])
+
         c_pel = c_pel_f + c_pel_d
 
         # CORTE
@@ -1176,7 +1153,7 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
     }
 
 # =========================================================
-# RESULTADOS (normal + oferta)
+# RESULTADOS
 # =========================================================
 res_admin = []
 res_operario = []
@@ -1225,12 +1202,12 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             })
 
 # =========================================================
-# VISTA OFERTA (ELEGANTE)
+# VISTA OFERTA (tipo captura / como tu ejemplo)
 # =========================================================
 def eur(x: float, nd: int = 3) -> str:
     return f"{x:.{nd}f}€"
 
-def render_oferta_html_elegante() -> str:
+def render_oferta_html_tipo_captura() -> str:
     piezas = list(st.session_state.piezas_dict.values())
     extras = st.session_state.lista_extras_grabados
     emb_tipo = st.session_state.emb_tipo
@@ -1238,199 +1215,136 @@ def render_oferta_html_elegante() -> str:
     W = float(st.session_state.emb_dims.get("W", 0))
     H = float(st.session_state.emb_dims.get("H", 0))
 
-    # ---- Formas ----
-    formas_html = ""
-    for idx, p in enumerate(piezas, start=1):
-        nombre = p.get("nombre", f"Forma {idx}")
-        size = f"{int(p.get('h',0))}×{int(p.get('w',0))} mm"
-        pliegos = float(p.get("pliegos", 1.0))
+    titulo = f"OFERTA COMERCIAL - {st.session_state.cli or 'CLIENTE'}"
+    ref = st.session_state.brf or "-"
 
+    # -------- Especificaciones (lista) --------
+    li = ""
+    for i, p in enumerate(piezas, start=1):
+        h = int(p.get("h", 0))
+        w = int(p.get("w", 0))
+
+        # Soporte
         if p.get("tipo_base") == "Material Rígido":
-            soporte = f"Rígido · {p.get('mat_rigido','')}"
-            tag = "RÍGIDO"
+            base = f"Rígido: {p.get('mat_rigido','')}"
         else:
-            soporte = f"Ondulado · {p.get('pl','')} ({p.get('ap','')})"
+            base = f"Base: {p.get('pl','')} ({p.get('ap','')})"
             if p.get("pl_dif", False):
-                soporte += f" · Plancha {int(p.get('pl_h',0))}×{int(p.get('pl_w',0))} mm"
-            tag = "ONDULADO"
+                base += f" · Medida optimizada: {int(p.get('pl_h',0))}x{int(p.get('pl_w',0))}mm"
 
+        # Cara
         pf = p.get("pf", "Ninguno")
         gf = int(p.get("gf", 0))
+        imp_cara = p.get("im", "No")
+        if imp_cara == "Offset":
+            imp_cara = f"Offset {int(p.get('nt',0))} tintas"
+            if p.get("ba", False):
+                imp_cara += " + Barniz"
+        elif imp_cara == "Digital":
+            imp_cara = "Digital"
+        else:
+            imp_cara = "No"
+
+        pel_cara = p.get("pel", "Sin Peliculado")
+
+        # Dorso (NUEVO visible)
         pd_ = p.get("pd", "Ninguno")
         gd = int(p.get("gd", 0))
-
-        imf = p.get("im", "No")
-        imd = p.get("im_d", "No")
-        ntf = int(p.get("nt", 0))
-        ntd = int(p.get("nt_d", 0))
-        baf = "Sí" if p.get("ba", False) else "No"
-        bad = "Sí" if p.get("ba_d", False) else "No"
-        pel_f = p.get("pel", "Sin Peliculado")
+        imp_d = p.get("im_d", "No")
+        if imp_d == "Offset":
+            imp_d = f"Offset {int(p.get('nt_d',0))} tintas"
+            if p.get("ba_d", False):
+                imp_d += " + Barniz"
+        elif imp_d == "Digital":
+            imp_d = "Digital"
+        else:
+            imp_d = "No"
         pel_d = p.get("pel_d", "Sin Peliculado")
 
+        # Corte
         corte = p.get("cor", "Troquelado")
-        cobrar_arr = "Sí" if p.get("cobrar_arreglo", True) else "No"
-        pv_trq = float(p.get("pv_troquel", 0.0))
 
-        imp_cara_txt = imf
-        if imf == "Offset":
-            imp_cara_txt = f"Offset · {ntf} tintas · Barniz: {baf}"
-        imp_dorso_txt = imd
-        if imd == "Offset":
-            imp_dorso_txt = f"Offset · {ntd} tintas · Barniz: {bad}"
-
-        formas_html += f"""
-<div class="card">
-  <div class="card-top">
-    <div>
-      <div class="card-title">{idx}. {nombre}</div>
-      <div class="muted">{size} · Pliegos/ud: <b>{pliegos:.4f}</b></div>
-    </div>
-    <div class="pill">{tag}</div>
-  </div>
-
-  <div class="row">
-    <div>
-      <div class="k">Soporte</div>
-      <div class="v">{soporte}</div>
-    </div>
-  </div>
-
-  <div class="kv">
-    <div>
-      <div class="k">Cartoncillo cara</div>
-      <div class="v">{pf} <span class="muted">({gf} g)</span></div>
-    </div>
-    <div>
-      <div class="k">Cartoncillo dorso</div>
-      <div class="v">{pd_} <span class="muted">({gd} g)</span></div>
-    </div>
-    <div>
-      <div class="k">Impresión cara</div>
-      <div class="v">{imp_cara_txt}</div>
-      <div class="muted">Peliculado: {pel_f}</div>
-    </div>
-    <div>
-      <div class="k">Impresión dorso</div>
-      <div class="v">{imp_dorso_txt}</div>
-      <div class="muted">Peliculado: {pel_d}</div>
-    </div>
-    <div>
-      <div class="k">Corte</div>
-      <div class="v">{corte}</div>
-    </div>
-    <div>
-      <div class="k">Troquel (venta)</div>
-      <div class="v">{pv_trq:.2f}€ <span class="muted">· Cobrar arreglo: {cobrar_arr}</span></div>
-    </div>
-  </div>
-</div>
+        li += f"""
+<li>
+  <b>Forma {i}</b> ({h}x{w} mm)
+  <small>
+    <span class="offer2-pill">Cara</span> {pf} ({gf}g) · Imp: {imp_cara} · Pel: {pel_cara}<br/>
+    <span class="offer2-pill">Dorso</span> {pd_} ({gd}g) · Imp: {imp_d} · Pel: {pel_d}<br/>
+    <span class="offer2-pill">Soporte</span> {base} · <span class="offer2-pill">Corte</span> {corte}
+  </small>
+</li>
 """
 
-    # ---- Extras ----
+    # -------- Extras --------
+    extras_html = ""
     if extras:
-        extras_html = "<table class='tbl'><tr><th>Extra</th><th>€/ud</th><th>Cant/ud prod</th></tr>"
+        extras_html += "<ul class='offer2-spec'>"
         for e in extras:
-            extras_html += (
-                f"<tr><td class='rowh'>{e.get('nombre','')}</td>"
-                f"<td>{float(e.get('coste',0)):.4f}€</td>"
-                f"<td>{float(e.get('cantidad',0)):.4f}</td></tr>"
-            )
-        extras_html += "</table>"
+            extras_html += f"<li><b>{e.get('nombre','')}</b><small>Coste compra: {float(e.get('coste',0)):.4f}€/ud · Cant/ud prod: {float(e.get('cantidad',0)):.4f}</small></li>"
+        extras_html += "</ul>"
     else:
-        extras_html = "<div class='card'><div class='muted'>Sin extras.</div></div>"
+        extras_html = "<div style='color:#6b7280; font-size:13px;'>Sin extras.</div>"
 
-    # ---- Embalaje ----
-    emb_dims_txt = f"{int(L)}×{int(W)}×{int(H)} mm" if emb_tipo in ["Embalaje Guaina (Automático)", "Embalaje en Plano"] else "N/A"
-    embalaje_html = f"""
-<div class="card">
-  <div class="row">
-    <div>
-      <div class="k">Tipo</div>
-      <div class="v">{emb_tipo}</div>
-    </div>
-    <div style="text-align:right;">
-      <div class="k">Medidas</div>
-      <div class="v">{emb_dims_txt}</div>
-    </div>
-  </div>
-</div>
-"""
+    # -------- Embalaje --------
+    emb_dims_txt = f"{int(L)}x{int(W)}x{int(H)} mm" if emb_tipo in ["Embalaje Guaina (Automático)", "Embalaje en Plano"] else "N/A"
+    emb_html = f"<div style='color:#111827; font-size:13px;'><b>Tipo:</b> {emb_tipo} &nbsp;&nbsp; <b>Medidas:</b> {emb_dims_txt}</div>"
 
-    # ---- Precios ----
+    # -------- Tabla precios (columnas como tu ejemplo) --------
     if not oferta_precios or not lista_cants:
-        precios_html = "<div class='card'><div class='muted'>Define cantidades para calcular precios.</div></div>"
+        tabla = "<div style='color:#6b7280; font-size:13px;'>Define cantidades para ver precios.</div>"
     else:
-        cols = "".join([f"<th>{q} uds</th>" for q in lista_cants])
-
-        row1 = "".join([f"<td>{eur(oferta_precios[q]['pvp_material_unit'], 3)}</td>" for q in lista_cants])
-        row2 = "".join([f"<td>{eur(oferta_precios[q]['pvp_emb_unit'], 3)}</td>" for q in lista_cants])
-        row3 = "".join([f"<td>{eur(oferta_precios[q]['pvp_troquel_total'], 2)}</td>" for q in lista_cants])
-        row4 = "".join([f"<td><b>{eur(oferta_precios[q]['pvp_total_unit'], 3)}</b></td>" for q in lista_cants])
-
-        precios_html = f"""
-<table class="tbl">
+        rows = ""
+        for q in lista_cants:
+            d = oferta_precios[q]
+            p_unit_mat = eur(d["pvp_material_unit"], 3)
+            p_unit_emb = eur(d["pvp_emb_unit"], 3)
+            trq_tot = eur(d["pvp_troquel_total"], 2)
+            total = eur(d["pvp_total"], 2)
+            unit_todo = eur(d["pvp_total_unit"], 3)
+            rows += f"""
+<tr>
+  <td class="num">{q}</td>
+  <td class="num">{p_unit_mat}</td>
+  <td class="num">{p_unit_emb}</td>
+  <td class="num">{trq_tot}</td>
+  <td class="num total">{total}</td>
+  <td class="num hl">{unit_todo}</td>
+</tr>
+"""
+        tabla = f"""
+<table class="offer2-table">
   <tr>
-    <th></th>
-    {cols}
+    <th style="width:10%;">Cantidad</th>
+    <th style="width:16%;">P. Venta Unitario</th>
+    <th style="width:16%;">P. Emb. Unitario</th>
+    <th style="width:16%;">Troqueles (Total)</th>
+    <th style="width:20%;">PRECIO VENTA TOTAL</th>
+    <th style="width:22%;">UNITARIO (TODO)</th>
   </tr>
-  <tr>
-    <td class="rowh">Precio venta material (unitario)</td>
-    {row1}
-  </tr>
-  <tr>
-    <td class="rowh">Precio venta embalaje (unitario)</td>
-    {row2}
-  </tr>
-  <tr>
-    <td class="rowh">Precio venta troquel (TOTAL)</td>
-    {row3}
-  </tr>
-  <tr>
-    <td class="rowh">Precio venta unitario (todo incluido)</td>
-    {row4}
-  </tr>
+  {rows}
 </table>
 """
 
     html = f"""
-<div class="offer">
-  <div class="offer-head">
-    <div>
-      <div class="badge">OFERTA · {st.session_state.cli or "Cliente"}</div>
-      <h1 class="offer-title">{st.session_state.desc or "Escandallo / Oferta"}</h1>
-      <div class="offer-sub">Briefing: <b>{st.session_state.brf or "-"}</b></div>
-    </div>
-    <div class="offer-meta">
-      <div><b>MAINSA</b> · Escandallo</div>
-      <div>{("Modo Admin" if st.session_state.is_admin else "Modo Operario")}</div>
-    </div>
+<div class="offer2-wrap">
+  <div class="offer2-head">
+    <h1 class="offer2-title">{titulo}</h1>
+    <div class="offer2-ref">Ref. Briefing: {ref}</div>
   </div>
 
-  <div class="hr"></div>
+  <div class="offer2-sec-title"><span class="offer2-icon">📋</span> Especificaciones del Proyecto</div>
+  <ul class="offer2-spec">{li}</ul>
 
-  <div class="section">
-    <h3><span class="icon">1</span> Formas</h3>
-    <div class="grid">
-      {formas_html}
-    </div>
-  </div>
+  <div class="offer2-sec-title"><span class="offer2-icon">➕</span> Materiales extra</div>
+  {extras_html}
 
-  <div class="section">
-    <h3><span class="icon">2</span> Materiales extra</h3>
-    {extras_html}
-  </div>
+  <div class="offer2-sec-title"><span class="offer2-icon">📦</span> Embalaje</div>
+  {emb_html}
 
-  <div class="section">
-    <h3><span class="icon">3</span> Embalaje</h3>
-    {embalaje_html}
-  </div>
+  <div class="offer2-sec-title"><span class="offer2-icon">€</span> Precios</div>
+  {tabla}
 
-  <div class="section">
-    <h3><span class="icon">4</span> Precios de venta</h3>
-    {precios_html}
-    <div class="note">* “Precio venta material” incluye todos los costes del producido excepto extras, embalajes y troqueles.</div>
-  </div>
+  <div class="offer2-foot">• Oferta válida salvo error tipográfico. IVA no incluido.</div>
 </div>
 """
     return textwrap.dedent(html).strip()
@@ -1439,7 +1353,7 @@ def render_oferta_html_elegante() -> str:
 # SALIDA PRINCIPAL
 # =========================================================
 if modo_comercial:
-    components.html(render_oferta_html_elegante(), height=1250, scrolling=True)
+    components.html(render_oferta_html_tipo_captura(), height=1000, scrolling=True)
 else:
     if st.session_state.is_admin:
         if res_admin:
