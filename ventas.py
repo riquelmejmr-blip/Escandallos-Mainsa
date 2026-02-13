@@ -276,6 +276,9 @@ if "cli" not in st.session_state:
     st.session_state.cli = ""
 if "desc" not in st.session_state:
     st.session_state.desc = ""
+# NUEVO: guardar también las cantidades usadas (tal cual)
+if "cants_str_saved" not in st.session_state:
+    st.session_state.cants_str_saved = "0"
 
 db = st.session_state.db_precios
 
@@ -295,8 +298,45 @@ st.markdown(
 st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 
 # =========================================================
-# SIDEBAR
+# SIDEBAR (IMPORT/EXPORT COMPLETO)
 # =========================================================
+def normalizar_import(di: dict):
+    """Carga robusta: conserva datos completos, incl. mermas personalizadas y db_precios (personalizados)."""
+    if "brf" in di: st.session_state.brf = di["brf"]
+    if "cli" in di: st.session_state.cli = di["cli"]
+    if "desc" in di: st.session_state.desc = di["desc"]
+
+    # Cantidades (texto original)
+    if "cants_str" in di and isinstance(di["cants_str"], str):
+        st.session_state.cants_str_saved = di["cants_str"]
+
+    # DB precios (completo)
+    if "db_precios" in di and isinstance(di["db_precios"], dict):
+        st.session_state.db_precios = di["db_precios"]
+
+    # Piezas
+    if "piezas" in di and isinstance(di["piezas"], dict):
+        st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
+
+    # Extras
+    if "extras" in di and isinstance(di["extras"], list):
+        st.session_state.lista_extras_grabados = di["extras"]
+
+    # Embalaje
+    if "costes_emb" in di and isinstance(di["costes_emb"], dict):
+        # claves de cantidad pueden venir como string -> int
+        st.session_state.costes_embalaje_manual = {int(k): float(v) for k, v in di["costes_emb"].items()}
+    if "emb_tipo" in di:
+        st.session_state.emb_tipo = di["emb_tipo"]
+    if "emb_dims" in di and isinstance(di["emb_dims"], dict):
+        st.session_state.emb_dims = di["emb_dims"]
+
+    # Mermas (conservar aunque estén personalizadas)
+    if "mermas_imp" in di and isinstance(di["mermas_imp"], dict):
+        st.session_state.mermas_imp_manual = {int(k): int(v) for k, v in di["mermas_imp"].items()}
+    if "mermas_proc" in di and isinstance(di["mermas_proc"], dict):
+        st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in di["mermas_proc"].items()}
+
 with st.sidebar:
     st.header("⚙️ Configuración")
     pwd = st.text_input("🔑 Contraseña Admin", type="password")
@@ -310,20 +350,13 @@ with st.sidebar:
 
     st.divider()
 
-    with st.expander("🤖 Importar Datos", expanded=False):
+    with st.expander("🤖 Importar Datos (JSON completo)", expanded=False):
         uploaded = st.file_uploader("Subir JSON", type=["json"])
         if uploaded:
             try:
                 di = json.load(uploaded)
-                if "brf" in di: st.session_state.brf = di["brf"]
-                if "cli" in di: st.session_state.cli = di["cli"]
-                if "desc" in di: st.session_state.desc = di["desc"]
-                if "piezas" in di: st.session_state.piezas_dict = {int(k): v for k, v in di["piezas"].items()}
-                if "extras" in di: st.session_state.lista_extras_grabados = di["extras"]
-                if "costes_emb" in di: st.session_state.costes_embalaje_manual = di["costes_emb"]
-                if "emb_tipo" in di: st.session_state.emb_tipo = di["emb_tipo"]
-                if "mermas_imp" in di: st.session_state.mermas_imp_manual = di["mermas_imp"]
-                if "mermas_proc" in di: st.session_state.mermas_proc_manual = di["mermas_proc"]
+                normalizar_import(di)
+                st.success("Importación completa OK")
                 st.rerun()
             except Exception as e:
                 st.error(f"Error importando JSON: {e}")
@@ -333,7 +366,9 @@ with st.sidebar:
     st.session_state.desc = st.text_input("Descripción", value=st.session_state.desc)
 
     st.divider()
-    cants_str = st.text_input("Cantidades (ej: 500, 1000)", value="0")
+    # Cantidades: se guardan como texto y se reconstruyen al cargar
+    cants_str = st.text_input("Cantidades (ej: 500, 1000)", value=st.session_state.cants_str_saved)
+    st.session_state.cants_str_saved = cants_str
     lista_cants = parse_cantidades(cants_str)
 
     unidad_t = st.radio("Manipulación:", ["Segundos", "Minutos"], horizontal=True)
@@ -352,21 +387,30 @@ with st.sidebar:
     modo_comercial = st.checkbox("🌟 VISTA OFERTA", value=False)
 
     st.divider()
-    st.header("💾 Guardar")
+    st.header("💾 Guardar (JSON completo)")
+
     safe_brf = re.sub(r'[\\/*?:"<>|]', "", (st.session_state.brf or "Ref")).replace(" ", "_")
     safe_cli = re.sub(r'[\\/*?:"<>|]', "", (st.session_state.cli or "Cli")).replace(" ", "_")
     nombre_archivo = f"{safe_brf}_{safe_cli}.json"
 
+    # EXPORT COMPLETO (incluye db_precios y cants_str y emb_dims)
     datos_exp = {
         "brf": st.session_state.brf,
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
+
+        "cants_str": st.session_state.cants_str_saved,  # conserva el texto original de cantidades
         "piezas": st.session_state.piezas_dict,
         "extras": st.session_state.lista_extras_grabados,
+
+        "db_precios": st.session_state.db_precios,  # CONSERVA precios/materiales personalizados
+
         "costes_emb": st.session_state.costes_embalaje_manual,
         "emb_tipo": st.session_state.emb_tipo,
-        "mermas_imp": st.session_state.mermas_imp_manual,
-        "mermas_proc": st.session_state.mermas_proc_manual,
+        "emb_dims": st.session_state.emb_dims,
+
+        "mermas_imp": st.session_state.mermas_imp_manual,    # CONSERVA personalizadas
+        "mermas_proc": st.session_state.mermas_proc_manual,  # CONSERVA personalizadas
     }
 
     st.download_button(
@@ -376,7 +420,7 @@ with st.sidebar:
     )
 
 # =========================================================
-# AUTO-RELLENO DE MERMAS
+# AUTO-RELLENO DE MERMAS (NO pisa personalizadas)
 # =========================================================
 def hay_digital_en_proyecto() -> bool:
     for p in st.session_state.piezas_dict.values():
@@ -436,7 +480,9 @@ if tab_costes:
                 for k, v in db["rigidos"].items():
                     if k != "Ninguno":
                         db["rigidos"][k]["precio_ud"] = st.number_input(
-                            f"{k} ({v['w']}x{v['h']})", value=float(v["precio_ud"]), key=f"cost_rig_{k}"
+                            f"{k} ({v['w']}x{v['h']})",
+                            value=float(v["precio_ud"]),
+                            key=f"cost_rig_{k}"
                         )
 
         with col_c2:
@@ -474,6 +520,10 @@ with tab_calculadora:
             st.session_state.lista_extras_grabados = []
             st.session_state.mermas_imp_manual = {}
             st.session_state.mermas_proc_manual = {}
+            st.session_state.costes_embalaje_manual = {}
+            st.session_state.emb_dims = {"L": 0, "W": 0, "H": 0}
+            st.session_state.emb_tipo = "Manual"
+            st.session_state.db_precios = deepcopy(PRECIOS_BASE)
             st.rerun()
 
         def callback_medida_estandar(pid: int):
@@ -495,11 +545,6 @@ with tab_calculadora:
             else:
                 st.session_state[f"im_{pid}"] = "No"
                 st.session_state[f"nt_{pid}"] = 0
-
-        def callback_cambio_dorso(pid: int):
-            new_mat = st.session_state.get(f"pd_{pid}", "Ninguno")
-            if new_mat != "Ninguno":
-                st.session_state[f"gd_{pid}"] = db["cartoncillo"][new_mat]["gramaje"]
 
         def callback_rigido_set_medidas(pid: int):
             mat = st.session_state.get(f"mrig_{pid}", "Ninguno")
@@ -587,22 +632,9 @@ with tab_calculadora:
                             on_change=callback_rigido_set_medidas,
                             args=(p_id,)
                         )
-
                         if p["mat_rigido"] != "Ninguno":
                             im_r = db["rigidos"][p["mat_rigido"]]
-                            mw, mh = int(im_r["w"]), int(im_r["h"])
-                            st.info(f"Hoja fija: {mw}x{mh} mm | Precio: {float(im_r['precio_ud']):.2f}€ / hoja")
-
-                    st.divider()
-
-                    opts_pd = list(db["cartoncillo"].keys())
-                    val_pd = p.get("pd", "Ninguno")
-                    p["pd"] = st.selectbox("C. Dorso", opts_pd, index=(opts_pd.index(val_pd) if val_pd in opts_pd else 0),
-                                           key=f"pd_{p_id}")
-                    if p["pd"] != "Ninguno":
-                        p["gd"] = st.number_input("Gramaje D.", value=int(p.get("gd", 0)), key=f"gd_{p_id}")
-                    else:
-                        p["gd"] = 0
+                            st.info(f"Hoja fija: {int(im_r['w'])}x{int(im_r['h'])} mm | Precio: {float(im_r['precio_ud']):.2f}€ / hoja")
 
                 with col3:
                     opts_cor = ["Troquelado", "Plotter"]
@@ -615,26 +647,6 @@ with tab_calculadora:
                     else:
                         p["cobrar_arreglo"] = False
 
-                    if p.get("pd", "Ninguno") != "Ninguno":
-                        opts_imd = ["Offset", "Digital", "No"]
-                        val_imd = p.get("im_d", "No")
-                        p["im_d"] = st.selectbox("Sistema Dorso", opts_imd, index=(opts_imd.index(val_imd) if val_imd in opts_imd else 2), key=f"imd_{p_id}")
-                        if p["im_d"] == "Offset":
-                            p["nt_d"] = st.number_input("Tintas D.", 0, 6, int(p.get("nt_d", 0)), key=f"ntd_{p_id}")
-                            p["ba_d"] = st.checkbox("Barniz D.", value=bool(p.get("ba_d", False)), key=f"bad_{p_id}")
-                            p["ld_d"] = False
-                        elif p["im_d"] == "Digital":
-                            p["ld_d"] = st.checkbox("Laminado Digital D.", value=bool(p.get("ld_d", False)), key=f"ldd_{p_id}")
-                            p["nt_d"], p["ba_d"] = 0, False
-                        else:
-                            p["nt_d"], p["ba_d"], p["ld_d"] = 0, False, False
-
-                        opts_pel_d = list(db["peliculado"].keys())
-                        val_peld = p.get("pel_d", "Sin Peliculado")
-                        p["pel_d"] = st.selectbox("Peliculado Dorso", opts_pel_d, index=(opts_pel_d.index(val_peld) if val_peld in opts_pel_d else 0), key=f"peld_{p_id}")
-                    else:
-                        p["im_d"], p["nt_d"], p["ba_d"], p["ld_d"], p["pel_d"] = "No", 0, False, False, "Sin Peliculado"
-
                     if st.button("🗑 Borrar Forma", key=f"del_{p_id}"):
                         if len(st.session_state.piezas_dict) > 1:
                             del st.session_state.piezas_dict[p_id]
@@ -643,40 +655,6 @@ with tab_calculadora:
                             st.warning("Debe existir al menos una forma.")
 
                 st.session_state.piezas_dict[p_id] = p
-
-        # --- EXTRAS (igual que antes) ---
-        st.divider()
-        st.subheader("📦 2. Almacén de Accesorios")
-
-        c_add_main, c_add_flex = st.columns(2)
-        with c_add_main:
-            st.markdown("**Extras Mainsa**")
-            opts_extra = ["---"] + list(db["extras_base"].keys())
-            ex_sel = st.selectbox("Añadir extra estándar:", opts_extra, key="sel_extra_mainsa")
-            if st.button("➕ Añadir Mainsa", key="btn_add_mainsa") and ex_sel != "---":
-                st.session_state.lista_extras_grabados.append({"nombre": ex_sel, "coste": float(db["extras_base"][ex_sel]), "cantidad": 1.0})
-                st.rerun()
-
-        with c_add_flex:
-            st.markdown("**Catálogo FLEXICO**")
-            flx_sel = st.selectbox("Buscar Ref/Desc:", ["---"] + OPCIONES_FLEXICO, key="sel_extra_flexico")
-            if st.button("➕ Añadir Flexico", key="btn_add_flexico") and flx_sel != "---":
-                cod = flx_sel.split(" - ")[0]
-                prod = PRODUCTOS_FLEXICO[cod]
-                st.session_state.lista_extras_grabados.append({"nombre": f"FLEXICO: {prod['desc']}", "coste": float(prod["precio"]), "cantidad": 1.0})
-                st.rerun()
-
-        for i, ex in enumerate(st.session_state.lista_extras_grabados):
-            c1, c2, c3, c4 = st.columns([3, 2, 2, 1])
-            c1.write(f"**{ex['nombre']}**")
-            if st.session_state.is_admin:
-                ex["coste"] = c2.number_input("€/ud compra", value=float(ex["coste"]), key=f"exc_{i}", format="%.4f")
-            else:
-                c2.write(f"{float(ex['coste']):.4f}€")
-            ex["cantidad"] = c3.number_input("Cant/Ud prod", value=float(ex["cantidad"]), key=f"exq_{i}")
-            if c4.button("🗑", key=f"exd_{i}"):
-                st.session_state.lista_extras_grabados.pop(i)
-                st.rerun()
 
         # --- EMBALAJE (igual) ---
         st.divider()
@@ -867,7 +845,6 @@ res_operario = []
 
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
-        # Costes taller de piezas
         cp = calcular_coste_piezas_taller(q_n)["coste_piezas_taller"]
 
         # Extras (taller)
@@ -883,23 +860,17 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         # Troquel (venta, fuera de margen)
         tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
 
-        # TOTAL VENTA (igual que tu fórmula)
+        # TOTAL VENTA
         taller_total = cp + c_ext + c_mo
         pvp_total = (taller_total * float(margen)) + float(imp_fijo_pvp) + pv_emb_total + tot_pv_trq
 
-        # === LO QUE PIDE OPERARIO (solo 3 cosas) ===
-        # 1) Precio venta unitario del material producido:
-        #    Incluye todos los costes EXCEPTO accesorios, embalajes y troqueles (venta).
-        #    En tu fórmula esto equivale a: ( (cp + c_mo) * margen + fijo_pvp ) / q
-        #    *No incluye extras (accesorios), *no incluye pv_emb_total, *no incluye tot_pv_trq.
+        # OPERARIO (solo 3 campos)
         pvp_material_producido_total = ((cp + c_mo) * float(margen)) + float(imp_fijo_pvp)
         pvp_material_producido_unit = (pvp_material_producido_total / q_n) if q_n > 0 else 0.0
 
-        precio_embalaje_unit = (pv_emb_total / q_n) if q_n > 0 else 0.0  # venta embalaje unitario
-        precio_troquel_total = tot_pv_trq  # venta troquel total (tal cual lo metéis)
-        precio_troquel_unit = (precio_troquel_total / q_n) if q_n > 0 else 0.0
+        precio_embalaje_unit = (pv_emb_total / q_n) if q_n > 0 else 0.0
+        precio_troquel_total = tot_pv_trq
 
-        # Admin resumen
         if st.session_state.is_admin:
             res_admin.append({
                 "Cantidad": q_n,
@@ -907,10 +878,6 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "Unitario (Todo Incluido)": f"{(pvp_total/q_n):.3f}€",
             })
         else:
-            res_tecnico.append({
-                "Cantidad": q_n,
-                "OK": "✅",
-            })
             res_operario.append({
                 "Cantidad": q_n,
                 "PVP unitario material producido": f"{pvp_material_producido_unit:.3f}€",
