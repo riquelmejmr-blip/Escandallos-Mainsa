@@ -1,8 +1,10 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import json
 import re
 import math
+import textwrap
 from copy import deepcopy
 
 # =========================================================
@@ -251,8 +253,6 @@ def crear_forma_vacia(index: int) -> dict:
 
 # =========================================================
 # EMBALAJE EN PLANO (COMPRA) - FORMULA
-# P ≈ ((152 + 20*S)/Q) + 0.15 + (1.02*S)
-# S = (L*W) + 2*H*(L+W)
 # =========================================================
 def coste_embalaje_plano_unitario(L_mm: float, W_mm: float, H_mm: float, Q: int):
     if Q <= 0:
@@ -305,7 +305,7 @@ db = st.session_state.db_precios
 # =========================================================
 st.markdown(
     """<style>
-    .offer-wrap { background:#fff; border:2px solid #1E88E5; border-radius:14px; padding:22px; color:#222; }
+    .offer-wrap { background:#fff; border:2px solid #1E88E5; border-radius:14px; padding:22px; color:#222; font-family: Arial, sans-serif; }
     .offer-title { font-size:28px; font-weight:800; color:#1E88E5; margin:0; }
     .offer-sub { font-size:14px; color:#555; margin-top:2px; margin-bottom:16px; }
     .sec { margin-top:14px; }
@@ -800,7 +800,6 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
     merma_proc = float(st.session_state.mermas_proc_manual.get(q_n, 0))
 
     detalle = []
-    debug = []
 
     aud = {
         "MATERIAL_CARTONCILLO": 0.0,
@@ -829,7 +828,6 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
         h = float(p.get("h", 0))
         m2_papel = (w * h) / 1_000_000 if (w > 0 and h > 0) else 0.0
 
-        # Costes pieza
         c_carton = 0.0
         c_ond = 0.0
         c_rig = 0.0
@@ -877,15 +875,13 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
         gf = float(p.get("gf", 0))
         if pf != "Ninguno" and m2_papel > 0 and gf > 0:
             precio_kg_pf = float(db["cartoncillo"][pf]["precio_kg"])
-            c_cf = hp_papel_f * m2_papel * (gf / 1000.0) * precio_kg_pf
-            c_carton += c_cf
+            c_carton += hp_papel_f * m2_papel * (gf / 1000.0) * precio_kg_pf
 
         pd_ = p.get("pd", "Ninguno")
         gd = float(p.get("gd", 0))
         if pd_ != "Ninguno" and m2_papel > 0 and gd > 0:
             precio_kg_pd = float(db["cartoncillo"][pd_]["precio_kg"])
-            c_cd = hp_papel_d * m2_papel * (gd / 1000.0) * precio_kg_pd
-            c_carton += c_cd
+            c_carton += hp_papel_d * m2_papel * (gd / 1000.0) * precio_kg_pd
 
         # IMPRESIÓN
         c_imp_f = 0.0
@@ -992,26 +988,24 @@ def calcular_costes_con_auditoria(q_n: int) -> dict:
 res_admin = []
 res_operario = []
 desc_full = {}
-oferta_precios = {}  # q -> dict de precios unitarios/total
+oferta_precios = {}
 
 if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     for q_n in lista_cants:
         out = calcular_costes_con_auditoria(q_n)
         desc_full[q_n] = out
 
-        # 1) Precio venta del material producido (unitario)
-        #    Incluye TODO excepto accesorios, embalajes y troqueles
-        #    => (coste_piezas_taller + mano_de_obra) * margen + fijo
+        # 1) PVP material (unitario): TODO excepto extras, embalajes y troqueles
         pvp_material_total = ((out["coste_piezas_taller"] + out["c_mo"]) * float(margen)) + float(imp_fijo_pvp)
         pvp_material_unit = (pvp_material_total / q_n) if q_n > 0 else 0.0
 
-        # 2) Precio venta embalaje (unitario) (venta ya incorpora 1.4)
+        # 2) PVP embalaje (unitario)
         pvp_emb_unit = (out["pv_emb_total"] / q_n) if q_n > 0 else 0.0
 
-        # 3) Precio venta troquel (TOTAL)
+        # 3) PVP troquel (TOTAL)
         pvp_troquel_total = float(out["tot_pv_trq"])
 
-        # 4) Precio venta unitario incluyendo todo
+        # 4) PVP unitario incluyendo todo
         pvp_total_unit = (out["pvp_total"] / q_n) if q_n > 0 else 0.0
 
         oferta_precios[q_n] = {
@@ -1038,16 +1032,10 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             })
 
 # =========================================================
-# VISTA OFERTA (para pantallazo)
-# Requisitos:
-# - Desglose de formas con características
-# - Materiales extra
-# - Características del embalaje
-# - Precios detallados (por este orden):
-#   1) PVP material (unitario)
-#   2) PVP embalaje (unitario)
-#   3) PVP troquel (TOTAL)
-#   4) PVP unitario todo incluido
+# VISTA OFERTA (LEGIBLE)
+#    - El problema que ves (HTML impreso como texto) pasa porque
+#      st.markdown interpreta la indentación como "bloque de código".
+#    - Solución: renderizar con components.html + dedent.
 # =========================================================
 def render_oferta_html() -> str:
     piezas = list(st.session_state.piezas_dict.values())
@@ -1057,14 +1045,12 @@ def render_oferta_html() -> str:
     W = float(st.session_state.emb_dims.get("W", 0))
     H = float(st.session_state.emb_dims.get("H", 0))
 
-    # ---- Bloque de formas ----
     formas_html = ""
     for p in piezas:
         nombre = p.get("nombre", "Pieza")
         size = f"{int(p.get('h',0))}x{int(p.get('w',0))} mm"
         pliegos = float(p.get("pliegos", 1.0))
 
-        # Soporte
         if p.get("tipo_base") == "Material Rígido":
             soporte = f"Rígido: {p.get('mat_rigido','')}"
         else:
@@ -1072,13 +1058,11 @@ def render_oferta_html() -> str:
             if p.get("pl_dif", False):
                 soporte += f" | Plancha: {int(p.get('pl_h',0))}x{int(p.get('pl_w',0))} mm"
 
-        # Materiales cara/dorso
         frontal = p.get("pf", "Ninguno")
         gf = int(p.get("gf", 0))
         dorso = p.get("pd", "Ninguno")
         gd = int(p.get("gd", 0))
 
-        # Impresión
         imf = p.get("im", "No")
         imd = p.get("im_d", "No")
         ntf = int(p.get("nt", 0))
@@ -1088,162 +1072,160 @@ def render_oferta_html() -> str:
         pel_f = p.get("pel", "Sin Peliculado")
         pel_d = p.get("pel_d", "Sin Peliculado")
 
-        # Corte
         corte = p.get("cor", "Troquelado")
         cobrar_arr = "Sí" if p.get("cobrar_arreglo", True) else "No"
         pv_trq = float(p.get("pv_troquel", 0.0))
 
-        formas_html += f"""
-        <div class="card">
-          <div class="v">{nombre}</div>
-          <div class="muted">{size} | Pliegos/ud: {pliegos:.4f}</div>
-          <div class="sec">
-            <div class="k">Soporte</div>
-            <div class="v">{soporte}</div>
-          </div>
-          <div class="grid sec">
-            <div>
-              <div class="k">Cartoncillo cara</div>
-              <div class="v">{frontal} ({gf} g)</div>
-            </div>
-            <div>
-              <div class="k">Cartoncillo dorso</div>
-              <div class="v">{dorso} ({gd} g)</div>
-            </div>
-          </div>
-          <div class="grid sec">
-            <div>
-              <div class="k">Impresión cara</div>
-              <div class="v">{imf}{" | " + str(ntf) + " tintas" if imf=="Offset" else ""}{" | Barniz: " + baf if imf=="Offset" else ""}</div>
-              <div class="muted">Peliculado: {pel_f}</div>
-            </div>
-            <div>
-              <div class="k">Impresión dorso</div>
-              <div class="v">{imd}{" | " + str(ntd) + " tintas" if imd=="Offset" else ""}{" | Barniz: " + bad if imd=="Offset" else ""}</div>
-              <div class="muted">Peliculado: {pel_d}</div>
-            </div>
-          </div>
-          <div class="grid sec">
-            <div>
-              <div class="k">Corte</div>
-              <div class="v">{corte}</div>
-            </div>
-            <div>
-              <div class="k">Troquel (venta)</div>
-              <div class="v">{pv_trq:.2f}€ | Cobrar arreglo: {cobrar_arr}</div>
-            </div>
-          </div>
-        </div>
-        """
+        imp_cara_txt = imf
+        if imf == "Offset":
+            imp_cara_txt = f"Offset | {ntf} tintas | Barniz: {baf}"
+        imp_dorso_txt = imd
+        if imd == "Offset":
+            imp_dorso_txt = f"Offset | {ntd} tintas | Barniz: {bad}"
 
-    # ---- Extras ----
-    extras_html = ""
+        formas_html += f"""
+<div class="card">
+  <div class="v">{nombre}</div>
+  <div class="muted">{size} | Pliegos/ud: {pliegos:.4f}</div>
+
+  <div class="sec">
+    <div class="k">Soporte</div>
+    <div class="v">{soporte}</div>
+  </div>
+
+  <div class="grid sec">
+    <div>
+      <div class="k">Cartoncillo cara</div>
+      <div class="v">{frontal} ({gf} g)</div>
+    </div>
+    <div>
+      <div class="k">Cartoncillo dorso</div>
+      <div class="v">{dorso} ({gd} g)</div>
+    </div>
+  </div>
+
+  <div class="grid sec">
+    <div>
+      <div class="k">Impresión cara</div>
+      <div class="v">{imp_cara_txt}</div>
+      <div class="muted">Peliculado: {pel_f}</div>
+    </div>
+    <div>
+      <div class="k">Impresión dorso</div>
+      <div class="v">{imp_dorso_txt}</div>
+      <div class="muted">Peliculado: {pel_d}</div>
+    </div>
+  </div>
+
+  <div class="grid sec">
+    <div>
+      <div class="k">Corte</div>
+      <div class="v">{corte}</div>
+    </div>
+    <div>
+      <div class="k">Troquel (venta)</div>
+      <div class="v">{pv_trq:.2f}€ | Cobrar arreglo: {cobrar_arr}</div>
+    </div>
+  </div>
+</div>
+"""
+
     if extras:
-        extras_html += "<table class='tbl'><tr><th>Extra</th><th>€/ud</th><th>Cant/ud prod</th></tr>"
+        extras_html = "<table class='tbl'><tr><th>Extra</th><th>€/ud</th><th>Cant/ud prod</th></tr>"
         for e in extras:
             extras_html += f"<tr><td class='rowh'>{e.get('nombre','')}</td><td>{float(e.get('coste',0)):.4f}€</td><td>{float(e.get('cantidad',0)):.4f}</td></tr>"
         extras_html += "</table>"
     else:
         extras_html = "<div class='muted'>Sin extras.</div>"
 
-    # ---- Embalaje ----
-    emb_dims_txt = ""
     if emb_tipo in ["Embalaje Guaina (Automático)", "Embalaje en Plano"]:
         emb_dims_txt = f"{int(L)}x{int(W)}x{int(H)} mm"
     else:
         emb_dims_txt = "N/A"
 
     embalaje_html = f"""
-    <div class="card">
-      <div class="k">Tipo de embalaje</div>
-      <div class="v">{emb_tipo}</div>
-      <div class="k" style="margin-top:8px;">Medidas</div>
-      <div class="v">{emb_dims_txt}</div>
-    </div>
-    """
+<div class="card">
+  <div class="k">Tipo de embalaje</div>
+  <div class="v">{emb_tipo}</div>
+  <div class="k" style="margin-top:8px;">Medidas</div>
+  <div class="v">{emb_dims_txt}</div>
+</div>
+"""
 
-    # ---- Precios (tabla: filas fijas, columnas cantidades) ----
     if not oferta_precios:
         precios_html = "<div class='muted'>Define cantidades para calcular precios.</div>"
     else:
-        # Header
         precios_html = "<table class='tbl'>"
         precios_html += "<tr><th></th>"
         for q in lista_cants:
             precios_html += f"<th>{q} uds</th>"
         precios_html += "</tr>"
 
-        # 1) PVP material (unitario)
         precios_html += "<tr><td class='rowh'>Precio venta material (unitario)</td>"
         for q in lista_cants:
-            v = oferta_precios[q]["pvp_material_unit"]
-            precios_html += f"<td>{v:.3f}€</td>"
+            precios_html += f"<td>{oferta_precios[q]['pvp_material_unit']:.3f}€</td>"
         precios_html += "</tr>"
 
-        # 2) PVP embalaje (unitario)
         precios_html += "<tr><td class='rowh'>Precio venta embalaje (unitario)</td>"
         for q in lista_cants:
-            v = oferta_precios[q]["pvp_emb_unit"]
-            precios_html += f"<td>{v:.3f}€</td>"
+            precios_html += f"<td>{oferta_precios[q]['pvp_emb_unit']:.3f}€</td>"
         precios_html += "</tr>"
 
-        # 3) PVP troquel (TOTAL)
         precios_html += "<tr><td class='rowh'>Precio venta troquel (TOTAL)</td>"
         for q in lista_cants:
-            v = oferta_precios[q]["pvp_troquel_total"]
-            precios_html += f"<td>{v:.2f}€</td>"
+            precios_html += f"<td>{oferta_precios[q]['pvp_troquel_total']:.2f}€</td>"
         precios_html += "</tr>"
 
-        # 4) PVP unitario incluyendo todo
         precios_html += "<tr><td class='rowh'>Precio venta unitario (todo incluido)</td>"
         for q in lista_cants:
-            v = oferta_precios[q]["pvp_total_unit"]
-            precios_html += f"<td><b>{v:.3f}€</b></td>"
+            precios_html += f"<td><b>{oferta_precios[q]['pvp_total_unit']:.3f}€</b></td>"
         precios_html += "</tr>"
 
         precios_html += "</table>"
 
     html = f"""
-    <div class="offer-wrap">
-      <div class="offer-title">OFERTA · {st.session_state.cli or "Cliente"}</div>
-      <div class="offer-sub">
-        Ref: <b>{st.session_state.brf or "-"}</b> · {st.session_state.desc or ""}
-      </div>
+<div class="offer-wrap">
+  <div class="offer-title">OFERTA · {st.session_state.cli or "Cliente"}</div>
+  <div class="offer-sub">
+    Ref: <b>{st.session_state.brf or "-"}</b> · {st.session_state.desc or ""}
+  </div>
 
-      <div class="sec">
-        <h3>1) Formas</h3>
-        <div class="grid">
-          {formas_html}
-        </div>
-      </div>
-
-      <div class="sec">
-        <h3>2) Materiales extra</h3>
-        {extras_html}
-      </div>
-
-      <div class="sec">
-        <h3>3) Embalaje</h3>
-        {embalaje_html}
-      </div>
-
-      <div class="sec">
-        <h3>4) Precios de venta</h3>
-        {precios_html}
-      </div>
-
-      <div class="sec muted">
-        * “Precio venta material” incluye todos los costes del producido excepto extras, embalajes y troqueles.
-      </div>
+  <div class="sec">
+    <h3>1) Formas</h3>
+    <div class="grid">
+      {formas_html}
     </div>
-    """
-    return html
+  </div>
+
+  <div class="sec">
+    <h3>2) Materiales extra</h3>
+    {extras_html}
+  </div>
+
+  <div class="sec">
+    <h3>3) Embalaje</h3>
+    {embalaje_html}
+  </div>
+
+  <div class="sec">
+    <h3>4) Precios de venta</h3>
+    {precios_html}
+  </div>
+
+  <div class="sec muted">
+    * “Precio venta material” incluye todos los costes del producido excepto extras, embalajes y troqueles.
+  </div>
+</div>
+"""
+    return textwrap.dedent(html).strip()
 
 # =========================================================
 # SALIDA PRINCIPAL
 # =========================================================
 if modo_comercial:
-    st.markdown(render_oferta_html(), unsafe_allow_html=True)
+    # Render en HTML real (LEGIBLE) y NO como texto
+    html = render_oferta_html()
+    components.html(html, height=1200, scrolling=True)
 else:
     if st.session_state.is_admin:
         if res_admin:
