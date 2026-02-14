@@ -414,9 +414,6 @@ with st.sidebar:
 
     st.divider()
 
-    # >>> FIX BLOQUEO IMPORT:
-    # El file_uploader persiste tras st.rerun, y si importas + rerun, vuelve a importar en bucle.
-    # Solución: hashear el archivo y solo importar si el hash cambia.
     with st.expander("🤖 Importar Datos (JSON completo)", expanded=False):
         uploaded = st.file_uploader("Subir JSON", type=["json"], key="uploader_json_full")
         if uploaded is not None:
@@ -846,14 +843,21 @@ with tab_calculadora:
 
         tipos_emb = ["Manual", "Embalaje Guaina (Automático)", "Embalaje en Plano", "Embalaje en Volumen"]
         idx_emb = tipos_emb.index(st.session_state.emb_tipo) if st.session_state.emb_tipo in tipos_emb else 0
-        st.session_state.emb_tipo = st.selectbox("Selecciona el tipo de embalaje:", tipos_emb, index=idx_emb, key="emb_tipo")
 
-        st.session_state.emb_material = st.selectbox(
+        # ✅ FIX: NO asignar a st.session_state.emb_tipo si el widget usa key="emb_tipo"
+        st.selectbox("Selecciona el tipo de embalaje:", tipos_emb, index=idx_emb, key="emb_tipo")
+
+        # ✅ FIX: NO asignar a st.session_state.emb_material si el widget usa key="emb_mat"
+        st.selectbox(
             "Material embalaje",
             EMB_MATERIALES,
             index=(EMB_MATERIALES.index(st.session_state.emb_material) if st.session_state.emb_material in EMB_MATERIALES else 0),
             key="emb_mat"
         )
+
+        # sincronizamos valores (el widget ya ha escrito)
+        st.session_state.emb_material = st.session_state.emb_mat  # guardamos en tu campo estándar
+        # (emb_tipo ya está en st.session_state.emb_tipo por el widget)
 
         if lista_cants:
             if st.session_state.emb_tipo in ["Embalaje Guaina (Automático)", "Embalaje en Plano", "Embalaje en Volumen"]:
