@@ -284,7 +284,7 @@ def coste_offset_por_tinta(n_hojas: int) -> float:
 # FORMAS
 # =========================================================
 def crear_forma_vacia(index):
-    # ✅ CAMBIO: arrancamos en 1
+    # ✅ Formas 1..n (no 0)
     return {
         "nombre": f"Forma {index}",
         "pliegos": 1.0,
@@ -318,8 +318,6 @@ def es_digital_en_proyecto(piezas_dict):
 # SESSION STATE INIT
 # =========================================================
 if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
-
-# ✅ CAMBIO: primera forma id=1
 if "piezas_dict" not in st.session_state: st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
 if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extras_grabados = []
 if "embalajes" not in st.session_state: st.session_state.embalajes = [crear_embalaje_vacio(0)]
@@ -344,7 +342,7 @@ if "_export_blob" not in st.session_state: st.session_state._export_blob = None
 if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
 
 # =========================================================
-# FIX IMPORT: PURGE KEYS DE WIDGETS (evita que Forma 1 quede “pegada”)
+# FIX IMPORT: PURGE KEYS DE WIDGETS
 # =========================================================
 def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len=0, embalajes_len=0, extras_len=0):
     """
@@ -407,13 +405,12 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
                 del st.session_state[kq]
 
 # =========================================================
-# FIX IMPORT: SEED KEYS DE WIDGETS CON LO IMPORTADO (Forma 1)
+# FIX IMPORT: SEED KEYS DE WIDGETS CON LO IMPORTADO (TODAS LAS FORMAS)
 # =========================================================
 def seed_widget_keys_from_import(lista_cants, piezas_dict):
     """
-    Tras importar, Streamlit prioriza st.session_state[widget_key] sobre value=.
-    Sembramos las keys de widgets con los valores importados para que NO se pierdan,
-    especialmente en la Forma 1.
+    Streamlit prioriza st.session_state[widget_key] sobre value=.
+    Sembramos las keys de widgets con los valores importados para que NO se pierdan.
     """
     for pid, p in piezas_dict.items():
         st.session_state[f"n_{pid}"] = p.get("nombre", f"Forma {pid}")
@@ -430,13 +427,10 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
 
         st.session_state[f"pf_{pid}"] = p.get("pf", "Ninguno")
         st.session_state[f"gf_{pid}"] = int(p.get("gf", 0))
-        st.session_state[f"pd_{pid}"] = p.get("pd", "Ninguno")
-        st.session_state[f"gd_{pid}"] = int(p.get("gd", 0))
 
         st.session_state[f"tb_{pid}"] = p.get("tipo_base", "Ondulado/Cartón")
         st.session_state[f"pl_{pid}"] = p.get("pl", "Ninguna")
         st.session_state[f"ap_{pid}"] = p.get("ap", "B/C")
-
         st.session_state[f"pldif_{pid}"] = bool(p.get("pl_dif", False))
         st.session_state[f"plh_{pid}"] = int(p.get("pl_h", p.get("h", 0)))
         st.session_state[f"plw_{pid}"] = int(p.get("pl_w", p.get("w", 0)))
@@ -446,6 +440,9 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
         st.session_state[f"rigwman_{pid}"] = int(p.get("rig_w", 0))
         st.session_state[f"righman_{pid}"] = int(p.get("rig_h", 0))
         st.session_state[f"rigpman_{pid}"] = float(p.get("rig_precio_ud", 0.0))
+
+        st.session_state[f"pd_{pid}"] = p.get("pd", "Ninguno")
+        st.session_state[f"gd_{pid}"] = int(p.get("gd", 0))
 
         st.session_state[f"cor_def_{pid}"] = p.get("cor_default", "Troquelado")
         if isinstance(p.get("cor_by_qty", {}), dict):
@@ -462,8 +459,80 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
         st.session_state[f"pel_d_{pid}"] = p.get("pel_d", "Sin Peliculado")
 
 # =========================================================
-# IMPORT / EXPORT (robusto)
+# IMPORT NORMALIZADO (ROBUSTO): GARANTIZA QUE SE CARGAN TODOS LOS CAMPOS
 # =========================================================
+def _coerce_bool(x, default=False):
+    try:
+        return bool(x)
+    except:
+        return default
+
+def _coerce_int(x, default=0):
+    try:
+        return int(float(x))
+    except:
+        return default
+
+def _coerce_float(x, default=0.0):
+    try:
+        return float(x)
+    except:
+        return default
+
+def _normalizar_pieza_dict(pid: int, v: dict):
+    base = crear_forma_vacia(pid)
+    if isinstance(v, dict):
+        base.update(v)
+
+    base["nombre"] = str(base.get("nombre", f"Forma {pid}"))
+    base["pliegos"] = _coerce_float(base.get("pliegos", 1.0), 1.0)
+
+    base["w"] = _coerce_int(base.get("w", 0), 0)
+    base["h"] = _coerce_int(base.get("h", 0), 0)
+
+    base["pf"] = str(base.get("pf", "Ninguno"))
+    base["gf"] = _coerce_int(base.get("gf", 0), 0)
+    base["pd"] = str(base.get("pd", "Ninguno"))
+    base["gd"] = _coerce_int(base.get("gd", 0), 0)
+
+    base["tipo_base"] = str(base.get("tipo_base", "Ondulado/Cartón"))
+
+    # ✅ blindaje plancha / calidad
+    base["pl"] = str(base.get("pl", "Ninguna"))
+    base["ap"] = str(base.get("ap", "B/C"))
+    base["pl_dif"] = _coerce_bool(base.get("pl_dif", False), False)
+    base["pl_h"] = _coerce_int(base.get("pl_h", base.get("h", 0)), 0)
+    base["pl_w"] = _coerce_int(base.get("pl_w", base.get("w", 0)), 0)
+
+    base["mat_rigido"] = str(base.get("mat_rigido", "Ninguno"))
+    base["rig_manual"] = _coerce_bool(base.get("rig_manual", False), False)
+    base["rig_w"] = _coerce_int(base.get("rig_w", 0), 0)
+    base["rig_h"] = _coerce_int(base.get("rig_h", 0), 0)
+    base["rig_precio_ud"] = _coerce_float(base.get("rig_precio_ud", 0.0), 0.0)
+
+    base["im"] = str(base.get("im", "No"))
+    base["nt"] = _coerce_int(base.get("nt", 0), 0)
+    base["ba"] = _coerce_bool(base.get("ba", False), False)
+    base["ld"] = _coerce_bool(base.get("ld", False), False)
+    base["pel"] = str(base.get("pel", "Sin Peliculado"))
+
+    base["im_d"] = str(base.get("im_d", "No"))
+    base["nt_d"] = _coerce_int(base.get("nt_d", 0), 0)
+    base["ba_d"] = _coerce_bool(base.get("ba_d", False), False)
+    base["ld_d"] = _coerce_bool(base.get("ld_d", False), False)
+    base["pel_d"] = str(base.get("pel_d", "Sin Peliculado"))
+
+    base["cor_default"] = str(base.get("cor_default", "Troquelado"))
+    if not isinstance(base.get("cor_by_qty", {}), dict):
+        base["cor_by_qty"] = {}
+    else:
+        base["cor_by_qty"] = {str(k): str(vv) for k, vv in base["cor_by_qty"].items()}
+
+    base["cobrar_arreglo"] = _coerce_bool(base.get("cobrar_arreglo", True), True)
+    base["pv_troquel"] = _coerce_float(base.get("pv_troquel", 0.0), 0.0)
+
+    return base
+
 def normalizar_import(di: dict):
     prev_cants = parse_cantidades(st.session_state.get("cants_str_saved", ""))
     prev_piezas_ids = list(st.session_state.get("piezas_dict", {}).keys()) if isinstance(st.session_state.get("piezas_dict", None), dict) else []
@@ -496,35 +565,30 @@ def normalizar_import(di: dict):
     lista_cants_import = parse_cantidades(st.session_state.cants_str_saved)
     cants_all = sorted(set(prev_cants + lista_cants_import))
 
-    # ✅ CAMBIO: REINDEX 1..n
-    new_piezas = {1: crear_forma_vacia(1)}
-    new_ids = [1]
-
     raw = []
-    if isinstance(di.get("piezas", None), dict):
-        for k, v in di["piezas"].items():
+    piezas_in = di.get("piezas", None)
+
+    if isinstance(piezas_in, dict):
+        for k, v in piezas_in.items():
             try:
                 ik = int(k)
             except:
                 continue
             if isinstance(v, dict):
                 raw.append((ik, v))
-    raw.sort(key=lambda x: x[0])
+        raw.sort(key=lambda x: x[0])
+    elif isinstance(piezas_in, list):
+        for idx, v in enumerate(piezas_in, start=1):
+            if isinstance(v, dict):
+                raw.append((idx, v))
 
+    new_piezas = {1: crear_forma_vacia(1)}
+    new_ids = [1]
     if raw:
         new_piezas = {}
         new_ids = []
         for new_id, (_old_id, v) in enumerate(raw, start=1):
-            base = crear_forma_vacia(new_id)
-            base.update(v)
-            if not isinstance(base.get("cor_by_qty", {}), dict):
-                base["cor_by_qty"] = {}
-            try:
-                base["h"] = int(base.get("h", 0))
-                base["w"] = int(base.get("w", 0))
-            except:
-                pass
-            new_piezas[new_id] = base
+            new_piezas[new_id] = _normalizar_pieza_dict(new_id, v)
             new_ids.append(new_id)
 
     piezas_all = sorted(set(prev_piezas_ids + new_ids))
@@ -592,27 +656,34 @@ def normalizar_import(di: dict):
         extras_len=len(st.session_state.lista_extras_grabados),
     )
 
-    # ✅ Seed final (clave del fix)
     seed_widget_keys_from_import(
         lista_cants=lista_cants_import,
         piezas_dict=st.session_state.piezas_dict
     )
 
+# =========================================================
+# EXPORT ROBUSTO
+# =========================================================
 def construir_export(resumen_compra=None, resumen_costes=None):
+    piezas_out = {}
+    for pid, p in st.session_state.piezas_dict.items():
+        piezas_out[str(int(pid))] = deepcopy(p)
+
     data = {
+        "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
         "brf": st.session_state.brf,
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input)},
         "params": {"dif_ud": float(st.session_state.dif_ud), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen)},
-        "db_precios": st.session_state.db_precios,
-        "piezas": st.session_state.piezas_dict,
-        "extras": st.session_state.lista_extras_grabados,
-        "embalajes": st.session_state.embalajes,
-        "externos": st.session_state.externos,
-        "mermas_imp": st.session_state.mermas_imp_manual,
-        "mermas_proc": st.session_state.mermas_proc_manual,
+        "db_precios": deepcopy(st.session_state.db_precios),
+        "piezas": piezas_out,
+        "extras": deepcopy(st.session_state.lista_extras_grabados),
+        "embalajes": deepcopy(st.session_state.embalajes),
+        "externos": deepcopy(st.session_state.externos),
+        "mermas_imp": deepcopy(st.session_state.mermas_imp_manual),
+        "mermas_proc": deepcopy(st.session_state.mermas_proc_manual),
     }
     if resumen_compra is not None:
         data["compras_legible"] = resumen_compra
@@ -809,7 +880,6 @@ with tab_calculadora:
 
     c_btns = st.columns([1, 4])
     if c_btns[0].button("➕ Forma"):
-        # ✅ sigue numeración natural 1..n
         nid = max(st.session_state.piezas_dict.keys()) + 1
         st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
         st.rerun()
@@ -1441,7 +1511,6 @@ st.session_state._export_blob = json.dumps(export_data, indent=4, ensure_ascii=F
 # SALIDAS
 # =========================================================
 def build_comercial_html(res_final_rows, desc_html, extras_html, emb_html, ext_html, tabla_html):
-    # HTML standalone descargable
     return f"""
 <!doctype html>
 <html lang="es">
@@ -1466,7 +1535,6 @@ def build_comercial_html(res_final_rows, desc_html, extras_html, emb_html, ext_h
 """
 
 if modo_comercial and res_final:
-    # ✅ Manipulación visible en la oferta
     manip_unit_txt = f"{t_input:g} {('min' if unidad_t=='Minutos' else 'seg')}/ud"
     manip_seg_txt = f"{seg_man_total:g} seg/ud"
 
@@ -1578,7 +1646,6 @@ if modo_comercial and res_final:
         "</div>"
     )
 
-    # ✅ Botón descargar vista comercial (HTML)
     oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, ext_html, tabla)
     safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
     fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
