@@ -284,7 +284,7 @@ def coste_offset_por_tinta(n_hojas: int) -> float:
 # FORMAS
 # =========================================================
 def crear_forma_vacia(index):
-    # index ARRANCA EN 1
+    # ✅ CAMBIO: arrancamos en 1
     return {
         "nombre": f"Forma {index}",
         "pliegos": 1.0,
@@ -319,8 +319,8 @@ def es_digital_en_proyecto(piezas_dict):
 # =========================================================
 if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
 
-if "piezas_dict" not in st.session_state:
-    st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
+# ✅ CAMBIO: primera forma id=1
+if "piezas_dict" not in st.session_state: st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
 if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extras_grabados = []
 if "embalajes" not in st.session_state: st.session_state.embalajes = [crear_embalaje_vacio(0)]
 if "externos" not in st.session_state: st.session_state.externos = [crear_externo_vacio(0)]
@@ -407,10 +407,64 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
                 del st.session_state[kq]
 
 # =========================================================
+# FIX IMPORT: SEED KEYS DE WIDGETS CON LO IMPORTADO (Forma 1)
+# =========================================================
+def seed_widget_keys_from_import(lista_cants, piezas_dict):
+    """
+    Tras importar, Streamlit prioriza st.session_state[widget_key] sobre value=.
+    Sembramos las keys de widgets con los valores importados para que NO se pierdan,
+    especialmente en la Forma 1.
+    """
+    for pid, p in piezas_dict.items():
+        st.session_state[f"n_{pid}"] = p.get("nombre", f"Forma {pid}")
+        st.session_state[f"p_{pid}"] = float(p.get("pliegos", 1.0))
+
+        st.session_state[f"h_{pid}"] = int(p.get("h", 0))
+        st.session_state[f"w_{pid}"] = int(p.get("w", 0))
+
+        st.session_state[f"im_{pid}"] = p.get("im", "No")
+        st.session_state[f"nt_{pid}"] = int(p.get("nt", 0))
+        st.session_state[f"ba_{pid}"] = bool(p.get("ba", False))
+        st.session_state[f"ld_{pid}"] = bool(p.get("ld", False))
+        st.session_state[f"pel_{pid}"] = p.get("pel", "Sin Peliculado")
+
+        st.session_state[f"pf_{pid}"] = p.get("pf", "Ninguno")
+        st.session_state[f"gf_{pid}"] = int(p.get("gf", 0))
+        st.session_state[f"pd_{pid}"] = p.get("pd", "Ninguno")
+        st.session_state[f"gd_{pid}"] = int(p.get("gd", 0))
+
+        st.session_state[f"tb_{pid}"] = p.get("tipo_base", "Ondulado/Cartón")
+        st.session_state[f"pl_{pid}"] = p.get("pl", "Ninguna")
+        st.session_state[f"ap_{pid}"] = p.get("ap", "B/C")
+
+        st.session_state[f"pldif_{pid}"] = bool(p.get("pl_dif", False))
+        st.session_state[f"plh_{pid}"] = int(p.get("pl_h", p.get("h", 0)))
+        st.session_state[f"plw_{pid}"] = int(p.get("pl_w", p.get("w", 0)))
+
+        st.session_state[f"mrig_{pid}"] = p.get("mat_rigido", "Ninguno")
+        st.session_state[f"rigman_{pid}"] = bool(p.get("rig_manual", False))
+        st.session_state[f"rigwman_{pid}"] = int(p.get("rig_w", 0))
+        st.session_state[f"righman_{pid}"] = int(p.get("rig_h", 0))
+        st.session_state[f"rigpman_{pid}"] = float(p.get("rig_precio_ud", 0.0))
+
+        st.session_state[f"cor_def_{pid}"] = p.get("cor_default", "Troquelado")
+        if isinstance(p.get("cor_by_qty", {}), dict):
+            for q in lista_cants:
+                st.session_state[f"cor_qty_{pid}_{q}"] = p["cor_by_qty"].get(str(q), p.get("cor_default", "Troquelado"))
+
+        st.session_state[f"arr_{pid}"] = bool(p.get("cobrar_arreglo", True))
+        st.session_state[f"pvt_{pid}"] = float(p.get("pv_troquel", 0.0))
+
+        st.session_state[f"im_d_{pid}"] = p.get("im_d", "No")
+        st.session_state[f"nt_d_{pid}"] = int(p.get("nt_d", 0))
+        st.session_state[f"ba_d_{pid}"] = bool(p.get("ba_d", False))
+        st.session_state[f"ld_d_{pid}"] = bool(p.get("ld_d", False))
+        st.session_state[f"pel_d_{pid}"] = p.get("pel_d", "Sin Peliculado")
+
+# =========================================================
 # IMPORT / EXPORT (robusto)
 # =========================================================
 def normalizar_import(di: dict):
-    # --- Capturamos estado previo para purge agresivo ---
     prev_cants = parse_cantidades(st.session_state.get("cants_str_saved", ""))
     prev_piezas_ids = list(st.session_state.get("piezas_dict", {}).keys()) if isinstance(st.session_state.get("piezas_dict", None), dict) else []
     prev_extras_len = len(st.session_state.get("lista_extras_grabados", [])) if isinstance(st.session_state.get("lista_extras_grabados", None), list) else 0
@@ -439,11 +493,10 @@ def normalizar_import(di: dict):
     if isinstance(di.get("db_precios", None), dict):
         st.session_state.db_precios = di["db_precios"]
 
-    # --- cantidades importadas (para purge) ---
     lista_cants_import = parse_cantidades(st.session_state.cants_str_saved)
     cants_all = sorted(set(prev_cants + lista_cants_import))
 
-    # --- Piezas: REINDEX 1..n (FIX Forma 1 real) ---
+    # ✅ CAMBIO: REINDEX 1..n
     new_piezas = {1: crear_forma_vacia(1)}
     new_ids = [1]
 
@@ -461,21 +514,19 @@ def normalizar_import(di: dict):
     if raw:
         new_piezas = {}
         new_ids = []
-        for idx, (_old_id, v) in enumerate(raw, start=1):  # start=1
-            base = crear_forma_vacia(idx)
+        for new_id, (_old_id, v) in enumerate(raw, start=1):
+            base = crear_forma_vacia(new_id)
             base.update(v)
             if not isinstance(base.get("cor_by_qty", {}), dict):
                 base["cor_by_qty"] = {}
-            # blindajes por si el JSON trae floats/strings raros
             try:
                 base["h"] = int(base.get("h", 0))
                 base["w"] = int(base.get("w", 0))
             except:
                 pass
-            new_piezas[idx] = base
-            new_ids.append(idx)
+            new_piezas[new_id] = base
+            new_ids.append(new_id)
 
-    # Purge agresivo ANTES de escribir listas nuevas (borra claves antiguas que “pisan”)
     piezas_all = sorted(set(prev_piezas_ids + new_ids))
     purge_widget_keys_for_import(
         lista_cants=cants_all,
@@ -533,13 +584,18 @@ def normalizar_import(di: dict):
         if "externos" not in st.session_state or not st.session_state.externos:
             st.session_state.externos = [crear_externo_vacio(0)]
 
-    # Purge final (por si quedan keys nuevas)
     purge_widget_keys_for_import(
         lista_cants=lista_cants_import,
         piezas_ids=list(st.session_state.piezas_dict.keys()),
         externos_len=len(st.session_state.externos),
         embalajes_len=len(st.session_state.embalajes),
         extras_len=len(st.session_state.lista_extras_grabados),
+    )
+
+    # ✅ Seed final (clave del fix)
+    seed_widget_keys_from_import(
+        lista_cants=lista_cants_import,
+        piezas_dict=st.session_state.piezas_dict
     )
 
 def construir_export(resumen_compra=None, resumen_costes=None):
@@ -753,7 +809,8 @@ with tab_calculadora:
 
     c_btns = st.columns([1, 4])
     if c_btns[0].button("➕ Forma"):
-        nid = (max(st.session_state.piezas_dict.keys()) + 1) if st.session_state.piezas_dict else 1
+        # ✅ sigue numeración natural 1..n
+        nid = max(st.session_state.piezas_dict.keys()) + 1
         st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
         st.rerun()
     if c_btns[1].button("🗑 Reiniciar"):
