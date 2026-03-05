@@ -284,8 +284,9 @@ def coste_offset_por_tinta(n_hojas: int) -> float:
 # FORMAS
 # =========================================================
 def crear_forma_vacia(index):
+    # index ARRANCA EN 1
     return {
-        "nombre": f"Forma {index + 1}",
+        "nombre": f"Forma {index}",
         "pliegos": 1.0,
         "w": 0, "h": 0,
         "pf": "Ninguno", "gf": 0,
@@ -318,7 +319,8 @@ def es_digital_en_proyecto(piezas_dict):
 # =========================================================
 if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
 
-if "piezas_dict" not in st.session_state: st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
+if "piezas_dict" not in st.session_state:
+    st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
 if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extras_grabados = []
 if "embalajes" not in st.session_state: st.session_state.embalajes = [crear_embalaje_vacio(0)]
 if "externos" not in st.session_state: st.session_state.externos = [crear_externo_vacio(0)]
@@ -441,9 +443,9 @@ def normalizar_import(di: dict):
     lista_cants_import = parse_cantidades(st.session_state.cants_str_saved)
     cants_all = sorted(set(prev_cants + lista_cants_import))
 
-    # --- Piezas: REINDEX 0..n-1 (FIX Forma 1) ---
-    new_piezas = {0: crear_forma_vacia(0)}
-    new_ids = [0]
+    # --- Piezas: REINDEX 1..n (FIX Forma 1 real) ---
+    new_piezas = {1: crear_forma_vacia(1)}
+    new_ids = [1]
 
     raw = []
     if isinstance(di.get("piezas", None), dict):
@@ -459,8 +461,8 @@ def normalizar_import(di: dict):
     if raw:
         new_piezas = {}
         new_ids = []
-        for new_id, (_old_id, v) in enumerate(raw):
-            base = crear_forma_vacia(new_id)
+        for idx, (_old_id, v) in enumerate(raw, start=1):  # start=1
+            base = crear_forma_vacia(idx)
             base.update(v)
             if not isinstance(base.get("cor_by_qty", {}), dict):
                 base["cor_by_qty"] = {}
@@ -470,8 +472,8 @@ def normalizar_import(di: dict):
                 base["w"] = int(base.get("w", 0))
             except:
                 pass
-            new_piezas[new_id] = base
-            new_ids.append(new_id)
+            new_piezas[idx] = base
+            new_ids.append(idx)
 
     # Purge agresivo ANTES de escribir listas nuevas (borra claves antiguas que “pisan”)
     piezas_all = sorted(set(prev_piezas_ids + new_ids))
@@ -483,7 +485,7 @@ def normalizar_import(di: dict):
         extras_len=max(prev_extras_len, len(di.get("extras", []) if isinstance(di.get("extras", None), list) else []), 0),
     )
 
-    st.session_state.piezas_dict = new_piezas if new_piezas else {0: crear_forma_vacia(0)}
+    st.session_state.piezas_dict = new_piezas if new_piezas else {1: crear_forma_vacia(1)}
 
     if isinstance(di.get("extras", None), list):
         st.session_state.lista_extras_grabados = di["extras"]
@@ -751,11 +753,11 @@ with tab_calculadora:
 
     c_btns = st.columns([1, 4])
     if c_btns[0].button("➕ Forma"):
-        nid = max(st.session_state.piezas_dict.keys()) + 1
+        nid = (max(st.session_state.piezas_dict.keys()) + 1) if st.session_state.piezas_dict else 1
         st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
         st.rerun()
     if c_btns[1].button("🗑 Reiniciar"):
-        st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
+        st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
         st.session_state.lista_extras_grabados = []
         st.session_state.embalajes = [crear_embalaje_vacio(0)]
         st.session_state.externos = [crear_externo_vacio(0)]
@@ -805,7 +807,7 @@ with tab_calculadora:
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                p["nombre"] = st.text_input("Etiqueta", p.get("nombre", f"Forma {p_id+1}"), key=f"n_{p_id}")
+                p["nombre"] = st.text_input("Etiqueta", p.get("nombre", f"Forma {p_id}"), key=f"n_{p_id}")
                 p["pliegos"] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get("pliegos", 1.0)), format="%.4f", key=f"p_{p_id}")
 
                 st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}",
