@@ -6,6 +6,14 @@ import math
 from copy import deepcopy
 import hashlib
 
+# ✅ PDF (Python / ReportLab)
+from io import BytesIO
+from reportlab.lib.pagesizes import A4
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib import colors
+from reportlab.lib.units import mm
+
 # =========================================================
 # 1) CONFIGURACIÓN
 # =========================================================
@@ -262,13 +270,6 @@ def merma_rigido_fija(hojas_netas: int) -> int:
 # IMPRESIÓN OFFSET - NUEVA TARIFA
 # =========================================================
 def coste_offset_por_tinta(n_hojas: int) -> float:
-    """
-    Regla verificada con ejemplo:
-    - Mínimo 85€ por tinta.
-    - Hojas extra hasta 500: 0,0875€/hoja/tinta (contando desde hoja 101).
-    - A partir de 501: 120€/tinta (mantiene el comportamiento anterior base).
-    - A partir de 2001: +0,015€/hoja/tinta (permite cuadrar 2500 → 510 con 4 tintas)
-    """
     n = max(0, int(round(n_hojas)))
     if n <= 100:
         return 85.0
@@ -314,6 +315,208 @@ def es_digital_en_proyecto(piezas_dict):
     return False
 
 # =========================================================
+# ✅ PDF: generar bytes (Python)
+# =========================================================
+def build_comercial_pdf_bytes(
+    brf: str,
+    cli: str,
+    desc: str,
+    unidad_t: str,
+    t_input: float,
+    seg_man_total: float,
+    piezas_dict: dict,
+    lista_extras: list,
+    embalajes: list,
+    externos: list,
+    res_final: list,
+) -> bytes:
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=14*mm,
+        rightMargin=14*mm,
+        topMargin=14*mm,
+        bottomMargin=14*mm
+    )
+
+    styles = getSampleStyleSheet()
+    h1 = ParagraphStyle("h1", parent=styles["Heading1"], textColor=colors.HexColor("#1E88E5"), spaceAfter=8)
+    h2 = ParagraphStyle("h2", parent=styles["Heading2"], textColor=colors.HexColor("#1E88E5"), spaceAfter=6)
+    normal = styles["BodyText"]
+    small = ParagraphStyle("small", parent=styles["BodyText"], fontSize=9, leading=11, textColor=colors.HexColor("#555555"))
+
+    story = []
+    story.append(Paragraph(f"OFERTA COMERCIAL - {cli or 'CLIENTE'}", h1))
+    story.append(Paragraph(f"<b>Ref. Briefing:</b> {brf or '-'}", normal))
+    if desc:
+        story.append(Paragraph(f"<b>Descripción:</b> {desc}", normal))
+
+    unidad_txt = "min" if unidad_t == "Minutos" else "seg"
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("Manipulación", h2))
+    story.append(Paragraph(
+        f"<b>Tiempo/ud:</b> {t_input:g} {unidad_txt}/ud &nbsp;&nbsp;|&nbsp;&nbsp; <b>Equivalente:</b> {seg_man_total:g} seg/ud",
+        normal
+    ))
+
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Especificaciones del proyecto", h2))
+
+    for p in piezas_dict.values():
+        nombre = p.get("nombre", "")
+        hh = int(p.get("h", 0))
+        ww = int(p.get("w", 0))
+        pliegos = float(p.get("pliegos", 1.0))
+
+        if p.get("tipo_base") == "Material Rígido":
+            if bool(p.get("rig_manual", False)):
+                base_info = f"Rígido manual {int(p.get('rig_w',0))}×{int(p.get('rig_h',0))} mm | {float(p.get('rig_precio_ud',0.0)):.2f} €/hoja"
+            else:
+                base_info = f"Rígido: {p.get('mat_rigido','')}"
+        else:
+            base_info = f"Ondulado: {p.get('pl','')} ({p.get('ap','')})"
+
+        cara = f"{p.get('pf','')} ({int(p.get('gf',0))}g)"
+        dorso = f"{p.get('pd','')} ({int(p.get('gd',0))}g)"
+        imp_c = p.get("im", "No")
+        imp_d = p.get("im_d", "No")
+        pel_c = p.get("pel", "Sin Peliculado")
+        pel_d = p.get("pel_d", "Sin Peliculado")
+        corte = p.get("cor_default", "Troquelado")
+        trq = float(p.get("pv_troquel", 0.0))
+
+        extra_c = ""
+        if imp_c == "Offset":
+            extra_c = f" | Tintas: {int(p.get('nt',0))}" + (" + Barniz" if bool(p.get("ba", False)) else "")
+        elif imp_c == "Digital":
+            extra_c = " | Laminado: " + ("Sí" if bool(p.get("ld", False)) else "No")
+
+        extra_d = ""
+        if imp_d == "Offset":
+            extra_d = f" | Tintas: {int(p.get('nt_d',0))}" + (" + Barniz" if bool(p.get("ba_d", False)) else "")
+        elif imp_d == "Digital":
+            extra_d = " | Laminado: " + ("Sí" if bool(p.get("ld_d", False)) else "No")
+
+        story.append(Paragraph(f"<b>{nombre}</b> — {hh}×{ww} mm | Pliegos/ud: {pliegos:.4f}", normal))
+        story.append(Paragraph(f"<b>Soporte:</b> {base_info}", small))
+        story.append(Paragraph(f"<b>Cara:</b> {cara} | <b>Imp:</b> {imp_c}{extra_c} | <b>Pel:</b> {pel_c}", small))
+        story.append(Paragraph(f"<b>Dorso:</b> {dorso} | <b>Imp:</b> {imp_d}{extra_d} | <b>Pel:</b> {pel_d}", small))
+        story.append(Paragraph(f"<b>Corte:</b> {corte} | <b>Troquel (venta):</b> {trq:.2f} €", small))
+        story.append(Spacer(1, 6))
+
+    story.append(Spacer(1, 6))
+    story.append(Paragraph("Materiales extra", h2))
+    if lista_extras:
+        data_ex = [["Extra", "Cant/ud prod", "€/ud compra"]]
+        for e in lista_extras:
+            data_ex.append([
+                str(e.get("nombre","")),
+                f"{float(e.get('cantidad',1.0)):.3f}",
+                f"{float(e.get('coste',0.0)):.4f}"
+            ])
+        t = Table(data_ex, colWidths=[95*mm, 35*mm, 35*mm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1E88E5")),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#DDDDDD")),
+            ("VALIGN", (0,0), (-1,-1), "TOP"),
+            ("FONTSIZE", (0,1), (-1,-1), 9),
+        ]))
+        story.append(t)
+    else:
+        story.append(Paragraph("Sin extras.", small))
+
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Embalajes", h2))
+    if embalajes:
+        data_emb = [["Nombre", "Tipo", "Material", "Dimensiones (mm)"]]
+        for emb in embalajes:
+            dims = emb.get("dims", {}) or {}
+            L = float(dims.get("L", 0))
+            W = float(dims.get("W", 0))
+            H = float(dims.get("H", 0))
+            data_emb.append([
+                str(emb.get("nombre","")),
+                str(emb.get("tipo","")),
+                str(emb.get("material","")),
+                f"{L:.0f}×{W:.0f}×{H:.0f}"
+            ])
+        t = Table(data_emb, colWidths=[55*mm, 55*mm, 35*mm, 35*mm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1E88E5")),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#DDDDDD")),
+            ("FONTSIZE", (0,1), (-1,-1), 9),
+        ]))
+        story.append(t)
+    else:
+        story.append(Paragraph("Sin embalajes.", small))
+
+    story.append(Spacer(1, 10))
+    story.append(Paragraph("Externos", h2))
+    if externos:
+        data_ext = [["Concepto", "Modo"]]
+        for ext in externos:
+            data_ext.append([str(ext.get("concepto","")), str(ext.get("modo",""))])
+        t = Table(data_ext, colWidths=[120*mm, 45*mm])
+        t.setStyle(TableStyle([
+            ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1E88E5")),
+            ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+            ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+            ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#DDDDDD")),
+            ("FONTSIZE", (0,1), (-1,-1), 9),
+        ]))
+        story.append(t)
+    else:
+        story.append(Paragraph("Sin externos.", small))
+
+    story.append(Spacer(1, 12))
+    story.append(Paragraph("Precios de venta", h2))
+    data_prices = [[
+        "Cantidad",
+        "Venta material (unit)",
+        "Venta embalaje (unit)",
+        "Troquel (TOTAL)",
+        "UNITARIO (TODO)",
+        "VENTA TOTAL"
+    ]]
+    for r in res_final:
+        data_prices.append([
+            str(r.get("Cantidad","")),
+            str(r.get("Precio venta material (unitario)","")),
+            str(r.get("Precio venta embalaje (unitario)","")),
+            str(r.get("Precio venta troquel (TOTAL)","")),
+            str(r.get("Precio venta unitario (todo)","")),
+            str(r.get("Precio venta total","")),
+        ])
+    t = Table(data_prices, colWidths=[20*mm, 32*mm, 32*mm, 25*mm, 30*mm, 25*mm])
+    t.setStyle(TableStyle([
+        ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#1E88E5")),
+        ("TEXTCOLOR", (0,0), (-1,0), colors.white),
+        ("FONTNAME", (0,0), (-1,0), "Helvetica-Bold"),
+        ("GRID", (0,0), (-1,-1), 0.25, colors.HexColor("#DDDDDD")),
+        ("FONTSIZE", (0,1), (-1,-1), 9),
+        ("FONTNAME", (0,1), (0,-1), "Helvetica-Bold"),
+        ("TEXTCOLOR", (4,1), (4,-1), colors.HexColor("#1E88E5")),
+        ("FONTNAME", (4,1), (4,-1), "Helvetica-Bold"),
+    ]))
+    story.append(t)
+
+    story.append(Spacer(1, 8))
+    story.append(Paragraph(
+        'Nota: "Venta material" incluye todos los costes del producido excepto extras, embalajes, externos y troqueles. IVA no incluido.',
+        small
+    ))
+
+    doc.build(story)
+    pdf = buffer.getvalue()
+    buffer.close()
+    return pdf
+
+# =========================================================
 # SESSION STATE INIT
 # =========================================================
 if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
@@ -345,16 +548,11 @@ if "_export_filename" not in st.session_state: st.session_state._export_filename
 # FIX IMPORT: PURGE KEYS DE WIDGETS (evita que Forma 1 quede “pegada”)
 # =========================================================
 def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len=0, embalajes_len=0, extras_len=0):
-    """
-    Streamlit prioriza st.session_state[widget_key] sobre value=.
-    Al importar, limpiamos claves de widgets para que se recarguen desde el JSON.
-    """
     if piezas_ids is None:
         piezas_ids = []
     if lista_cants is None:
         lista_cants = []
 
-    # 1) Piezas
     base_prefixes = [
         "n_", "p_", "std_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_",
         "pf_", "gf_", "tb_", "pl_", "pldif_", "plh_", "plw_", "ap_",
@@ -368,27 +566,27 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
             if k in st.session_state:
                 del st.session_state[k]
 
-        # corte por qty
         for q in lista_cants:
             kq = f"cor_qty_{pid}_{q}"
             if kq in st.session_state:
                 del st.session_state[kq]
 
-    # 2) Mermas por cantidad
+        kdel = f"del_{pid}"
+        if kdel in st.session_state:
+            del st.session_state[kdel]
+
     for q in lista_cants:
         for k in [f"mi_{q}", f"mp_{q}"]:
             if k in st.session_state:
                 del st.session_state[k]
 
-    # 3) Extras (inputs por índice)
     for i in range(max(0, extras_len)):
-        for k in [f"exc_{i}", f"exq_{i}"]:
+        for k in [f"exc_{i}", f"exq_{i}", f"exd_{i}"]:
             if k in st.session_state:
                 del st.session_state[k]
 
-    # 4) Embalajes
     for ei in range(max(0, embalajes_len)):
-        for k in [f"emb_name_{ei}", f"emb_tipo_{ei}", f"emb_mat_{ei}", f"embL_{ei}", f"embW_{ei}", f"embH_{ei}"]:
+        for k in [f"emb_name_{ei}", f"emb_tipo_{ei}", f"emb_mat_{ei}", f"embL_{ei}", f"embW_{ei}", f"embH_{ei}", f"emb_del_{ei}"]:
             if k in st.session_state:
                 del st.session_state[k]
         for q in lista_cants:
@@ -396,9 +594,8 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
             if kq in st.session_state:
                 del st.session_state[kq]
 
-    # 5) Externos
     for xi in range(max(0, externos_len)):
-        for k in [f"ext_con_{xi}", f"ext_modo_{xi}"]:
+        for k in [f"ext_con_{xi}", f"ext_modo_{xi}", f"ext_del_{xi}"]:
             if k in st.session_state:
                 del st.session_state[k]
         for q in lista_cants:
@@ -407,9 +604,15 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
                 del st.session_state[kq]
 
 # =========================================================
-# IMPORT / EXPORT (robusto)
+# IMPORT / EXPORT (robusto)  ✅ FIX FORMA 1
 # =========================================================
 def normalizar_import(di: dict):
+    prev_cants = parse_cantidades(st.session_state.get("cants_str_saved", ""))
+    prev_piezas_ids = list(st.session_state.get("piezas_dict", {}).keys()) if isinstance(st.session_state.get("piezas_dict", None), dict) else []
+    prev_extras_len = len(st.session_state.get("lista_extras_grabados", [])) if isinstance(st.session_state.get("lista_extras_grabados", None), list) else 0
+    prev_emb_len = len(st.session_state.get("embalajes", [])) if isinstance(st.session_state.get("embalajes", None), list) else 0
+    prev_ext_len = len(st.session_state.get("externos", [])) if isinstance(st.session_state.get("externos", None), list) else 0
+
     st.session_state.brf = str(di.get("brf", st.session_state.brf))
     st.session_state.cli = str(di.get("cli", st.session_state.cli))
     st.session_state.desc = str(di.get("desc", st.session_state.desc))
@@ -432,27 +635,45 @@ def normalizar_import(di: dict):
     if isinstance(di.get("db_precios", None), dict):
         st.session_state.db_precios = di["db_precios"]
 
-    # cantidades para purge
     lista_cants_import = parse_cantidades(st.session_state.cants_str_saved)
+    cants_all = sorted(set(prev_cants + lista_cants_import))
 
-    piezas_ids = []
+    # piezas raw
+    raw = []
     if isinstance(di.get("piezas", None), dict):
-        piezas = {}
         for k, v in di["piezas"].items():
             try:
                 ik = int(k)
             except:
                 continue
             if isinstance(v, dict):
-                base = crear_forma_vacia(ik)
-                base.update(v)
-                if not isinstance(base.get("cor_by_qty", {}), dict):
-                    base["cor_by_qty"] = {}
-                piezas[ik] = base
-                piezas_ids.append(ik)
-        st.session_state.piezas_dict = piezas if piezas else {0: crear_forma_vacia(0)}
-        if not piezas_ids:
-            piezas_ids = list(st.session_state.piezas_dict.keys())
+                raw.append((ik, v))
+    raw.sort(key=lambda x: x[0])
+
+    # reindex ids 0..n-1 (FIX Forma 1)
+    new_ids = list(range(len(raw))) if raw else [0]
+    piezas_all = sorted(set(prev_piezas_ids + new_ids))
+
+    # purge agresivo antes
+    purge_widget_keys_for_import(
+        lista_cants=cants_all,
+        piezas_ids=piezas_all,
+        externos_len=max(prev_ext_len, 1),
+        embalajes_len=max(prev_emb_len, 1),
+        extras_len=prev_extras_len,
+    )
+
+    if raw:
+        new_piezas = {}
+        for new_id, (_old_id, v) in enumerate(raw):
+            base = crear_forma_vacia(new_id)
+            base.update(v)
+            if not isinstance(base.get("cor_by_qty", {}), dict):
+                base["cor_by_qty"] = {}
+            new_piezas[new_id] = base
+        st.session_state.piezas_dict = new_piezas
+    else:
+        st.session_state.piezas_dict = {0: crear_forma_vacia(0)}
 
     if isinstance(di.get("extras", None), list):
         st.session_state.lista_extras_grabados = di["extras"]
@@ -482,7 +703,6 @@ def normalizar_import(di: dict):
     else:
         st.session_state.embalajes = [crear_embalaje_vacio(0)]
 
-    # Externos (si existen en JSON; si no, dejamos default)
     ext = di.get("externos", None)
     if isinstance(ext, list) and len(ext) > 0:
         new_ext = []
@@ -498,11 +718,10 @@ def normalizar_import(di: dict):
             new_ext.append(base)
         st.session_state.externos = new_ext if new_ext else [crear_externo_vacio(0)]
     else:
-        # si el JSON viejo no lo trae, mantenemos lo que haya o ponemos 1 por defecto
         if "externos" not in st.session_state or not st.session_state.externos:
             st.session_state.externos = [crear_externo_vacio(0)]
 
-    # ✅ CLAVE: purgar keys de widgets para que Forma 1 se refresque desde JSON
+    # purge final
     purge_widget_keys_for_import(
         lista_cants=lista_cants_import,
         piezas_ids=list(st.session_state.piezas_dict.keys()),
@@ -523,7 +742,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "piezas": st.session_state.piezas_dict,
         "extras": st.session_state.lista_extras_grabados,
         "embalajes": st.session_state.embalajes,
-        "externos": st.session_state.externos,  # ✅ nuevo
+        "externos": st.session_state.externos,
         "mermas_imp": st.session_state.mermas_imp_manual,
         "mermas_proc": st.session_state.mermas_proc_manual,
     }
@@ -714,9 +933,6 @@ with tab_calculadora:
             if q not in st.session_state.mermas_imp_manual:
                 st.session_state.mermas_imp_manual[q] = mi
 
-    # -----------------------------------------------------
-    # PASO 2: TÉCNICO
-    # -----------------------------------------------------
     st.header("Paso 2 · Datos técnicos")
 
     c_btns = st.columns([1, 4])
@@ -1028,9 +1244,6 @@ with tab_calculadora:
                         emb["costes"][q] = float(c_vol)
                         cols[idx].metric(f"{q} uds", f"{c_vol:.3f}€")
 
-    # =========================================================
-    # NUEVO SLOT: EXTERNOS (proveedores / procesos esporádicos)
-    # =========================================================
     st.divider()
     st.subheader("📌 4. Externos (proveedores / procesos esporádicos)")
 
@@ -1111,7 +1324,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "corte": 0.0,
                 "manipulacion": 0.0,
                 "dificultad": 0.0,
-                "externos": 0.0,  # ✅ nuevo
+                "externos": 0.0,
             }
         }
 
@@ -1280,29 +1493,26 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             emb_det.append({"nombre": emb.get("nombre",""), "tipo": emb.get("tipo",""), "material": emb.get("material",""), "coste_unit_compra": cu})
         tot_cat["materiales"]["embalajes_compra"] += emb_compra_total
 
-        # ===== Externos =====
         ext_total = 0.0
         ext_det = []
         for ext in st.session_state.externos:
             val = float(ext.get("costes", {}).get(q_n, 0.0))
             if ext.get("modo", "Unitario (€/ud)") == "Unitario (€/ud)":
                 coste = val * q_n
-                tipo = "unitario"
             else:
                 coste = val
-                tipo = "total"
             ext_total += coste
-            ext_det.append({"concepto": ext.get("concepto",""), "modo": ext.get("modo",""), "tipo_aplicado": tipo, "valor_input": val, "coste_total": coste})
+            ext_det.append({"concepto": ext.get("concepto",""), "modo": ext.get("modo",""), "valor_input": val, "coste_total": coste})
         tot_cat["procesos"]["externos"] += ext_total
 
         pv_emb_total = (emb_compra_total * 1.4)
-        pv_material_total = ((coste_f + c_mo) * margen) + imp_fijo_pvp
-        pv_material_unit = pv_material_total / q_n
-
         tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
 
         pvp_total_todo = ((coste_f + c_ext + ext_total + c_mo) * margen) + imp_fijo_pvp + pv_emb_total + tot_pv_trq
         unit_todo = pvp_total_todo / q_n
+
+        pv_material_total = ((coste_f + c_mo) * margen) + imp_fijo_pvp
+        pv_material_unit = pv_material_total / q_n
 
         res_final.append({
             "Cantidad": q_n,
@@ -1356,10 +1566,45 @@ st.session_state._export_blob = json.dumps(export_data, indent=4, ensure_ascii=F
 # SALIDAS
 # =========================================================
 if modo_comercial and res_final:
+    # ✅ Botón PDF (PYTHON) + nombre seguro
+    safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
+    pdf_name = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.pdf"
+
+    pdf_bytes = build_comercial_pdf_bytes(
+        brf=st.session_state.brf,
+        cli=st.session_state.cli,
+        desc=st.session_state.desc,
+        unidad_t=st.session_state.unidad_t,
+        t_input=float(st.session_state.t_input),
+        seg_man_total=seg_man_total,
+        piezas_dict=st.session_state.piezas_dict,
+        lista_extras=st.session_state.lista_extras_grabados,
+        embalajes=st.session_state.embalajes,
+        externos=st.session_state.externos,
+        res_final=res_final,
+    )
+    st.download_button(
+        "⬇️ Descargar VISTA OFERTA (PDF)",
+        data=pdf_bytes,
+        file_name=pdf_name,
+        mime="application/pdf",
+        use_container_width=True
+    )
+
+    # ✅ Manipulación visible en la oferta
+    manip_unit_txt = f"{t_input:g} {('min' if unidad_t=='Minutos' else 'seg')}/ud"
+    manip_seg_txt = f"{seg_man_total:g} seg/ud"
+
     desc_html = "<div class='sec-title'>📋 Especificaciones del Proyecto</div>"
     desc_html += "<div class='card'>"
+    desc_html += (
+        "<div style='margin-bottom:10px;'>"
+        "<span class='tag'>Manipulación</span>"
+        f"<span class='small muted'><b>Tiempo/ud:</b> {manip_unit_txt} &nbsp;|&nbsp; <b>Equivalente:</b> {manip_seg_txt}</span>"
+        "</div>"
+    )
+
     for p in st.session_state.piezas_dict.values():
-        base_info = ""
         if p.get("tipo_base") == "Material Rígido":
             if bool(p.get("rig_manual", False)):
                 base_info = f"Rígido Manual: {int(p.get('rig_w',0))}×{int(p.get('rig_h',0))} mm | {float(p.get('rig_precio_ud',0.0)):.2f}€/hoja"
