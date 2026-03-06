@@ -169,14 +169,30 @@ FORMATOS_STD = {
 # MERMAS (AUTO)
 # =========================================================
 def calcular_mermas_estandar(n, es_digital=False):
+    """Devuelve (merma_rodaje_proceso_hojas, merma_arranque_impresion_hojas).
+
+    Regla: merma de rodaje/proceso proporcional con tope máximo de 150 hojas.
+    """
+    # Rodaje proceso: proporcional pero capado
     if es_digital:
-        return int(n * 0.02), 10
-    if n < 100: return 10, 150
-    if n < 200: return 20, 175
-    if n < 600: return 30, 200
-    if n < 1000: return 40, 220
-    if n < 2000: return 50, 250
-    return int(n * 0.03), 300
+        merma_proc = min(int(n * 0.02), 150)
+        return merma_proc, 10
+
+    if n < 100:
+        merma_proc, merma_imp = 10, 150
+    elif n < 200:
+        merma_proc, merma_imp = 20, 175
+    elif n < 600:
+        merma_proc, merma_imp = 30, 200
+    elif n < 1000:
+        merma_proc, merma_imp = 40, 220
+    elif n < 2000:
+        merma_proc, merma_imp = 50, 250
+    else:
+        merma_proc, merma_imp = int(n * 0.03), 300
+
+    return min(int(merma_proc), 150), int(merma_imp)
+
 
 def parse_cantidades(s: str):
     if not s:
@@ -1555,19 +1571,28 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         pv_emb_total = (emb_compra_total * margen_embalajes)
 
         # Venta producido (excluye extras, embalajes y troquel)
-        materiales_cost = float(tot_cat["materiales"]["cartoncillo"] + tot_cat["materiales"]["ondulado"] + tot_cat["materiales"]["rigidos"])
-        procesos_cost = float(sum(tot_cat["procesos"].values()))  # incluye externos, manipulación y dificultad
+        materiales_cost = float(
+            tot_cat["materiales"]["cartoncillo"]
+            + tot_cat["materiales"]["ondulado"]
+            + tot_cat["materiales"]["rigidos"]
+        )
+
+        # Procesos incluye "externos" en el desglose de costes, pero comercialmente los queremos tratar como "Extras".
+        procesos_cost_total = float(sum(tot_cat["procesos"].values()))  # incluye externos, manipulación y dificultad
+        procesos_cost_sin_externos = float(procesos_cost_total - ext_total)
 
         pv_materiales_total = materiales_cost * margen
-        pv_procesos_total = (procesos_cost * margen) + imp_fijo_pvp
+        pv_procesos_total = (procesos_cost_sin_externos * margen) + imp_fijo_pvp
 
-        # ✅ Descuento SOLO sobre procesos (no afecta extras, embalajes ni troqueles)
+        # ✅ Descuento SOLO sobre procesos (no afecta extras, embalajes ni troqueles).
+        # Al mover "externos" a extras, tampoco se les aplica este descuento.
         pv_procesos_total = pv_procesos_total * (1.0 - (descuento_procesos / 100.0))
 
         pv_producido_total = pv_materiales_total + pv_procesos_total
         pv_material_unit = pv_producido_total / q_n
 
-        pv_extras_total = (c_ext * margen_extras)
+        # Extras comerciales = extras grabados + procesos externos
+        pv_extras_total = ((c_ext + ext_total) * margen_extras)
         pv_extras_unit = pv_extras_total / q_n if q_n > 0 else 0.0
 
         tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
@@ -1575,12 +1600,17 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         pvp_total_todo = pv_producido_total + pv_extras_total + pv_emb_total + tot_pv_trq
         unit_todo = pvp_total_todo / q_n
 
+        # Unitario sin troquel: producido + embalaje + extras
+        pvp_prod_emb_extras = pv_producido_total + pv_emb_total + pv_extras_total
+        unit_prod_emb_extras = pvp_prod_emb_extras / q_n if q_n > 0 else 0.0
+
         res_final.append({
             "Cantidad": q_n,
             "Precio venta material (unitario)": f"{pv_material_unit:.3f}€",
             "Precio venta extras (unitario)": f"{pv_extras_unit:.3f}€",
             "Precio venta embalaje (unitario)": f"{(pv_emb_total/q_n):.3f}€",
             "Precio venta troquel (TOTAL)": f"{tot_pv_trq:.2f}€",
+            "Precio venta unitario (prod+emb+extras)": f"{unit_prod_emb_extras:.3f}€",
             "Precio venta unitario (todo)": f"{unit_todo:.3f}€",
             "Precio venta total": f"{pvp_total_todo:.2f}€"
         })
@@ -1740,6 +1770,7 @@ if modo_comercial and res_final:
             f"<td>{r.get('Precio venta extras (unitario)', '0.000€')}</td>"
             f"<td>{r['Precio venta embalaje (unitario)']}</td>"
             f"<td>{r['Precio venta troquel (TOTAL)']}</td>"
+            f"<td>{r.get('Precio venta unitario (prod+emb+extras)', '0.000€')}</td>"
             f"<td><b style='color:#1E88E5;'>{r['Precio venta unitario (todo)']}</b></td>"
             f"<td>{r['Precio venta total']}</td>"
             "</tr>"
@@ -1752,15 +1783,17 @@ if modo_comercial and res_final:
         "<tr>"
         "<th>Cantidad</th>"
         "<th>Venta material (unit)</th>"
+        "<th>Venta extras+externos (unit)</th>"
         "<th>Venta embalaje (unit)</th>"
         "<th>Troquel (TOTAL)</th>"
+        "<th>Unitario (prod+emb+extras)</th>"
         "<th>UNITARIO (TODO)</th>"
         "<th>VENTA TOTAL</th>"
         "</tr>"
         f"{rows}"
         "</table>"
         "<div class='small muted' style='margin-top:10px;'>"
-        "* &quot;Venta material&quot; incluye todos los costes del producido excepto extras, embalajes, externos y troqueles. IVA no incluido."
+        "* &quot;Venta material&quot; incluye el producido (materiales + procesos internos) excluyendo extras, procesos externos, embalajes y troqueles. &quot;Extras+externos&quot; incluye extras grabados y procesos externos. IVA no incluido."
         "</div>"
     )
 
@@ -1790,8 +1823,10 @@ else:
         df = pd.DataFrame(res_final)[[
             "Cantidad",
             "Precio venta material (unitario)",
+            "Precio venta extras (unitario)",
             "Precio venta embalaje (unitario)",
             "Precio venta troquel (TOTAL)",
+            "Precio venta unitario (prod+emb+extras)",
             "Precio venta unitario (todo)",
             "Precio venta total"
         ]]
