@@ -337,6 +337,19 @@ if "dif_ud" not in st.session_state: st.session_state.dif_ud = 0.091
 if "imp_fijo_pvp" not in st.session_state: st.session_state.imp_fijo_pvp = 500.0
 if "margen" not in st.session_state: st.session_state.margen = 2.2
 
+if "descuento_procesos" not in st.session_state: st.session_state.descuento_procesos = 0.0
+if "margen_extras" not in st.session_state: st.session_state.margen_extras = 1.4
+if "margen_embalajes" not in st.session_state: st.session_state.margen_embalajes = 1.4
+
+if "db_descuentos" not in st.session_state:
+    # Descuentos de compra por bloque (en %). Se aplican a los costes en cálculo.
+    st.session_state.db_descuentos = {
+        "cartoncillo": 0.0,
+        "ondulado_rigidos": 0.0,
+        "narba": 0.0,
+    }
+
+
 if "_last_import_hash" not in st.session_state: st.session_state._last_import_hash = None
 if "_export_blob" not in st.session_state: st.session_state._export_blob = None
 if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
@@ -558,9 +571,27 @@ def normalizar_import(di: dict):
         if "dif_ud" in params: st.session_state.dif_ud = float(params["dif_ud"])
         if "imp_fijo_pvp" in params: st.session_state.imp_fijo_pvp = float(params["imp_fijo_pvp"])
         if "margen" in params: st.session_state.margen = float(params["margen"])
+        # ✅ Nuevos (compatibles hacia atrás)
+        if "descuento_procesos" in params: st.session_state.descuento_procesos = float(params["descuento_procesos"])
+        if "margen_extras" in params: st.session_state.margen_extras = float(params["margen_extras"])
+        if "margen_embalajes" in params: st.session_state.margen_embalajes = float(params["margen_embalajes"])
 
     if isinstance(di.get("db_precios", None), dict):
         st.session_state.db_precios = di["db_precios"]
+
+    # ✅ Descuentos por bloque (si vienen en el JSON)
+    if isinstance(di.get("db_descuentos", None), dict):
+        cur = st.session_state.get("db_descuentos", {})
+        if not isinstance(cur, dict):
+            cur = {}
+        for k, v in di["db_descuentos"].items():
+            try:
+                cur[str(k)] = float(v)
+            except Exception:
+                pass
+        for k0 in ["cartoncillo", "ondulado_rigidos", "narba"]:
+            cur.setdefault(k0, 0.0)
+        st.session_state.db_descuentos = cur
 
     lista_cants_import = parse_cantidades(st.session_state.cants_str_saved)
     cants_all = sorted(set(prev_cants + lista_cants_import))
@@ -680,8 +711,9 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "desc": st.session_state.desc,
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input)},
-        "params": {"dif_ud": float(st.session_state.dif_ud), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen)},
+        "params": {"dif_ud": float(st.session_state.dif_ud), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
         "db_precios": deepcopy(st.session_state.db_precios),
+        "db_descuentos": deepcopy(st.session_state.db_descuentos),
         "piezas": piezas_out,
         "extras": deepcopy(st.session_state.lista_extras_grabados),
         "embalajes": deepcopy(st.session_state.embalajes),
@@ -772,8 +804,20 @@ with tab_costes:
     col_c1, col_c2 = st.columns(2)
     db = st.session_state.db_precios
 
+    # defaults descuentos (por si vienen viejos)
+    if "db_descuentos" not in st.session_state or not isinstance(st.session_state.db_descuentos, dict):
+        st.session_state.db_descuentos = {"cartoncillo": 0.0, "ondulado_rigidos": 0.0, "narba": 0.0}
+    for _k0 in ["cartoncillo", "ondulado_rigidos", "narba"]:
+        st.session_state.db_descuentos.setdefault(_k0, 0.0)
+
     with col_c1:
         with st.expander("📄 Cartoncillo (€/Kg)", expanded=True):
+            st.session_state.db_descuentos["cartoncillo"] = st.number_input(
+                "Descuento bloque Cartoncillo (%)",
+                min_value=0.0, max_value=100.0, step=0.5,
+                value=float(st.session_state.db_descuentos.get("cartoncillo", 0.0)),
+                key="db_desc_cart"
+            )
             for k, v in db["cartoncillo"].items():
                 if k != "Ninguno":
                     db["cartoncillo"][k]["precio_kg"] = st.number_input(
@@ -781,15 +825,25 @@ with tab_costes:
                     )
 
         with st.expander("🧱 Ondulado y Rígidos (€/hoja)", expanded=True):
+            st.session_state.db_descuentos["ondulado_rigidos"] = st.number_input(
+                "Descuento bloque Ondulado + Rígidos (%)",
+                min_value=0.0, max_value=100.0, step=0.5,
+                value=float(st.session_state.db_descuentos.get("ondulado_rigidos", 0.0)),
+                key="db_desc_or"
+            )
+
             st.markdown("##### Ondulado")
             for k, v in db["planchas"].items():
                 if k != "Ninguna":
                     st.markdown(f"**{k}**")
-                    cols = st.columns(len(v))
-                    for idx, (sk, sv) in enumerate(v.items()):
+                    # ✅ 'peg' se gestiona en NARBA, aquí solo calidades de plancha
+                    vv = {kk: sv for kk, sv in v.items() if kk != "peg"}
+                    cols = st.columns(len(vv)) if vv else st.columns(1)
+                    for idx, (sk, sv) in enumerate(vv.items()):
                         db["planchas"][k][sk] = cols[idx].number_input(
                             sk, value=float(sv), key=f"cost_pl_{k}_{sk}"
                         )
+
             st.markdown("---")
             st.markdown("##### Rígidos (Precio Hoja + Tamaño)")
             for k, v in db["rigidos"].items():
@@ -802,21 +856,50 @@ with tab_costes:
                     db["rigidos"][k]["h"] = int(c3.number_input("h", value=int(v["h"]), key=f"righ_{k}"))
 
     with col_c2:
-        with st.expander("✨ Acabados", expanded=True):
+        with st.expander("✨ Acabados (otros)", expanded=True):
+            # Laminado digital se mantiene aquí (no NARBA)
+            db["laminado_digital"] = st.number_input(
+                "Laminado Digital", value=float(db.get("laminado_digital", 3.5)), key="cost_lam_dig"
+            )
+
+        with st.expander("🧩 NARBA (Procesos: Contracolado · Peliculado · Troquelado)", expanded=True):
+            st.session_state.db_descuentos["narba"] = st.number_input(
+                "Descuento bloque NARBA (%)",
+                min_value=0.0, max_value=100.0, step=0.5,
+                value=float(st.session_state.db_descuentos.get("narba", 0.0)),
+                key="db_desc_narba"
+            )
+
+            st.markdown("##### Contracolado (€/m² por capa)")
+            for k, v in db["planchas"].items():
+                if k != "Ninguna":
+                    if "peg" in v:
+                        db["planchas"][k]["peg"] = st.number_input(
+                            f"{k} · peg", value=float(v["peg"]), key=f"cost_peg_{k}", format="%.4f"
+                        )
+
+            st.markdown("---")
+            st.markdown("##### Peliculado (€/m²)")
             for k, v in db["peliculado"].items():
                 if k != "Sin Peliculado":
                     db["peliculado"][k] = st.number_input(f"{k}", value=float(v), key=f"cost_pel_{k}")
-            db["laminado_digital"] = st.number_input("Laminado Digital", value=float(db.get("laminado_digital", 3.5)), key="cost_lam_dig")
 
-        with st.expander("🔪 Troquelado", expanded=True):
+            st.markdown("---")
+            st.markdown("##### Troquelado")
             for k, v in db["troquelado"].items():
                 st.markdown(f"**{k}**")
                 c_arr, c_tir = st.columns(2)
-                db["troquelado"][k]["arranque"] = c_arr.number_input(f"Arranque (€)", value=float(v["arranque"]), key=f"trq_arr_{k}")
-                db["troquelado"][k]["tiro"] = c_tir.number_input(f"Tiro (€/h)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}")
+                db["troquelado"][k]["arranque"] = c_arr.number_input(
+                    "Arranque (€)", value=float(v["arranque"]), key=f"trq_arr_{k}"
+                )
+                db["troquelado"][k]["tiro"] = c_tir.number_input(
+                    "Tiro (€/h)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}"
+                )
 
         with st.expander("✂️ Plotter", expanded=True):
-            db["plotter"]["precio_hoja"] = st.number_input("Corte Plotter (€/hoja)", value=float(db["plotter"]["precio_hoja"]), key="plotter_precio")
+            db["plotter"]["precio_hoja"] = st.number_input(
+                "Corte Plotter (€/hoja)", value=float(db["plotter"]["precio_hoja"]), key="plotter_precio"
+            )
 
         with st.expander("🖨️ Impresión Offset (info)", expanded=True):
             st.markdown(
@@ -831,6 +914,7 @@ with tab_costes:
                 """,
                 unsafe_allow_html=True
             )
+
 
 # =========================================================
 # TAB CALCULADORA
@@ -862,9 +946,17 @@ with tab_calculadora:
         st.number_input("Fijo PVP (€)", value=float(st.session_state.imp_fijo_pvp), key="imp_fijo_pvp")
         st.number_input("Multiplicador", step=0.1, value=float(st.session_state.margen), key="margen")
 
+        st.markdown("---")
+        st.number_input("Descuento sobre PROCESOS (%)", min_value=0.0, max_value=100.0, step=0.5, value=float(st.session_state.descuento_procesos), key="descuento_procesos")
+        st.number_input("Margen materiales EXTRA", min_value=1.0, step=0.05, value=float(st.session_state.margen_extras), key="margen_extras")
+        st.number_input("Margen EMBALAJES", min_value=1.0, step=0.05, value=float(st.session_state.margen_embalajes), key="margen_embalajes")
+
     dif_ud = float(st.session_state.dif_ud)
     imp_fijo_pvp = float(st.session_state.imp_fijo_pvp)
     margen = float(st.session_state.margen)
+    descuento_procesos = float(st.session_state.descuento_procesos)
+    margen_extras = float(st.session_state.margen_extras)
+    margen_embalajes = float(st.session_state.margen_embalajes)
 
     st.divider()
 
@@ -1275,6 +1367,12 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             }
         }
 
+        # Descuentos de compra por bloque (BD)
+        db_desc = st.session_state.get("db_descuentos", {}) if isinstance(st.session_state.get("db_descuentos", None), dict) else {}
+        f_cart = 1.0 - (float(db_desc.get("cartoncillo", 0.0)) / 100.0)
+        f_or = 1.0 - (float(db_desc.get("ondulado_rigidos", 0.0)) / 100.0)
+        f_narba = 1.0 - (float(db_desc.get("narba", 0.0)) / 100.0)
+
         for pid, p in st.session_state.piezas_dict.items():
             c_cart_cara = c_cart_dorso = 0.0
             c_ondulado = 0.0
@@ -1310,7 +1408,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                     if p.get("mat_rigido") != "Ninguno":
                         info = db["rigidos"][p["mat_rigido"]]
                         mw, mh = float(info["w"]), float(info["h"])
-                        precio_hoja = float(info["precio_ud"])
+                        precio_hoja = float(info["precio_ud"]) * f_or
                     else:
                         mw = mh = precio_hoja = 0.0
 
@@ -1346,14 +1444,14 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                         m2_plancha = (float(p["pl_w"]) * float(p["pl_h"])) / 1_000_000
                     else:
                         m2_plancha = m2_papel
-                    c_ondulado = hp_produccion * m2_plancha * float(db["planchas"][p["pl"]][p.get("ap","B/C")])
+                    c_ondulado = hp_produccion * m2_plancha * float(db["planchas"][p["pl"]][p.get("ap","B/C")]) * f_or
 
             if p.get("pf", "Ninguno") != "Ninguno" and m2_papel > 0:
-                c_cart_cara = hp_papel_f * m2_papel * (float(p.get("gf", 0))/1000.0) * float(db["cartoncillo"][p["pf"]]["precio_kg"])
+                c_cart_cara = hp_papel_f * m2_papel * (float(p.get("gf", 0))/1000.0) * float(db["cartoncillo"][p["pf"]]["precio_kg"]) * f_cart
             if p.get("pd", "Ninguno") != "Ninguno" and m2_papel > 0:
-                c_cart_dorso = hp_papel_d * m2_papel * (float(p.get("gd", 0))/1000.0) * float(db["cartoncillo"][p["pd"]]["precio_kg"])
+                c_cart_dorso = hp_papel_d * m2_papel * (float(p.get("gd", 0))/1000.0) * float(db["cartoncillo"][p["pd"]]["precio_kg"]) * f_cart
 
-            peg_rate = float(db["planchas"]["Microcanal / Canal 3"]["peg"])
+            peg_rate = float(db["planchas"]["Microcanal / Canal 3"]["peg"]) * f_narba
             if capas > 0 and m2_papel > 0:
                 c_contracolado = hp_produccion * m2_papel * peg_rate * capas
 
@@ -1381,9 +1479,9 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_pel_cara = 0.0
             c_pel_dorso = 0.0
             if p.get("pel","Sin Peliculado") != "Sin Peliculado":
-                c_pel_cara = hp_produccion * m2_papel * float(db["peliculado"][p["pel"]])
+                c_pel_cara = hp_produccion * m2_papel * float(db["peliculado"][p["pel"]]) * f_narba
             if p.get("pd","Ninguno") != "Ninguno" and p.get("pel_d","Sin Peliculado") != "Sin Peliculado":
-                c_pel_dorso = hp_produccion * m2_papel * float(db["peliculado"][p["pel_d"]])
+                c_pel_dorso = hp_produccion * m2_papel * float(db["peliculado"][p["pel_d"]]) * f_narba
             c_pel_total += (c_pel_cara + c_pel_dorso)
 
             cor_sel = p.get("cor_default", "Troquelado")
@@ -1392,8 +1490,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
 
             cat = "Grande (> 1000x700)" if (h>1000 or w>700) else ("Pequeño (< 1000x700)" if (h<1000 and w<700) else "Mediano (Estándar)")
             if cor_sel == "Troquelado":
-                arr = float(db["troquelado"][cat]["arranque"]) if bool(p.get("cobrar_arreglo", True)) else 0.0
-                tiro = float(db["troquelado"][cat]["tiro"])
+                arr = float(db["troquelado"][cat]["arranque"]) * f_narba if bool(p.get("cobrar_arreglo", True)) else 0.0
+                tiro = float(db["troquelado"][cat]["tiro"]) * f_narba
                 c_troquel_taller = arr + (hp_produccion * tiro)
             else:
                 c_plotter = hp_produccion * float(db["plotter"]["precio_hoja"])
@@ -1454,18 +1552,33 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             ext_det.append({"concepto": ext.get("concepto",""), "modo": ext.get("modo",""), "tipo_aplicado": tipo, "valor_input": val, "coste_total": coste})
         tot_cat["procesos"]["externos"] += ext_total
 
-        pv_emb_total = (emb_compra_total * 1.4)
-        pv_material_total = ((coste_f + c_mo) * margen) + imp_fijo_pvp
-        pv_material_unit = pv_material_total / q_n
+        pv_emb_total = (emb_compra_total * margen_embalajes)
+
+        # Venta producido (excluye extras, embalajes y troquel)
+        materiales_cost = float(tot_cat["materiales"]["cartoncillo"] + tot_cat["materiales"]["ondulado"] + tot_cat["materiales"]["rigidos"])
+        procesos_cost = float(sum(tot_cat["procesos"].values()))  # incluye externos, manipulación y dificultad
+
+        pv_materiales_total = materiales_cost * margen
+        pv_procesos_total = (procesos_cost * margen) + imp_fijo_pvp
+
+        # ✅ Descuento SOLO sobre procesos (no afecta extras, embalajes ni troqueles)
+        pv_procesos_total = pv_procesos_total * (1.0 - (descuento_procesos / 100.0))
+
+        pv_producido_total = pv_materiales_total + pv_procesos_total
+        pv_material_unit = pv_producido_total / q_n
+
+        pv_extras_total = (c_ext * margen_extras)
+        pv_extras_unit = pv_extras_total / q_n if q_n > 0 else 0.0
 
         tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
 
-        pvp_total_todo = ((coste_f + c_ext + ext_total + c_mo) * margen) + imp_fijo_pvp + pv_emb_total + tot_pv_trq
+        pvp_total_todo = pv_producido_total + pv_extras_total + pv_emb_total + tot_pv_trq
         unit_todo = pvp_total_todo / q_n
 
         res_final.append({
             "Cantidad": q_n,
             "Precio venta material (unitario)": f"{pv_material_unit:.3f}€",
+            "Precio venta extras (unitario)": f"{pv_extras_unit:.3f}€",
             "Precio venta embalaje (unitario)": f"{(pv_emb_total/q_n):.3f}€",
             "Precio venta troquel (TOTAL)": f"{tot_pv_trq:.2f}€",
             "Precio venta unitario (todo)": f"{unit_todo:.3f}€",
@@ -1624,6 +1737,7 @@ if modo_comercial and res_final:
             "<tr>"
             f"<td><b>{r['Cantidad']}</b></td>"
             f"<td>{r['Precio venta material (unitario)']}</td>"
+            f"<td>{r.get('Precio venta extras (unitario)', '0.000€')}</td>"
             f"<td>{r['Precio venta embalaje (unitario)']}</td>"
             f"<td>{r['Precio venta troquel (TOTAL)']}</td>"
             f"<td><b style='color:#1E88E5;'>{r['Precio venta unitario (todo)']}</b></td>"
