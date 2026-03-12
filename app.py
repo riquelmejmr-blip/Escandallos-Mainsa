@@ -1851,13 +1851,22 @@ with tab_debug:
         st.subheader("Resumen compras (materiales y procesos)")
         comp = compras_legible.get(sq, {})
         if comp:
+            materiales = comp.get("Materiales", {}) or {}
+            procesos = comp.get("Procesos", {}) or {}
+
             c1, c2 = st.columns(2)
             with c1:
                 st.markdown("**Materiales (compra estimada)**")
-                st.dataframe(pd.DataFrame([comp.get("Materiales", {})]), use_container_width=True)
+                st.dataframe(pd.DataFrame([materiales]), use_container_width=True)
             with c2:
                 st.markdown("**Procesos (coste estimado)**")
-                st.dataframe(pd.DataFrame([comp.get("Procesos", {})]), use_container_width=True)
+                st.dataframe(pd.DataFrame([procesos]), use_container_width=True)
+
+            total_materiales = sum(float(v or 0.0) for v in materiales.values())
+            total_procesos = sum(float(v or 0.0) for v in procesos.values())
+            total_compra = total_materiales + total_procesos
+
+            st.metric("TOTAL COSTE (compra) · Materiales + Procesos", f"{total_compra:,.2f}€")
 
         st.subheader("Externos (detalle)")
         exd = desc_full.get(sq, {}).get("externos", [])
