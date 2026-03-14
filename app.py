@@ -95,7 +95,7 @@ PRODUCTOS_FLEXICO = {
     "163401": {"desc": "PINZA PORTA ETIQ ARTICUL TRSP", "precio": 0.3474},
     "172012": {"desc": "GANCHO SUSPENSION +HILO 1,2M", "precio": 0.1500},
     "172078": {"desc": "GANCHO DOBLE METALICO 300mm", "precio": 0.0690},
-    "950221": {"desc": "BASE GIRATORIA Ø 150 MM", "precio": 1.9400}
+    "950221": {"desc": "BASE GIRATORIA Ø 150 MM", "precio": 1.9400},
 }
 OPCIONES_FLEXICO = [f"{k} - {v['desc']}" for k, v in PRODUCTOS_FLEXICO.items()]
 
@@ -146,36 +146,44 @@ PRECIOS_BASE = {
     },
     "laminado_digital": 3.5,
     "extras_base": {
-        "CINTA D/CARA": 0.26, "CINTA LOHMAN": 0.49, "CINTA GEL": 1.2,
-        "GOMA TERMINALES": 0.079, "IMAN 20x2mm": 1.145, "TUBOS": 1.06,
-        "REMACHES": 0.049, "VELCRO": 0.43, "PUNTO ADHESIVO": 0.08
+        "CINTA D/CARA": 0.26,
+        "CINTA LOHMAN": 0.49,
+        "CINTA GEL": 1.2,
+        "GOMA TERMINALES": 0.079,
+        "IMAN 20x2mm": 1.145,
+        "TUBOS": 1.06,
+        "REMACHES": 0.049,
+        "VELCRO": 0.43,
+        "PUNTO ADHESIVO": 0.08,
     },
     "troquelado": {
         "Pequeño (< 1000x700)": {"arranque": 48.19, "tiro": 0.06},
         "Mediano (Estándar)": {"arranque": 80.77, "tiro": 0.09},
-        "Grande (> 1000x700)": {"arranque": 107.80, "tiro": 0.135}
+        "Grande (> 1000x700)": {"arranque": 107.80, "tiro": 0.135},
     },
-    "plotter": {"precio_hoja": 2.03}
+    "plotter": {"precio_hoja": 2.03},
 }
 
 FORMATOS_STD = {
-    "Personalizado": (0, 0), "1600x1200": (1600, 1200), "1600x1100": (1600, 1100),
-    "1400x1000": (1400, 1000), "1300x900": (1300, 900), "1200x800": (1200, 800),
-    "1100x800": (1100, 800), "1000x700": (1000, 700), "900x650": (900, 650),
-    "800x550": (800, 550), "700x500": (700, 500)
+    "Personalizado": (0, 0),
+    "1600x1200": (1600, 1200),
+    "1600x1100": (1600, 1100),
+    "1400x1000": (1400, 1000),
+    "1300x900": (1300, 900),
+    "1200x800": (1200, 800),
+    "1100x800": (1100, 800),
+    "1000x700": (1000, 700),
+    "900x650": (900, 650),
+    "800x550": (800, 550),
+    "700x500": (700, 500),
 }
 
 # =========================================================
-# MERMAS (AUTO)
+# MERMAS (AUTO) - NUEVA TABLA
 # =========================================================
 def calcular_mermas_estandar(n, es_digital=False):
-    """Devuelve (merma_rodaje_proceso_hojas, merma_arranque_impresion_hojas).
-
-    ⚠️ Actualización (Mar 2026):
-    - La merma se calcula por tramos (según guía MAINSA).
-    - Se interpreta 'n' como nº de hojas netas del formato (q * pliegos/ud), porque un formato
-      puede tener distinto rendimiento (p.ej. 1/hoja vs 4/hoja) y NO pueden compartir merma.
-    - 'es_digital' se mantiene por compatibilidad pero no cambia la tabla.
+    """Devuelve (merma_procesos_hojas, merma_impresion_hojas).
+    'n' se interpreta como nº de hojas netas del formato (cantidad * pliegos/ud).
     """
     n = max(0, int(math.ceil(float(n))))
 
@@ -208,14 +216,17 @@ def parse_cantidades(s: str):
             out.append(int(x))
     return out
 
+
 # =========================================================
 # EMBALAJES (múltiples)
 # =========================================================
 TIPOS_EMB = ["Manual", "Embalaje Guaina (Automático)", "Embalaje en Plano", "Embalaje en Volumen"]
 EMB_MATS = ["Canal 5", "D/D"]
 
+
 def emb_mult(material: str) -> float:
     return 1.5 if material == "D/D" else 1.0
+
 
 def embalaje_plano_unit(L_mm, W_mm, H_mm, Q):
     if Q <= 0 or L_mm <= 0 or W_mm <= 0 or H_mm <= 0:
@@ -227,6 +238,7 @@ def embalaje_plano_unit(L_mm, W_mm, H_mm, Q):
     P = ((152.0 + (20.0 * S)) / float(Q)) + 0.15 + (1.02 * S)
     return float(P), float(S)
 
+
 def embalaje_volumen_unit(L_mm, A_mm, H_mm, Q):
     if Q <= 0 or L_mm <= 0 or A_mm <= 0 or H_mm <= 0:
         return 0.0, 0.0
@@ -237,6 +249,7 @@ def embalaje_volumen_unit(L_mm, A_mm, H_mm, Q):
     P = ((20.0 + (8.0 * S)) / float(Q)) + (0.64 * S)
     return float(P), float(S)
 
+
 def crear_embalaje_vacio(idx):
     return {
         "id": f"emb_{idx}",
@@ -244,21 +257,24 @@ def crear_embalaje_vacio(idx):
         "tipo": "Manual",
         "material": "Canal 5",
         "dims": {"L": 0.0, "W": 0.0, "H": 0.0},
-        "costes": {}
+        "costes": {},
     }
+
 
 # =========================================================
 # EXTERNOS (PROVEEDORES ESPORÁDICOS)
 # =========================================================
 EXT_TIPOS_COSTE = ["Unitario (€/ud)", "Total (€)"]
 
+
 def crear_externo_vacio(idx: int):
     return {
         "id": f"ext_{idx}",
         "concepto": f"Externo {idx+1}",
         "modo": "Unitario (€/ud)",
-        "costes": {}  # por cantidad -> float (€/ud o € total)
+        "costes": {},  # por cantidad -> float (€/ud o € total)
     }
+
 
 # =========================================================
 # RÍGIDOS - MERMA FIJA (si NO hay contracolado)
@@ -278,17 +294,11 @@ def merma_rigido_fija(hojas_netas: int) -> int:
         return 7
     return 10
 
+
 # =========================================================
-# IMPRESIÓN OFFSET - NUEVA TARIFA
+# IMPRESIÓN OFFSET - TARIFA
 # =========================================================
 def coste_offset_por_tinta(n_hojas: int) -> float:
-    """
-    Regla verificada con ejemplo:
-    - Mínimo 85€ por tinta.
-    - Hojas extra hasta 500: 0,0875€/hoja/tinta (contando desde hoja 101).
-    - A partir de 501: 120€/tinta (mantiene el comportamiento anterior base).
-    - A partir de 2001: +0,015€/hoja/tinta (permite cuadrar 2500 → 510 con 4 tintas)
-    """
     n = max(0, int(round(n_hojas)))
     if n <= 100:
         return 85.0
@@ -300,6 +310,7 @@ def coste_offset_por_tinta(n_hojas: int) -> float:
         base += (n - 2000) * 0.015
     return base
 
+
 # =========================================================
 # FORMAS
 # =========================================================
@@ -308,20 +319,33 @@ def crear_forma_vacia(index):
     return {
         "nombre": f"Forma {index}",
         "pliegos": 1.0,
-        "w": 0, "h": 0,
-        "pf": "Ninguno", "gf": 0,
-        "pd": "Ninguno", "gd": 0,
+        "w": 0,
+        "h": 0,
+        "pf": "Ninguno",
+        "gf": 0,
+        "pd": "Ninguno",
+        "gd": 0,
         "tipo_base": "Ondulado/Cartón",
-        "pl": "Ninguna", "ap": "B/C",
-        "pl_dif": False, "pl_h": 0, "pl_w": 0,
+        "pl": "Ninguna",
+        "ap": "B/C",
+        "pl_dif": False,
+        "pl_h": 0,
+        "pl_w": 0,
         "mat_rigido": "Ninguno",
         "rig_manual": False,
-        "rig_w": 0, "rig_h": 0, "rig_precio_ud": 0.0,
-        "im": "No", "nt": 0, "ba": False,
-        "im_d": "No", "nt_d": 0, "ba_d": False,
+        "rig_w": 0,
+        "rig_h": 0,
+        "rig_precio_ud": 0.0,
+        "im": "No",
+        "nt": 0,
+        "ba": False,
+        "im_d": "No",
+        "nt_d": 0,
+        "ba_d": False,
         "pel": "Sin Peliculado",
         "pel_d": "Sin Peliculado",
-        "ld": False, "ld_d": False,
+        "ld": False,
+        "ld_d": False,
         "cor_default": "Troquelado",
         "cor_by_qty": {},
         "cobrar_arreglo": True,
@@ -329,54 +353,79 @@ def crear_forma_vacia(index):
         "impresiones_extra": [],
     }
 
+
 def es_digital_en_proyecto(piezas_dict):
     for p in piezas_dict.values():
         if p.get("im") == "Digital" or p.get("im_d") == "Digital":
             return True
     return False
 
+
 # =========================================================
 # SESSION STATE INIT
 # =========================================================
-if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
-if "piezas_dict" not in st.session_state: st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
-if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extras_grabados = []
-if "embalajes" not in st.session_state: st.session_state.embalajes = [crear_embalaje_vacio(0)]
-if "externos" not in st.session_state: st.session_state.externos = [crear_externo_vacio(0)]
-if "mermas_imp_manual" not in st.session_state: st.session_state.mermas_imp_manual = {}
-if "mermas_proc_manual" not in st.session_state: st.session_state.mermas_proc_manual = {}
-if "mermas_imp_pieza" not in st.session_state: st.session_state.mermas_imp_pieza = {}
-if "mermas_proc_pieza" not in st.session_state: st.session_state.mermas_proc_pieza = {}
-if "mermas_auto_pieza" not in st.session_state: st.session_state.mermas_auto_pieza = {}
+if "db_precios" not in st.session_state:
+    st.session_state.db_precios = deepcopy(PRECIOS_BASE)
+if "piezas_dict" not in st.session_state:
+    st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
+if "lista_extras_grabados" not in st.session_state:
+    st.session_state.lista_extras_grabados = []
+if "embalajes" not in st.session_state:
+    st.session_state.embalajes = [crear_embalaje_vacio(0)]
+if "externos" not in st.session_state:
+    st.session_state.externos = [crear_externo_vacio(0)]
+if "mermas_imp_manual" not in st.session_state:
+    st.session_state.mermas_imp_manual = {}
+if "mermas_proc_manual" not in st.session_state:
+    st.session_state.mermas_proc_manual = {}
+if "mermas_imp_pieza" not in st.session_state:
+    st.session_state.mermas_imp_pieza = {}
+if "mermas_proc_pieza" not in st.session_state:
+    st.session_state.mermas_proc_pieza = {}
+if "mermas_auto_pieza" not in st.session_state:
+    st.session_state.mermas_auto_pieza = {}
 
-if "brf" not in st.session_state: st.session_state.brf = ""
-if "cli" not in st.session_state: st.session_state.cli = ""
-if "desc" not in st.session_state: st.session_state.desc = ""
-if "cants_str_saved" not in st.session_state: st.session_state.cants_str_saved = ""
+if "brf" not in st.session_state:
+    st.session_state.brf = ""
+if "cli" not in st.session_state:
+    st.session_state.cli = ""
+if "desc" not in st.session_state:
+    st.session_state.desc = ""
+if "cants_str_saved" not in st.session_state:
+    st.session_state.cants_str_saved = ""
 
-if "unidad_t" not in st.session_state: st.session_state.unidad_t = "Segundos"
-if "t_input" not in st.session_state: st.session_state.t_input = 0.0
+if "unidad_t" not in st.session_state:
+    st.session_state.unidad_t = "Segundos"
+if "t_input" not in st.session_state:
+    st.session_state.t_input = 0.0
 
-if "dif_ud" not in st.session_state: st.session_state.dif_ud = 0.091
-if "imp_fijo_pvp" not in st.session_state: st.session_state.imp_fijo_pvp = 500.0
-if "margen" not in st.session_state: st.session_state.margen = 2.2
+if "dif_ud" not in st.session_state:
+    st.session_state.dif_ud = 0.091
+if "imp_fijo_pvp" not in st.session_state:
+    st.session_state.imp_fijo_pvp = 500.0
+if "margen" not in st.session_state:
+    st.session_state.margen = 2.2
 
-if "descuento_procesos" not in st.session_state: st.session_state.descuento_procesos = 0.0
-if "margen_extras" not in st.session_state: st.session_state.margen_extras = 1.4
-if "margen_embalajes" not in st.session_state: st.session_state.margen_embalajes = 1.4
+if "descuento_procesos" not in st.session_state:
+    st.session_state.descuento_procesos = 0.0
+if "margen_extras" not in st.session_state:
+    st.session_state.margen_extras = 1.4
+if "margen_embalajes" not in st.session_state:
+    st.session_state.margen_embalajes = 1.4
 
 if "db_descuentos" not in st.session_state:
-    # Descuentos de compra por bloque (en %). Se aplican a los costes en cálculo.
     st.session_state.db_descuentos = {
         "cartoncillo": 0.0,
         "ondulado_rigidos": 0.0,
         "narba": 0.0,
     }
 
-
-if "_last_import_hash" not in st.session_state: st.session_state._last_import_hash = None
-if "_export_blob" not in st.session_state: st.session_state._export_blob = None
-if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
+if "_last_import_hash" not in st.session_state:
+    st.session_state._last_import_hash = None
+if "_export_blob" not in st.session_state:
+    st.session_state._export_blob = None
+if "_export_filename" not in st.session_state:
+    st.session_state._export_filename = "oferta.json"
 
 # =========================================================
 # FIX IMPORT: PURGE KEYS DE WIDGETS
@@ -392,10 +441,39 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         lista_cants = []
 
     base_prefixes = [
-        "n_", "p_", "std_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_",
-        "pf_", "gf_", "tb_", "pl_", "pldif_", "plh_", "plw_", "ap_",
-        "rigman_", "rigwman_", "righman_", "rigpman_", "mrig_",
-        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
+        "n_",
+        "p_",
+        "std_",
+        "h_",
+        "w_",
+        "im_",
+        "nt_",
+        "ba_",
+        "ld_",
+        "pel_",
+        "pf_",
+        "gf_",
+        "tb_",
+        "pl_",
+        "pldif_",
+        "plh_",
+        "plw_",
+        "ap_",
+        "rigman_",
+        "rigwman_",
+        "righman_",
+        "rigpman_",
+        "mrig_",
+        "pd_",
+        "gd_",
+        "cor_def_",
+        "arr_",
+        "pvt_",
+        "im_d_",
+        "nt_d_",
+        "ba_d_",
+        "ld_d_",
+        "pel_d_",
     ]
 
     for pid in piezas_ids:
@@ -413,13 +491,12 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         if kdel in st.session_state:
             del st.session_state[kdel]
 
-    # Mermas (legacy global)
     for q in lista_cants:
         for k in [f"mi_{q}", f"mp_{q}"]:
             if k in st.session_state:
                 del st.session_state[k]
 
-    # Mermas por pieza/formato (nuevo)
+    # Mermas por pieza (V44+)
     for pid in piezas_ids:
         for q in lista_cants:
             for k in [f"mi_{pid}_{q}", f"mp_{pid}_{q}", f"merma_auto_{pid}_{q}"]:
@@ -432,7 +509,15 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
                 del st.session_state[k]
 
     for ei in range(max(0, embalajes_len)):
-        for k in [f"emb_name_{ei}", f"emb_tipo_{ei}", f"emb_mat_{ei}", f"embL_{ei}", f"embW_{ei}", f"embH_{ei}", f"emb_del_{ei}"]:
+        for k in [
+            f"emb_name_{ei}",
+            f"emb_tipo_{ei}",
+            f"emb_mat_{ei}",
+            f"embL_{ei}",
+            f"embW_{ei}",
+            f"embH_{ei}",
+            f"emb_del_{ei}",
+        ]:
             if k in st.session_state:
                 del st.session_state[k]
         for q in lista_cants:
@@ -448,6 +533,7 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
             kq = f"ext_{xi}_{q}"
             if kq in st.session_state:
                 del st.session_state[kq]
+
 
 # =========================================================
 # FIX IMPORT: SEED KEYS DE WIDGETS CON LO IMPORTADO (TODAS LAS FORMAS)
@@ -503,26 +589,30 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
         st.session_state[f"ld_d_{pid}"] = bool(p.get("ld_d", False))
         st.session_state[f"pel_d_{pid}"] = p.get("pel_d", "Sin Peliculado")
 
+
 # =========================================================
-# IMPORT NORMALIZADO (ROBUSTO): GARANTIZA QUE SE CARGAN TODOS LOS CAMPOS
+# IMPORT NORMALIZADO
 # =========================================================
 def _coerce_bool(x, default=False):
     try:
         return bool(x)
-    except:
+    except Exception:
         return default
+
 
 def _coerce_int(x, default=0):
     try:
         return int(float(x))
-    except:
+    except Exception:
         return default
+
 
 def _coerce_float(x, default=0.0):
     try:
         return float(x)
-    except:
+    except Exception:
         return default
+
 
 def _normalizar_pieza_dict(pid: int, v: dict):
     base = crear_forma_vacia(pid)
@@ -542,7 +632,6 @@ def _normalizar_pieza_dict(pid: int, v: dict):
 
     base["tipo_base"] = str(base.get("tipo_base", "Ondulado/Cartón"))
 
-    # ✅ blindaje plancha / calidad
     base["pl"] = str(base.get("pl", "Ninguna"))
     base["ap"] = str(base.get("ap", "B/C"))
     base["pl_dif"] = _coerce_bool(base.get("pl_dif", False), False)
@@ -576,7 +665,7 @@ def _normalizar_pieza_dict(pid: int, v: dict):
     base["cobrar_arreglo"] = _coerce_bool(base.get("cobrar_arreglo", True), True)
     base["pv_troquel"] = _coerce_float(base.get("pv_troquel", 0.0), 0.0)
 
-    # ✅ V44+: soportar varias impresiones por formato
+    # ✅ V44+: varias impresiones por formato
     if not isinstance(base.get("impresiones_extra", []), list):
         base["impresiones_extra"] = []
     else:
@@ -610,6 +699,7 @@ def _normalizar_pieza_dict(pid: int, v: dict):
 
     return base
 
+
 def normalizar_import(di: dict):
     prev_cants = parse_cantidades(st.session_state.get("cants_str_saved", ""))
     prev_piezas_ids = list(st.session_state.get("piezas_dict", {}).keys()) if isinstance(st.session_state.get("piezas_dict", None), dict) else []
@@ -632,18 +722,22 @@ def normalizar_import(di: dict):
 
     params = di.get("params", {})
     if isinstance(params, dict):
-        if "dif_ud" in params: st.session_state.dif_ud = float(params["dif_ud"])
-        if "imp_fijo_pvp" in params: st.session_state.imp_fijo_pvp = float(params["imp_fijo_pvp"])
-        if "margen" in params: st.session_state.margen = float(params["margen"])
-        # ✅ Nuevos (compatibles hacia atrás)
-        if "descuento_procesos" in params: st.session_state.descuento_procesos = float(params["descuento_procesos"])
-        if "margen_extras" in params: st.session_state.margen_extras = float(params["margen_extras"])
-        if "margen_embalajes" in params: st.session_state.margen_embalajes = float(params["margen_embalajes"])
+        if "dif_ud" in params:
+            st.session_state.dif_ud = float(params["dif_ud"])
+        if "imp_fijo_pvp" in params:
+            st.session_state.imp_fijo_pvp = float(params["imp_fijo_pvp"])
+        if "margen" in params:
+            st.session_state.margen = float(params["margen"])
+        if "descuento_procesos" in params:
+            st.session_state.descuento_procesos = float(params["descuento_procesos"])
+        if "margen_extras" in params:
+            st.session_state.margen_extras = float(params["margen_extras"])
+        if "margen_embalajes" in params:
+            st.session_state.margen_embalajes = float(params["margen_embalajes"])
 
     if isinstance(di.get("db_precios", None), dict):
         st.session_state.db_precios = di["db_precios"]
 
-    # ✅ Descuentos por bloque (si vienen en el JSON)
     if isinstance(di.get("db_descuentos", None), dict):
         cur = st.session_state.get("db_descuentos", {})
         if not isinstance(cur, dict):
@@ -662,16 +756,11 @@ def normalizar_import(di: dict):
 
     raw = []
     piezas_in = di.get("piezas", None)
-
-    # ✅ Import robusto:
-    # - Si el JSON trae piezas como dict ({"1": {...}, "6": {...}}), mantenemos SUS IDs
-    #   para que "Forma 6" siga siendo la 6 (y no se renumere).
-    # - Si viene como lista, seguimos usando 1..n.
     if isinstance(piezas_in, dict):
         for k, v in piezas_in.items():
             try:
                 ik = int(k)
-            except:
+            except Exception:
                 continue
             if isinstance(v, dict):
                 raw.append((ik, v))
@@ -709,16 +798,13 @@ def normalizar_import(di: dict):
     if isinstance(di.get("mermas_proc", None), dict):
         st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in di["mermas_proc"].items()}
 
-    # ✅ NUEVO (V44+): mermas por pieza/formato (compatibles hacia atrás)
-    # Formato esperado:
-    #   mermas_imp_pieza: {"1": {"500": 190, ...}, "2": {...}}
-    #   mermas_proc_pieza: {"1": {"500": 50, ...}, "2": {...}}
+    # ✅ V44+: mermas por pieza (compatibles hacia atrás)
     if isinstance(di.get("mermas_imp_pieza", None), dict):
         out = {}
         for kpid, vv in di["mermas_imp_pieza"].items():
             try:
                 ipid = int(kpid)
-            except:
+            except Exception:
                 continue
             if isinstance(vv, dict):
                 out[ipid] = {int(kq): int(vq) for kq, vq in vv.items() if str(kq).isdigit()}
@@ -729,7 +815,7 @@ def normalizar_import(di: dict):
         for kpid, vv in di["mermas_proc_pieza"].items():
             try:
                 ipid = int(kpid)
-            except:
+            except Exception:
                 continue
             if isinstance(vv, dict):
                 out[ipid] = {int(kq): int(vq) for kq, vq in vv.items() if str(kq).isdigit()}
@@ -740,7 +826,7 @@ def normalizar_import(di: dict):
         for kpid, vv in di["mermas_auto_pieza"].items():
             try:
                 ipid = int(kpid)
-            except:
+            except Exception:
                 continue
             if isinstance(vv, dict):
                 out[ipid] = {int(kq): bool(vq) for kq, vq in vv.items()}
@@ -792,10 +878,8 @@ def normalizar_import(di: dict):
         extras_len=len(st.session_state.lista_extras_grabados),
     )
 
-    seed_widget_keys_from_import(
-        lista_cants=lista_cants_import,
-        piezas_dict=st.session_state.piezas_dict
-    )
+    seed_widget_keys_from_import(lista_cants=lista_cants_import, piezas_dict=st.session_state.piezas_dict)
+
 
 # =========================================================
 # EXPORT ROBUSTO
@@ -812,7 +896,14 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "desc": st.session_state.desc,
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input)},
-        "params": {"dif_ud": float(st.session_state.dif_ud), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
+        "params": {
+            "dif_ud": float(st.session_state.dif_ud),
+            "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp),
+            "margen": float(st.session_state.margen),
+            "descuento_procesos": float(st.session_state.descuento_procesos),
+            "margen_extras": float(st.session_state.margen_extras),
+            "margen_embalajes": float(st.session_state.margen_embalajes),
+        },
         "db_precios": deepcopy(st.session_state.db_precios),
         "db_descuentos": deepcopy(st.session_state.db_descuentos),
         "piezas": piezas_out,
@@ -830,6 +921,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
     if resumen_costes is not None:
         data["resumen_costes"] = resumen_costes
     return data
+
 
 # =========================================================
 # CSS
@@ -856,7 +948,7 @@ st.markdown(CSS_COMERCIAL, unsafe_allow_html=True)
 st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 
 # =========================================================
-# SIDEBAR (visualización + import/export)
+# SIDEBAR
 # =========================================================
 with st.sidebar:
     st.header("📦 JSON / Visualización")
@@ -891,24 +983,23 @@ with st.sidebar:
                 "💾 Descargar JSON",
                 data=st.session_state._export_blob,
                 file_name=st.session_state._export_filename,
-                mime="application/json"
+                mime="application/json",
             )
         else:
             st.caption("Calcula una vez para habilitar la exportación.")
 
 # =========================================================
-# PESTAÑAS (SIEMPRE ADMIN)
+# PESTAÑAS
 # =========================================================
 tab_calculadora, tab_costes, tab_debug = st.tabs(["🧮 Calculadora", "💰 Base de Datos", "🔍 Desglose"])
 
 # =========================================================
-# TAB COSTES (siempre visible)
+# TAB COSTES (igual)
 # =========================================================
 with tab_costes:
     col_c1, col_c2 = st.columns(2)
     db = st.session_state.db_precios
 
-    # defaults descuentos (por si vienen viejos)
     if "db_descuentos" not in st.session_state or not isinstance(st.session_state.db_descuentos, dict):
         st.session_state.db_descuentos = {"cartoncillo": 0.0, "ondulado_rigidos": 0.0, "narba": 0.0}
     for _k0 in ["cartoncillo", "ondulado_rigidos", "narba"]:
@@ -918,9 +1009,11 @@ with tab_costes:
         with st.expander("📄 Cartoncillo (€/Kg)", expanded=True):
             st.session_state.db_descuentos["cartoncillo"] = st.number_input(
                 "Descuento bloque Cartoncillo (%)",
-                min_value=0.0, max_value=100.0, step=0.5,
+                min_value=0.0,
+                max_value=100.0,
+                step=0.5,
                 value=float(st.session_state.db_descuentos.get("cartoncillo", 0.0)),
-                key="db_desc_cart"
+                key="db_desc_cart",
             )
             for k, v in db["cartoncillo"].items():
                 if k != "Ninguno":
@@ -931,47 +1024,43 @@ with tab_costes:
         with st.expander("🧱 Ondulado y Rígidos (€/hoja)", expanded=True):
             st.session_state.db_descuentos["ondulado_rigidos"] = st.number_input(
                 "Descuento bloque Ondulado + Rígidos (%)",
-                min_value=0.0, max_value=100.0, step=0.5,
+                min_value=0.0,
+                max_value=100.0,
+                step=0.5,
                 value=float(st.session_state.db_descuentos.get("ondulado_rigidos", 0.0)),
-                key="db_desc_or"
+                key="db_desc_or",
             )
 
             st.markdown("##### Ondulado")
             for k, v in db["planchas"].items():
                 if k != "Ninguna":
                     st.markdown(f"**{k}**")
-                    # ✅ 'peg' se gestiona en NARBA, aquí solo calidades de plancha
                     vv = {kk: sv for kk, sv in v.items() if kk != "peg"}
                     cols = st.columns(len(vv)) if vv else st.columns(1)
                     for idx, (sk, sv) in enumerate(vv.items()):
-                        db["planchas"][k][sk] = cols[idx].number_input(
-                            sk, value=float(sv), key=f"cost_pl_{k}_{sk}"
-                        )
+                        db["planchas"][k][sk] = cols[idx].number_input(sk, value=float(sv), key=f"cost_pl_{k}_{sk}")
 
             st.markdown("---")
             st.markdown("##### Rígidos (Precio Hoja + Tamaño)")
             for k, v in db["rigidos"].items():
                 if k != "Ninguno":
                     c1, c2, c3 = st.columns([3, 1, 1])
-                    db["rigidos"][k]["precio_ud"] = c1.number_input(
-                        f"{k} (€/hoja)", value=float(v["precio_ud"]), key=f"cost_rig_{k}"
-                    )
+                    db["rigidos"][k]["precio_ud"] = c1.number_input(f"{k} (€/hoja)", value=float(v["precio_ud"]), key=f"cost_rig_{k}")
                     db["rigidos"][k]["w"] = int(c2.number_input("w", value=int(v["w"]), key=f"rigw_{k}"))
                     db["rigidos"][k]["h"] = int(c3.number_input("h", value=int(v["h"]), key=f"righ_{k}"))
 
     with col_c2:
         with st.expander("✨ Acabados (otros)", expanded=True):
-            # Laminado digital se mantiene aquí (no NARBA)
-            db["laminado_digital"] = st.number_input(
-                "Laminado Digital", value=float(db.get("laminado_digital", 3.5)), key="cost_lam_dig"
-            )
+            db["laminado_digital"] = st.number_input("Laminado Digital", value=float(db.get("laminado_digital", 3.5)), key="cost_lam_dig")
 
         with st.expander("🧩 NARBA (Procesos: Contracolado · Peliculado · Troquelado)", expanded=True):
             st.session_state.db_descuentos["narba"] = st.number_input(
                 "Descuento bloque NARBA (%)",
-                min_value=0.0, max_value=100.0, step=0.5,
+                min_value=0.0,
+                max_value=100.0,
+                step=0.5,
                 value=float(st.session_state.db_descuentos.get("narba", 0.0)),
-                key="db_desc_narba"
+                key="db_desc_narba",
             )
 
             st.markdown("##### Contracolado (€/m² por capa)")
@@ -993,17 +1082,11 @@ with tab_costes:
             for k, v in db["troquelado"].items():
                 st.markdown(f"**{k}**")
                 c_arr, c_tir = st.columns(2)
-                db["troquelado"][k]["arranque"] = c_arr.number_input(
-                    "Arranque (€)", value=float(v["arranque"]), key=f"trq_arr_{k}"
-                )
-                db["troquelado"][k]["tiro"] = c_tir.number_input(
-                    "Tiro (€/h)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}"
-                )
+                db["troquelado"][k]["arranque"] = c_arr.number_input("Arranque (€)", value=float(v["arranque"]), key=f"trq_arr_{k}")
+                db["troquelado"][k]["tiro"] = c_tir.number_input("Tiro (€/h)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}")
 
         with st.expander("✂️ Plotter", expanded=True):
-            db["plotter"]["precio_hoja"] = st.number_input(
-                "Corte Plotter (€/hoja)", value=float(db["plotter"]["precio_hoja"]), key="plotter_precio"
-            )
+            db["plotter"]["precio_hoja"] = st.number_input("Corte Plotter (€/hoja)", value=float(db["plotter"]["precio_hoja"]), key="plotter_precio")
 
         with st.expander("🖨️ Impresión Offset (info)", expanded=True):
             st.markdown(
@@ -1016,9 +1099,8 @@ with tab_costes:
 • &gt;2000: <b>+0,015€ / hoja / tinta</b><br>
 </div>
                 """,
-                unsafe_allow_html=True
+                unsafe_allow_html=True,
             )
-
 
 # =========================================================
 # TAB CALCULADORA
@@ -1063,37 +1145,6 @@ with tab_calculadora:
     margen_embalajes = float(st.session_state.margen_embalajes)
 
     st.divider()
-
-    if lista_cants and st.session_state.piezas_dict:
-        # ✅ Mermas por pieza (formato): se calculan por hojas netas (= q * pliegos)
-        for pid, pz in st.session_state.piezas_dict.items():
-            st.session_state.mermas_imp_pieza.setdefault(pid, {})
-            st.session_state.mermas_proc_pieza.setdefault(pid, {})
-            st.session_state.mermas_auto_pieza.setdefault(pid, {})
-
-            pl = float(pz.get("pliegos", 1.0))
-            for q in lista_cants:
-                hojas_netas = q * pl
-                mp, mi = calcular_mermas_estandar(hojas_netas)
-
-                # flags auto por defecto
-                st.session_state.mermas_auto_pieza[pid].setdefault(q, True)
-
-                # si auto, refrescamos valores; si manual, respetamos lo que haya
-                if st.session_state.mermas_auto_pieza[pid].get(q, True):
-                    st.session_state.mermas_proc_pieza[pid][q] = int(mp)
-                    st.session_state.mermas_imp_pieza[pid][q] = int(mi)
-                else:
-                    st.session_state.mermas_proc_pieza[pid].setdefault(q, int(mp))
-                    st.session_state.mermas_imp_pieza[pid].setdefault(q, int(mi))
-
-        # ✅ Compatibilidad hacia atrás:
-        # mantenemos los diccionarios globales si alguien depende de ellos (export/import antiguos)
-        for q in lista_cants:
-            if q not in st.session_state.mermas_proc_manual:
-                st.session_state.mermas_proc_manual[q] = calcular_mermas_estandar(q)[0]
-            if q not in st.session_state.mermas_imp_manual:
-                st.session_state.mermas_imp_manual[q] = calcular_mermas_estandar(q)[1]
 
     # -----------------------------------------------------
     # PASO 2: TÉCNICO
@@ -1162,8 +1213,7 @@ with tab_calculadora:
                 p["nombre"] = st.text_input("Etiqueta", p.get("nombre", f"Forma {p_id}"), key=f"n_{p_id}")
                 p["pliegos"] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get("pliegos", 1.0)), format="%.4f", key=f"p_{p_id}")
 
-                st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}",
-                             on_change=callback_medida_estandar, args=(p_id,))
+                st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}", on_change=callback_medida_estandar, args=(p_id,))
 
                 c_h, c_w = st.columns(2)
                 p["h"] = c_h.number_input("Largo Papel (mm)", 0, 5000, value=int(p.get("h", 0)), key=f"h_{p_id}")
@@ -1186,103 +1236,97 @@ with tab_calculadora:
                 p["pel"] = st.selectbox("Peliculado Cara", opts_pel, index=idx_pel, key=f"pel_{p_id}")
 
                 # -------------------------------------------------
-                # (OPCIONAL) Varias impresiones para este formato
+                # Varias impresiones para este formato (opcional)
                 # -------------------------------------------------
                 with st.expander("🖨️ Varias impresiones (opcional)", expanded=False):
                     st.caption("Útil si este formato se imprime en varios modelos (p.ej. 200 + 300 + 500).")
                     if "impresiones_extra" not in p or not isinstance(p.get("impresiones_extra", None), list):
                         p["impresiones_extra"] = []
 
-                    if st.button("➕ Añadir impresión adicional", key=f"add_imp_{p_id}"):
+                    if st.button("➕ Añadir impresión", key=f"add_imp_{p_id}"):
                         new_idx = len(p["impresiones_extra"]) + 1
                         new_id = hashlib.sha256(f"{p_id}-{new_idx}-{p.get('nombre','')}".encode("utf-8")).hexdigest()[:10]
-                        p["impresiones_extra"].append({
-                            "id": new_id,
-                            "nombre": f"Impresión {new_idx}",
-                            "qty": 0,
-                            # copiamos parámetros actuales como punto de partida
-                            "im": p.get("im", "No"),
-                            "nt": int(p.get("nt", 0)),
-                            "ba": bool(p.get("ba", False)),
-                            "ld": bool(p.get("ld", False)),
-                            "pel": p.get("pel", "Sin Peliculado"),
-                            "im_d": p.get("im_d", "No"),
-                            "nt_d": int(p.get("nt_d", 0)),
-                            "ba_d": bool(p.get("ba_d", False)),
-                            "ld_d": bool(p.get("ld_d", False)),
-                            "pel_d": p.get("pel_d", "Sin Peliculado"),
-                            "merma_imp": 0,
-                            "auto_merma": True,
-                        })
+                        p["impresiones_extra"].append(
+                            {
+                                "id": new_id,
+                                "nombre": f"Impresión {new_idx}",
+                                "qty": 0,
+                                "im": p.get("im", "No"),
+                                "nt": int(p.get("nt", 0)),
+                                "ba": bool(p.get("ba", False)),
+                                "ld": bool(p.get("ld", False)),
+                                "pel": p.get("pel", "Sin Peliculado"),
+                                "im_d": p.get("im_d", "No"),
+                                "nt_d": int(p.get("nt_d", 0)),
+                                "ba_d": bool(p.get("ba_d", False)),
+                                "ld_d": bool(p.get("ld_d", False)),
+                                "pel_d": p.get("pel_d", "Sin Peliculado"),
+                                "merma_imp": 0,
+                                "auto_merma": True,
+                            }
+                        )
                         st.rerun()
 
                     if p["impresiones_extra"]:
-                        labels = [f"{it.get('nombre','')} · {int(it.get('qty',0))} uds" for it in p["impresiones_extra"]]
-                        sel = st.selectbox("Selecciona impresión adicional", labels, index=0, key=f"sel_imp_{p_id}")
+                        labels = [f"{it.get('nombre','Impresión')} · {int(it.get('qty',0))} uds" for it in p["impresiones_extra"]]
+                        sel = st.selectbox("Selecciona impresión", labels, index=0, key=f"sel_imp_{p_id}")
                         sel_i = labels.index(sel) if sel in labels else 0
                         it = p["impresiones_extra"][sel_i]
 
                         cI1, cI2 = st.columns([2, 1])
-                        it["nombre"] = cI1.text_input("Nombre", value=str(it.get("nombre", f"Impresión {sel_i+1}")), key=f"imp_nom_{p_id}_{it['id']}")
-                        it["qty"] = int(cI2.number_input("Cantidad (uds)", min_value=0, value=int(it.get("qty", 0)), step=1, key=f"imp_qty_{p_id}_{it['id']}"))
+                        it["nombre"] = cI1.text_input("Nombre", value=str(it.get("nombre", f"Impresión {sel_i+1}")), key=f"imp_nom_{p_id}_{it.get('id',sel_i)}")
+                        it["qty"] = int(cI2.number_input("Cantidad (uds)", min_value=0, value=int(it.get("qty", 0)), step=1, key=f"imp_qty_{p_id}_{it.get('id',sel_i)}"))
 
-                        st.markdown("**Parámetros de impresión (pueden diferir del formato base):**")
                         opts_im2 = ["Offset", "Digital", "No"]
-
                         cpa, cpb = st.columns(2)
                         # Cara
                         val_imx = str(it.get("im", "No"))
                         idx_imx = opts_im2.index(val_imx) if val_imx in opts_im2 else 2
-                        it["im"] = cpa.selectbox("Impresión Cara", opts_im2, index=idx_imx, key=f"imp_im_{p_id}_{it['id']}")
+                        it["im"] = cpa.selectbox("Impresión Cara", opts_im2, index=idx_imx, key=f"imp_im_{p_id}_{it.get('id',sel_i)}")
                         if it["im"] == "Offset":
-                            it["nt"] = int(cpa.number_input("Tintas Cara", 0, 6, int(it.get("nt", 4)), key=f"imp_nt_{p_id}_{it['id']}"))
-                            it["ba"] = bool(cpa.checkbox("Barniz Cara", value=bool(it.get("ba", False)), key=f"imp_ba_{p_id}_{it['id']}"))
+                            it["nt"] = int(cpa.number_input("Tintas Cara", 0, 6, int(it.get("nt", 4)), key=f"imp_nt_{p_id}_{it.get('id',sel_i)}"))
+                            it["ba"] = bool(cpa.checkbox("Barniz Cara", value=bool(it.get("ba", False)), key=f"imp_ba_{p_id}_{it.get('id',sel_i)}"))
                             it["ld"] = False
                         elif it["im"] == "Digital":
-                            it["ld"] = bool(cpa.checkbox("Laminado Digital Cara", value=bool(it.get("ld", False)), key=f"imp_ld_{p_id}_{it['id']}"))
-                            it["nt"] = int(it.get("nt", 0))
-                            it["ba"] = bool(it.get("ba", False))
-                        it["pel"] = cpa.selectbox("Peliculado Cara", opts_pel, index=opts_pel.index(it.get("pel", "Sin Peliculado")) if it.get("pel", "Sin Peliculado") in opts_pel else 0, key=f"imp_pel_{p_id}_{it['id']}")
+                            it["ld"] = bool(cpa.checkbox("Laminado Digital Cara", value=bool(it.get("ld", False)), key=f"imp_ld_{p_id}_{it.get('id',sel_i)}"))
+                        it["pel"] = cpa.selectbox("Peliculado Cara", opts_pel, index=opts_pel.index(it.get("pel", "Sin Peliculado")) if it.get("pel", "Sin Peliculado") in opts_pel else 0, key=f"imp_pel_{p_id}_{it.get('id',sel_i)}")
 
-                        # Dorso (solo si hay cartoncillo dorso)
+                        # Dorso
                         val_imdx = str(it.get("im_d", "No"))
                         idx_imdx = opts_im2.index(val_imdx) if val_imdx in opts_im2 else 2
-                        it["im_d"] = cpb.selectbox("Impresión Dorso", opts_im2, index=idx_imdx, key=f"imp_imd_{p_id}_{it['id']}")
+                        it["im_d"] = cpb.selectbox("Impresión Dorso", opts_im2, index=idx_imdx, key=f"imp_imd_{p_id}_{it.get('id',sel_i)}")
                         if it["im_d"] == "Offset":
-                            it["nt_d"] = int(cpb.number_input("Tintas Dorso", 0, 6, int(it.get("nt_d", 0)), key=f"imp_ntd_{p_id}_{it['id']}"))
-                            it["ba_d"] = bool(cpb.checkbox("Barniz Dorso", value=bool(it.get("ba_d", False)), key=f"imp_bad_{p_id}_{it['id']}"))
+                            it["nt_d"] = int(cpb.number_input("Tintas Dorso", 0, 6, int(it.get("nt_d", 0)), key=f"imp_ntd_{p_id}_{it.get('id',sel_i)}"))
+                            it["ba_d"] = bool(cpb.checkbox("Barniz Dorso", value=bool(it.get("ba_d", False)), key=f"imp_bad_{p_id}_{it.get('id',sel_i)}"))
                             it["ld_d"] = False
                         elif it["im_d"] == "Digital":
-                            it["ld_d"] = bool(cpb.checkbox("Laminado Digital Dorso", value=bool(it.get("ld_d", False)), key=f"imp_ldd_{p_id}_{it['id']}"))
-                            it["nt_d"] = int(it.get("nt_d", 0))
-                            it["ba_d"] = bool(it.get("ba_d", False))
-                        it["pel_d"] = cpb.selectbox("Peliculado Dorso", opts_pel, index=opts_pel.index(it.get("pel_d", "Sin Peliculado")) if it.get("pel_d", "Sin Peliculado") in opts_pel else 0, key=f"imp_peld_{p_id}_{it['id']}")
+                            it["ld_d"] = bool(cpb.checkbox("Laminado Digital Dorso", value=bool(it.get("ld_d", False)), key=f"imp_ldd_{p_id}_{it.get('id',sel_i)}"))
+                        it["pel_d"] = cpb.selectbox("Peliculado Dorso", opts_pel, index=opts_pel.index(it.get("pel_d", "Sin Peliculado")) if it.get("pel_d", "Sin Peliculado") in opts_pel else 0, key=f"imp_peld_{p_id}_{it.get('id',sel_i)}")
 
-                        # Merma impresión extra (por impresión)
+                        # Merma impresión (extra) por impresión
                         plx = float(p.get("pliegos", 1.0))
                         hojas_netas_x = float(it.get("qty", 0)) * plx
-                        _mpx, mix_sug = calcular_mermas_estandar(hojas_netas_x)
+                        _mpx, mi_sug = calcular_mermas_estandar(hojas_netas_x)
                         it.setdefault("auto_merma", True)
-                        it.setdefault("merma_imp", int(mix_sug))
+                        it.setdefault("merma_imp", int(mi_sug))
 
                         cM1, cM2 = st.columns([1, 3])
-                        it["auto_merma"] = bool(cM1.checkbox("Merma Auto", value=bool(it.get("auto_merma", True)), key=f"imp_auto_{p_id}_{it['id']}"))
+                        it["auto_merma"] = bool(cM1.checkbox("Merma Auto", value=bool(it.get("auto_merma", True)), key=f"imp_auto_{p_id}_{it.get('id',sel_i)}"))
                         if it["auto_merma"]:
-                            it["merma_imp"] = int(mix_sug)
-                        it["merma_imp"] = int(cM2.number_input("Merma impresión extra (hojas)", min_value=0, value=int(it.get("merma_imp", mix_sug)), key=f"imp_merma_{p_id}_{it['id']}", disabled=bool(it["auto_merma"])))
+                            it["merma_imp"] = int(mi_sug)
+                        it["merma_imp"] = int(cM2.number_input("Merma impresión (hojas)", min_value=0, value=int(it.get("merma_imp", mi_sug)), key=f"imp_merma_{p_id}_{it.get('id',sel_i)}", disabled=bool(it["auto_merma"])))
 
-                        if st.button("🗑 Eliminar esta impresión adicional", key=f"del_imp_{p_id}_{it['id']}"):
+                        if st.button("🗑 Eliminar esta impresión", key=f"del_imp_{p_id}_{it.get('id',sel_i)}"):
                             p["impresiones_extra"].pop(sel_i)
                             st.rerun()
                     else:
-                        st.caption("No hay impresiones adicionales creadas.")
+                        st.caption("No hay impresiones adicionales.")
 
             with col2:
                 opts_pf = list(db["cartoncillo"].keys())
                 val_pf = p.get("pf", "Ninguno")
                 idx_pf = opts_pf.index(val_pf) if val_pf in opts_pf else 0
-                p["pf"] = st.selectbox("Cartoncillo Cara", opts_pf, index=idx_pf, key=f"pf_{p_id}",
-                                       on_change=callback_cambio_frontal, args=(p_id,))
+                p["pf"] = st.selectbox("Cartoncillo Cara", opts_pf, index=idx_pf, key=f"pf_{p_id}", on_change=callback_cambio_frontal, args=(p_id,))
                 p["gf"] = st.number_input("Gramaje Cara (g)", value=int(p.get("gf", 0)), key=f"gf_{p_id}")
 
                 st.divider()
@@ -1326,8 +1370,7 @@ with tab_calculadora:
                         opts_rig = list(db["rigidos"].keys())
                         val_rig = p.get("mat_rigido", "Ninguno")
                         idx_rig = opts_rig.index(val_rig) if val_rig in opts_rig else 0
-                        p["mat_rigido"] = st.selectbox("Material Rígido (hoja)", opts_rig, index=idx_rig, key=f"mrig_{p_id}",
-                                                       on_change=callback_rigido, args=(p_id,))
+                        p["mat_rigido"] = st.selectbox("Material Rígido (hoja)", opts_rig, index=idx_rig, key=f"mrig_{p_id}", on_change=callback_rigido, args=(p_id,))
                         if p["mat_rigido"] != "Ninguno":
                             info = db["rigidos"][p["mat_rigido"]]
                             st.info(f"Tamaño hoja: {info['w']}x{info['h']} mm | Precio: {info['precio_ud']:.2f}€/hoja")
@@ -1337,12 +1380,10 @@ with tab_calculadora:
                 opts_pd = list(db["cartoncillo"].keys())
                 val_pd = p.get("pd", "Ninguno")
                 idx_pd = opts_pd.index(val_pd) if val_pd in opts_pd else 0
-                p["pd"] = st.selectbox("Cartoncillo Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}",
-                                       on_change=callback_cambio_dorso, args=(p_id,))
+                p["pd"] = st.selectbox("Cartoncillo Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}", on_change=callback_cambio_dorso, args=(p_id,))
                 p["gd"] = st.number_input("Gramaje Dorso (g)", value=int(p.get("gd", 0)), key=f"gd_{p_id}")
 
             with col3:
-                # Dorso
                 opts_im = ["Offset", "Digital", "No"]
                 val_im_d = p.get("im_d", "No")
                 idx_im_d = opts_im.index(val_im_d) if val_im_d in opts_im else 2
@@ -1371,45 +1412,40 @@ with tab_calculadora:
                     st.caption("Corte por cantidad (si quieres forzar por tirada):")
                     for q in lista_cants:
                         p["cor_by_qty"][str(q)] = st.selectbox(
-                            f"{q} uds", opts_cor,
+                            f"{q} uds",
+                            opts_cor,
                             index=opts_cor.index(p["cor_by_qty"].get(str(q), p["cor_default"])) if p["cor_by_qty"].get(str(q), p["cor_default"]) in opts_cor else 0,
-                            key=f"cor_qty_{p_id}_{q}"
+                            key=f"cor_qty_{p_id}_{q}",
                         )
 
                 p["cobrar_arreglo"] = st.checkbox("Cobrar arreglo troquel", value=bool(p.get("cobrar_arreglo", True)), key=f"arr_{p_id}")
                 p["pv_troquel"] = float(st.number_input("Troquel (venta) €", value=float(p.get("pv_troquel", 0.0)), key=f"pvt_{p_id}"))
 
     # =========================================================
-    # (UI) EXTRAS / EMBALAJES / EXTERNOS (igual que antes)
+    # ... (EXTRAS / EMBALAJES / EXTERNOS: tu código original sigue igual aquí)
     # =========================================================
-    st.divider()
-    st.subheader("📌 3. Extras (materiales externos)")
-    # ... (se mantiene el resto de tu app: extras, embalajes, externos, etc.)
-    # NOTA: el código original continúa tal cual; la parte de abajo depende de tu fichero completo.
 
-    # =========================================================
-    # ⚙️ 5. Gestión de Mermas (por formato)
-    # =========================================================
     st.divider()
     st.subheader("⚙️ 5. Gestión de Mermas (por formato)")
     if lista_cants and st.session_state.piezas_dict:
+        # inicializa mermas por pieza si faltan
+        for pid, pz in st.session_state.piezas_dict.items():
+            st.session_state.mermas_imp_pieza.setdefault(pid, {})
+            st.session_state.mermas_proc_pieza.setdefault(pid, {})
+            st.session_state.mermas_auto_pieza.setdefault(pid, {})
+
         piezas_ids = list(st.session_state.piezas_dict.keys())
         piezas_labels = [f"{pid} · {st.session_state.piezas_dict[pid].get('nombre', f'Forma {pid}')}" for pid in piezas_ids]
-        sel_idx = 0
-        sel_label = st.selectbox("Selecciona formato", piezas_labels, index=sel_idx, key="merma_sel_pieza")
+        sel_label = st.selectbox("Selecciona formato", piezas_labels, index=0, key="merma_sel_pieza")
         try:
             sel_pid = int(sel_label.split("·")[0].strip())
-        except:
+        except Exception:
             sel_pid = piezas_ids[0]
 
         pz = st.session_state.piezas_dict.get(sel_pid, {})
         pl = float(pz.get("pliegos", 1.0))
-
-        st.session_state.mermas_imp_pieza.setdefault(sel_pid, {})
-        st.session_state.mermas_proc_pieza.setdefault(sel_pid, {})
-        st.session_state.mermas_auto_pieza.setdefault(sel_pid, {})
-
         st.caption("La merma se calcula por hojas netas del formato (cantidad × pliegos/ud). Puedes pasar a manual por cantidad.")
+
         for q in lista_cants:
             hojas_netas = q * pl
             mp_sug, mi_sug = calcular_mermas_estandar(hojas_netas)
@@ -1417,35 +1453,43 @@ with tab_calculadora:
             st.session_state.mermas_auto_pieza[sel_pid].setdefault(q, True)
             is_auto = bool(st.session_state.mermas_auto_pieza[sel_pid].get(q, True))
 
-            c0, c1, c2, c3 = st.columns([1.2, 1.0, 2.0, 2.0])
+            c0, c1, c2, c3 = st.columns([1.0, 1.1, 2.2, 2.2])
             c0.markdown(f"**{q} uds**")
             c1.caption(f"{int(math.ceil(hojas_netas))} hojas netas")
 
-            # Toggle auto/manual (1 flag controla ambas para simplificar UX)
             new_auto = c1.checkbox("Auto", value=is_auto, key=f"merma_auto_{sel_pid}_{q}")
             st.session_state.mermas_auto_pieza[sel_pid][q] = bool(new_auto)
 
             if new_auto:
-                st.session_state.mermas_proc_pieza[sel_pid][q] = int(mp_sug)
                 st.session_state.mermas_imp_pieza[sel_pid][q] = int(mi_sug)
+                st.session_state.mermas_proc_pieza[sel_pid][q] = int(mp_sug)
+            else:
+                st.session_state.mermas_imp_pieza[sel_pid].setdefault(q, int(mi_sug))
+                st.session_state.mermas_proc_pieza[sel_pid].setdefault(q, int(mp_sug))
 
-            st.session_state.mermas_imp_pieza[sel_pid][q] = int(c2.number_input(
-                "Arranque impresión (hojas)",
-                value=int(st.session_state.mermas_imp_pieza[sel_pid].get(q, mi_sug)),
-                key=f"mi_{sel_pid}_{q}",
-                disabled=new_auto
-            ))
-            st.session_state.mermas_proc_pieza[sel_pid][q] = int(c3.number_input(
-                "Rodaje proceso (hojas)",
-                value=int(st.session_state.mermas_proc_pieza[sel_pid].get(q, mp_sug)),
-                key=f"mp_{sel_pid}_{q}",
-                disabled=new_auto
-            ))
+            st.session_state.mermas_imp_pieza[sel_pid][q] = int(
+                c2.number_input(
+                    "Arranque impresión (hojas)",
+                    min_value=0,
+                    value=int(st.session_state.mermas_imp_pieza[sel_pid].get(q, mi_sug)),
+                    key=f"mi_{sel_pid}_{q}",
+                    disabled=bool(new_auto),
+                )
+            )
+            st.session_state.mermas_proc_pieza[sel_pid][q] = int(
+                c3.number_input(
+                    "Rodaje proceso (hojas)",
+                    min_value=0,
+                    value=int(st.session_state.mermas_proc_pieza[sel_pid].get(q, mp_sug)),
+                    key=f"mp_{sel_pid}_{q}",
+                    disabled=bool(new_auto),
+                )
+            )
 
-        if st.button("🔄 Recalcular AUTO para este formato (todas las cantidades)", key="merma_recalc_one"):
-            for q in lista_cants:
-                st.session_state.mermas_auto_pieza[sel_pid][q] = True
-            st.rerun()
+        # Compatibilidad
+        for q in lista_cants:
+            st.session_state.mermas_imp_manual.setdefault(q, int(calcular_mermas_estandar(q)[1]))
+            st.session_state.mermas_proc_manual.setdefault(q, int(calcular_mermas_estandar(q)[0]))
     else:
         st.warning("Define cantidades en Paso 1 y al menos 1 formato en Paso 2.")
 
@@ -1461,9 +1505,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
 
     for q_n in lista_cants:
-        # Compatibilidad: valores globales (JSON antiguos). Si hay mermas por pieza, se usan más abajo.
-        merma_imp_global = int(st.session_state.mermas_imp_manual.get(q_n, 0))
-        merma_proc_global = int(st.session_state.mermas_proc_manual.get(q_n, 0))
+        merma_imp_hojas = int(st.session_state.mermas_imp_manual.get(q_n, 0))
+        merma_proc_hojas = int(st.session_state.mermas_proc_manual.get(q_n, 0))
 
         coste_f = 0.0
         det_f = []
@@ -1475,7 +1518,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "ondulado": 0.0,
                 "rigidos": 0.0,
                 "extras": 0.0,
-                "embalajes_compra": 0.0
+                "embalajes_compra": 0.0,
             },
             "procesos": {
                 "contracolado": 0.0,
@@ -1485,10 +1528,9 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "manipulacion": 0.0,
                 "dificultad": 0.0,
                 "externos": 0.0,
-            }
+            },
         }
 
-        # Descuentos de compra por bloque (BD)
         db_desc = st.session_state.get("db_descuentos", {}) if isinstance(st.session_state.get("db_descuentos", None), dict) else {}
         f_cart = 1.0 - (float(db_desc.get("cartoncillo", 0.0)) / 100.0)
         f_or = 1.0 - (float(db_desc.get("ondulado_rigidos", 0.0)) / 100.0)
@@ -1505,57 +1547,73 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_plotter = 0.0
 
             pliegos_ud = float(p.get("pliegos", 1.0))
-            nb_total = q_n * pliegos_ud  # hojas netas del formato (sin mermas)
+            nb_total = q_n * pliegos_ud  # hojas netas del formato
 
-            # ✅ Mermas por pieza (si existen). Si no, cae a global.
+            # ✅ Mermas por formato (si existen); si no, cae a las globales (compatibilidad)
             mp_dict = st.session_state.get("mermas_proc_pieza", {}).get(pid, {}) if isinstance(st.session_state.get("mermas_proc_pieza", None), dict) else {}
             mi_dict = st.session_state.get("mermas_imp_pieza", {}).get(pid, {}) if isinstance(st.session_state.get("mermas_imp_pieza", None), dict) else {}
+            merma_proc_hojas_pieza = int(mp_dict.get(q_n, merma_proc_hojas))
+            merma_imp_base = int(mi_dict.get(q_n, merma_imp_hojas))
 
-            merma_proc_hojas = int(mp_dict.get(q_n, merma_proc_global))
-            # La merma de impresión "base" se usa SOLO si no hay varias impresiones
-            merma_imp_base = int(mi_dict.get(q_n, merma_imp_global))
-
-            hp_produccion = nb_total + merma_proc_hojas  # para procesos (troquel, contracolado, etc.)
+            hp_produccion = nb_total + merma_proc_hojas_pieza  # hojas para procesos
 
             w = float(p.get("w", 0))
             h = float(p.get("h", 0))
             m2_papel = (w * h) / 1_000_000 if (w > 0 and h > 0) else 0.0
 
             # -------------------------------------------------
-            # Varias impresiones (opcional):
-            # - cada impresión tiene su coste (tintas/acabados) + su merma extra de impresión
-            # - la merma de PROCESOS se queda en el total del formato
+            # Varias impresiones (opcional)
             # -------------------------------------------------
             impresiones = []
             extras = p.get("impresiones_extra", []) if isinstance(p.get("impresiones_extra", None), list) else []
             extras_valid = [it for it in extras if isinstance(it, dict) and int(it.get("qty", 0)) > 0]
-
             sum_extras = sum(int(it.get("qty", 0)) for it in extras_valid)
             resto = max(0, int(q_n) - int(sum_extras))
 
-            # Si hay extras, interpretamos que son "modelos" y el resto (si existe) usa parámetros base.
             if extras_valid:
                 for it in extras_valid:
-                    impresiones.append({
-                        "tipo": "extra",
-                        "qty": int(it.get("qty", 0)),
-                        "im": str(it.get("im", p.get("im", "No"))),
-                        "nt": int(it.get("nt", p.get("nt", 0))),
-                        "ba": bool(it.get("ba", p.get("ba", False))),
-                        "ld": bool(it.get("ld", p.get("ld", False))),
-                        "pel": str(it.get("pel", p.get("pel", "Sin Peliculado"))),
-                        "im_d": str(it.get("im_d", p.get("im_d", "No"))),
-                        "nt_d": int(it.get("nt_d", p.get("nt_d", 0))),
-                        "ba_d": bool(it.get("ba_d", p.get("ba_d", False))),
-                        "ld_d": bool(it.get("ld_d", p.get("ld_d", False))),
-                        "pel_d": str(it.get("pel_d", p.get("pel_d", "Sin Peliculado"))),
-                        "merma_imp": int(it.get("merma_imp", 0)),
-                        "auto_merma": bool(it.get("auto_merma", True)),
-                    })
+                    impresiones.append(
+                        {
+                            "tipo": "extra",
+                            "qty": int(it.get("qty", 0)),
+                            "im": str(it.get("im", p.get("im", "No"))),
+                            "nt": int(it.get("nt", p.get("nt", 0))),
+                            "ba": bool(it.get("ba", p.get("ba", False))),
+                            "ld": bool(it.get("ld", p.get("ld", False))),
+                            "pel": str(it.get("pel", p.get("pel", "Sin Peliculado"))),
+                            "im_d": str(it.get("im_d", p.get("im_d", "No"))),
+                            "nt_d": int(it.get("nt_d", p.get("nt_d", 0))),
+                            "ba_d": bool(it.get("ba_d", p.get("ba_d", False))),
+                            "ld_d": bool(it.get("ld_d", p.get("ld_d", False))),
+                            "pel_d": str(it.get("pel_d", p.get("pel_d", "Sin Peliculado"))),
+                            "merma_imp": int(it.get("merma_imp", 0)),
+                            "auto_merma": bool(it.get("auto_merma", True)),
+                        }
+                    )
                 if resto > 0:
-                    impresiones.append({
-                        "tipo": "resto",
-                        "qty": int(resto),
+                    impresiones.append(
+                        {
+                            "tipo": "resto",
+                            "qty": int(resto),
+                            "im": str(p.get("im", "No")),
+                            "nt": int(p.get("nt", 0)),
+                            "ba": bool(p.get("ba", False)),
+                            "ld": bool(p.get("ld", False)),
+                            "pel": str(p.get("pel", "Sin Peliculado")),
+                            "im_d": str(p.get("im_d", "No")),
+                            "nt_d": int(p.get("nt_d", 0)),
+                            "ba_d": bool(p.get("ba_d", False)),
+                            "ld_d": bool(p.get("ld_d", False)),
+                            "pel_d": str(p.get("pel_d", "Sin Peliculado")),
+                            "merma_imp": int(calcular_mermas_estandar(int(resto * pliegos_ud))[1]),
+                            "auto_merma": True,
+                        }
+                    )
+            else:
+                impresiones = [
+                    {
+                        "tipo": "base",
+                        "qty": int(q_n),
                         "im": str(p.get("im", "No")),
                         "nt": int(p.get("nt", 0)),
                         "ba": bool(p.get("ba", False)),
@@ -1566,75 +1624,39 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                         "ba_d": bool(p.get("ba_d", False)),
                         "ld_d": bool(p.get("ld_d", False)),
                         "pel_d": str(p.get("pel_d", "Sin Peliculado")),
-                        "merma_imp": int(0),
-                        "auto_merma": True,
-                    })
-            else:
-                impresiones = [{
-                    "tipo": "base",
-                    "qty": int(q_n),
-                    "im": str(p.get("im", "No")),
-                    "nt": int(p.get("nt", 0)),
-                    "ba": bool(p.get("ba", False)),
-                    "ld": bool(p.get("ld", False)),
-                    "pel": str(p.get("pel", "Sin Peliculado")),
-                    "im_d": str(p.get("im_d", "No")),
-                    "nt_d": int(p.get("nt_d", 0)),
-                    "ba_d": bool(p.get("ba_d", False)),
-                    "ld_d": bool(p.get("ld_d", False)),
-                    "pel_d": str(p.get("pel_d", "Sin Peliculado")),
-                    "merma_imp": int(merma_imp_base),
-                    "auto_merma": False,  # ya viene de gestión de mermas por pieza
-                }]
+                        "merma_imp": int(merma_imp_base),
+                        "auto_merma": False,
+                    }
+                ]
 
-            # Hojas a comprar/usar para materiales:
-            # - base: hojas de producción (= nb_total + merma_proc)
-            # - extra: sumamos SOLO las mermas de impresión de cada impresión que imprima
+            # Hojas para cartoncillo (cara/dorso): procesos + suma de mermas de impresión por cada tirada que imprime
             hp_papel_f = float(hp_produccion)
             hp_papel_d = float(hp_produccion)
-
-            imprime_cara_any = False
-            imprime_dorso_any = False
-
             for it in impresiones:
                 qty_it = int(it.get("qty", 0))
                 if qty_it <= 0:
                     continue
-                nb_it = qty_it * pliegos_ud  # hojas netas de esta impresión
-
+                nb_it = qty_it * pliegos_ud
                 merma_imp_it = int(it.get("merma_imp", 0))
                 if bool(it.get("auto_merma", False)):
                     _mp_s, mi_s = calcular_mermas_estandar(nb_it)
                     merma_imp_it = int(mi_s)
-                    it["merma_imp"] = merma_imp_it
-
-                imprime_cara_it = (str(it.get("im", "No")) != "No")
+                imprime_cara_it = str(it.get("im", "No")) != "No"
                 imprime_dorso_it = (p.get("pd", "Ninguno") != "Ninguno" and str(it.get("im_d", "No")) != "No")
-
                 if imprime_cara_it:
-                    imprime_cara_any = True
                     hp_papel_f += merma_imp_it
                 if imprime_dorso_it:
-                    imprime_dorso_any = True
                     hp_papel_d += merma_imp_it
 
-            # Si NO se imprime, no sumamos merma de impresión (pero sí proceso, ya incluido en hp_produccion).
-
-            # ✅ Contracolado: solo cuando hay cartoncillo cara + otro material
-            # Reglas:
-            # - Cara + (plancha o rígido) -> 1 contracolado
-            # - Cara + Dorso -> 1 contracolado
-            # - Cara + (plancha o rígido) + Dorso -> 2 contracolados (sándwich)
-            tiene_cara = (p.get("pf", "Ninguno") != "Ninguno")
-            tiene_dorso = (p.get("pd", "Ninguno") != "Ninguno")
+            # ✅ Contracolado: solo si hay cartoncillo cara + otro material
+            tiene_cara = p.get("pf", "Ninguno") != "Ninguno"
+            tiene_dorso = p.get("pd", "Ninguno") != "Ninguno"
             tiene_base = (
                 (p.get("tipo_base") == "Material Rígido" and p.get("mat_rigido", "Ninguno") != "Ninguno")
                 or (p.get("tipo_base") != "Material Rígido" and p.get("pl", "Ninguna") != "Ninguna")
             )
-
-            capas = 0
             if tiene_cara and tiene_dorso and tiene_base:
-                capas = 2
+                capas = 2  # sandwich
             elif tiene_cara and (tiene_dorso or tiene_base):
                 capas = 1
             else:
@@ -1670,76 +1692,73 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                         n_pl = math.ceil(n_net * 1.02)
                     c_rigido = n_pl * precio_hoja
 
-                    debug_log.append({
-                        "qty": q_n,
-                        "pieza": p.get("nombre",""),
-                        "tipo": "rigido",
-                        "by": by,
-                        "hojas_netas": n_net,
-                        "hojas_total": n_pl,
-                        "precio_hoja": precio_hoja,
-                        "coste": c_rigido,
-                        "merma_regla": "fija" if capas == 0 else "2%"
-                    })
+                    debug_log.append(
+                        {
+                            "qty": q_n,
+                            "pieza": p.get("nombre", ""),
+                            "tipo": "rigido",
+                            "by": by,
+                            "hojas_netas": n_net,
+                            "hojas_total": n_pl,
+                            "precio_hoja": precio_hoja,
+                            "coste": c_rigido,
+                            "merma_regla": "fija" if capas == 0 else "2%",
+                        }
+                    )
             else:
                 if p.get("pl", "Ninguna") != "Ninguna":
                     if bool(p.get("pl_dif", False)) and float(p.get("pl_h", 0)) > 0 and float(p.get("pl_w", 0)) > 0:
                         m2_plancha = (float(p["pl_w"]) * float(p["pl_h"])) / 1_000_000
                     else:
                         m2_plancha = m2_papel
-                    c_ondulado = hp_produccion * m2_plancha * float(db["planchas"][p["pl"]][p.get("ap","B/C")]) * f_or
+                    c_ondulado = hp_produccion * m2_plancha * float(db["planchas"][p["pl"]][p.get("ap", "B/C")]) * f_or
 
             if p.get("pf", "Ninguno") != "Ninguno" and m2_papel > 0:
-                c_cart_cara = hp_papel_f * m2_papel * (float(p.get("gf", 0))/1000.0) * float(db["cartoncillo"][p["pf"]]["precio_kg"]) * f_cart
+                c_cart_cara = hp_papel_f * m2_papel * (float(p.get("gf", 0)) / 1000.0) * float(db["cartoncillo"][p["pf"]]["precio_kg"]) * f_cart
             if p.get("pd", "Ninguno") != "Ninguno" and m2_papel > 0:
-                c_cart_dorso = hp_papel_d * m2_papel * (float(p.get("gd", 0))/1000.0) * float(db["cartoncillo"][p["pd"]]["precio_kg"]) * f_cart
+                c_cart_dorso = hp_papel_d * m2_papel * (float(p.get("gd", 0)) / 1000.0) * float(db["cartoncillo"][p["pd"]]["precio_kg"]) * f_cart
 
             peg_rate = float(db["planchas"]["Microcanal / Canal 3"]["peg"]) * f_narba
             if capas > 0 and m2_papel > 0:
                 c_contracolado = hp_produccion * m2_papel * peg_rate * capas
 
             # -------------------------------------------------
-            # Impresión (y laminado digital) por impresión
+            # Impresión (y laminado digital) por tirada
             # -------------------------------------------------
             c_imp_total = 0.0
-
             for it in impresiones:
                 qty_it = int(it.get("qty", 0))
                 if qty_it <= 0:
                     continue
-                nb_it = qty_it * pliegos_ud  # hojas netas de esta impresión
+                nb_it = qty_it * pliegos_ud
 
                 merma_imp_it = int(it.get("merma_imp", 0))
                 if bool(it.get("auto_merma", False)):
                     _mp_s, mi_s = calcular_mermas_estandar(nb_it)
                     merma_imp_it = int(mi_s)
 
-                # Reparto de merma de proceso sobre las impresiones (proporcional a su qty)
-                proc_share = (float(merma_proc_hojas) * (float(qty_it) / float(q_n))) if q_n > 0 else 0.0
-                hojas_imp_cara = nb_it + proc_share + merma_imp_it
-                hojas_imp_dorso = nb_it + proc_share + merma_imp_it
+                proc_share = (float(merma_proc_hojas_pieza) * (float(qty_it) / float(q_n))) if q_n > 0 else 0.0
+                hojas_imp = nb_it + proc_share + merma_imp_it
 
-                # Cara
                 if str(it.get("im", "No")) == "Digital":
-                    c_imp_total += hojas_imp_cara * m2_papel * 6.5
+                    c_imp_total += hojas_imp * m2_papel * 6.5
                     if bool(it.get("ld", False)):
                         c_pel_total += hp_produccion * m2_papel * float(db.get("laminado_digital", 3.5))
                 elif str(it.get("im", "No")) == "Offset":
                     tintas_cara = int(it.get("nt", 0)) + (1 if bool(it.get("ba", False)) else 0)
-                    c_imp_total += coste_offset_por_tinta(int(round(hojas_imp_cara))) * tintas_cara
+                    c_imp_total += coste_offset_por_tinta(int(round(hojas_imp))) * tintas_cara
 
-                # Dorso (solo si existe cartoncillo dorso)
                 if p.get("pd", "Ninguno") != "Ninguno":
                     if str(it.get("im_d", "No")) == "Digital":
-                        c_imp_total += hojas_imp_dorso * m2_papel * 6.5
+                        c_imp_total += hojas_imp * m2_papel * 6.5
                         if bool(it.get("ld_d", False)):
                             c_pel_total += hp_produccion * m2_papel * float(db.get("laminado_digital", 3.5))
                     elif str(it.get("im_d", "No")) == "Offset":
                         tintas_dorso = int(it.get("nt_d", 0)) + (1 if bool(it.get("ba_d", False)) else 0)
-                        c_imp_total += coste_offset_por_tinta(int(round(hojas_imp_dorso))) * tintas_dorso
+                        c_imp_total += coste_offset_por_tinta(int(round(hojas_imp))) * tintas_dorso
 
             # -------------------------------------------------
-            # Peliculado (por impresión si hay varias)
+            # Peliculado (por tirada si hay varias impresiones)
             # -------------------------------------------------
             c_pel_cara = 0.0
             c_pel_dorso = 0.0
@@ -1754,26 +1773,26 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                     if bool(it.get("auto_merma", False)):
                         _mp_s, mi_s = calcular_mermas_estandar(nb_it)
                         merma_imp_it = int(mi_s)
-                    proc_share = (float(merma_proc_hojas) * (float(qty_it) / float(q_n))) if q_n > 0 else 0.0
+                    proc_share = (float(merma_proc_hojas_pieza) * (float(qty_it) / float(q_n))) if q_n > 0 else 0.0
                     hojas_it = nb_it + proc_share + merma_imp_it
 
                     if str(it.get("pel", "Sin Peliculado")) != "Sin Peliculado":
                         c_pel_cara += hojas_it * m2_papel * float(db["peliculado"][str(it.get("pel"))]) * f_narba
                     if p.get("pd", "Ninguno") != "Ninguno" and str(it.get("pel_d", "Sin Peliculado")) != "Sin Peliculado":
                         c_pel_dorso += hojas_it * m2_papel * float(db["peliculado"][str(it.get("pel_d"))]) * f_narba
-                c_pel_total += (c_pel_cara + c_pel_dorso)
             else:
-                if p.get("pel","Sin Peliculado") != "Sin Peliculado":
+                if p.get("pel", "Sin Peliculado") != "Sin Peliculado":
                     c_pel_cara = hp_produccion * m2_papel * float(db["peliculado"][p["pel"]]) * f_narba
-                if p.get("pd","Ninguno") != "Ninguno" and p.get("pel_d","Sin Peliculado") != "Sin Peliculado":
+                if p.get("pd", "Ninguno") != "Ninguno" and p.get("pel_d", "Sin Peliculado") != "Sin Peliculado":
                     c_pel_dorso = hp_produccion * m2_papel * float(db["peliculado"][p["pel_d"]]) * f_narba
-                c_pel_total += (c_pel_cara + c_pel_dorso)
+
+            c_pel_total += c_pel_cara + c_pel_dorso
 
             cor_sel = p.get("cor_default", "Troquelado")
             if isinstance(p.get("cor_by_qty", {}), dict):
                 cor_sel = p["cor_by_qty"].get(str(q_n), cor_sel)
 
-            cat = "Grande (> 1000x700)" if (h>1000 or w>700) else ("Pequeño (< 1000x700)" if (h<1000 and w<700) else "Mediano (Estándar)")
+            cat = "Grande (> 1000x700)" if (h > 1000 or w > 700) else ("Pequeño (< 1000x700)" if (h < 1000 and w < 700) else "Mediano (Estándar)")
             if cor_sel == "Troquelado":
                 arr = float(db["troquelado"][cat]["arranque"]) * f_narba if bool(p.get("cobrar_arreglo", True)) else 0.0
                 tiro = float(db["troquelado"][cat]["tiro"]) * f_narba
@@ -1784,32 +1803,30 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             sub = c_cart_cara + c_cart_dorso + c_ondulado + c_rigido + c_contracolado + c_imp_total + c_pel_total + c_troquel_taller + c_plotter
             coste_f += sub
 
-            det_f.append({
-                "Pieza": p.get("nombre",""),
-                "Cartoncillo Cara": c_cart_cara,
-                "Cartoncillo Dorso": c_cart_dorso,
-                "Plancha Ondulado": c_ondulado,
-                "Material Rígido": c_rigido,
-                "Contracolado": c_contracolado,
-                "Impresión": c_imp_total,
-                "Peliculado": c_pel_total,
-                "Corte (Troquel/Plotter)": c_troquel_taller + c_plotter,
-                "Subtotal Pieza": sub,
-                "Corte Seleccionado": cor_sel
-            })
+            det_f.append(
+                {
+                    "Pieza": p.get("nombre", ""),
+                    "Cartoncillo Cara": c_cart_cara,
+                    "Cartoncillo Dorso": c_cart_dorso,
+                    "Plancha Ondulado": c_ondulado,
+                    "Material Rígido": c_rigido,
+                    "Contracolado": c_contracolado,
+                    "Impresión": c_imp_total,
+                    "Peliculado": c_pel_total,
+                    "Corte (Troquel/Plotter)": c_troquel_taller + c_plotter,
+                    "Subtotal Pieza": sub,
+                    "Corte Seleccionado": cor_sel,
+                }
+            )
 
-            tot_cat["materiales"]["cartoncillo"] += (c_cart_cara + c_cart_dorso)
+            tot_cat["materiales"]["cartoncillo"] += c_cart_cara + c_cart_dorso
             tot_cat["materiales"]["ondulado"] += c_ondulado
             tot_cat["materiales"]["rigidos"] += c_rigido
             tot_cat["procesos"]["contracolado"] += c_contracolado
             tot_cat["procesos"]["impresion"] += c_imp_total
             tot_cat["procesos"]["peliculado"] += c_pel_total
-            tot_cat["procesos"]["corte"] += (c_troquel_taller + c_plotter)
+            tot_cat["procesos"]["corte"] += c_troquel_taller + c_plotter
 
-        # (el resto del motor: extras, mo, embalajes, comerciales, export, debug...)
-        # Se mantiene como en tu fichero original.
-
-# =========================================================
-# SALIDAS (VISTA OFERTA / DESGLOSE)
-# =========================================================
-# ... (resto del fichero original, sin cambios)
+        # =========================================================
+        # ... (RESTO DEL CÁLCULO ORIGINAL: extras, embalajes, externos, pvp, export, debug...)
+        # =========================================================
