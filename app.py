@@ -1412,9 +1412,27 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             h = float(p.get("h", 0))
             m2_papel = (w * h) / 1_000_000 if (w > 0 and h > 0) else 0.0
 
-            capas = 0
-            if p.get("pf","Ninguno") != "Ninguno": capas += 1
-            if p.get("pd","Ninguno") != "Ninguno": capas += 1
+            # Capas de cartoncillo seleccionadas (cara/dorso)
+            has_cart_cara = (p.get("pf", "Ninguno") != "Ninguno")
+            has_cart_dorso = (p.get("pd", "Ninguno") != "Ninguno")
+            capas_cartoncillo = (1 if has_cart_cara else 0) + (1 if has_cart_dorso else 0)
+
+            # ✅ Reglas de CONTRACOLADO:
+            # - Solo se contracola si hay que pegar capas entre sí.
+            # - Si hay base (plancha ondulado o rígido) + cartoncillo: 1 contracolado por cada cara con cartoncillo.
+            # - Si NO hay base (solo cartoncillo):
+            #     · 1 cara: NO hay contracolado
+            #     · cara + dorso: 1 contracolado (pegarlos entre sí)
+            has_base_ondulado = (p.get("tipo_base") == "Ondulado/Cartón" and p.get("pl", "Ninguna") != "Ninguna")
+            has_base_rigido = (p.get("tipo_base") == "Material Rígido" and (
+                bool(p.get("rig_manual", False)) or p.get("mat_rigido", "Ninguno") != "Ninguno"
+            ))
+            has_base = (has_base_ondulado or has_base_rigido)
+
+            if has_base:
+                capas_contracolado = (1 if has_cart_cara else 0) + (1 if has_cart_dorso else 0)
+            else:
+                capas_contracolado = 1 if (has_cart_cara and has_cart_dorso) else 0
 
             if p.get("tipo_base") == "Material Rígido":
                 if bool(p.get("rig_manual", False)):
@@ -1437,7 +1455,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
 
                 if by > 0:
                     n_net = math.ceil(hp_produccion / by)
-                    if capas == 0:
+                    if capas_contracolado == 0:
                         n_pl = n_net + merma_rigido_fija(n_net)
                     else:
                         n_pl = math.ceil(n_net * 1.02)
@@ -1452,7 +1470,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                         "hojas_total": n_pl,
                         "precio_hoja": precio_hoja,
                         "coste": c_rigido,
-                        "merma_regla": "fija" if capas == 0 else "2%"
+                        "merma_regla": "fija" if capas_contracolado == 0 else "2%"
                     })
             else:
                 if p.get("pl", "Ninguna") != "Ninguna":
@@ -1468,8 +1486,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 c_cart_dorso = hp_papel_d * m2_papel * (float(p.get("gd", 0))/1000.0) * float(db["cartoncillo"][p["pd"]]["precio_kg"]) * f_cart
 
             peg_rate = float(db["planchas"]["Microcanal / Canal 3"]["peg"]) * f_narba
-            if capas > 0 and m2_papel > 0:
-                c_contracolado = hp_produccion * m2_papel * peg_rate * capas
+            if capas_contracolado > 0 and m2_papel > 0:
+                c_contracolado = hp_produccion * m2_papel * peg_rate * capas_contracolado
 
             c_imp_cara = 0.0
             c_imp_dorso = 0.0
