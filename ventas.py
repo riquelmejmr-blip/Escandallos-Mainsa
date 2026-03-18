@@ -339,6 +339,7 @@ if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extra
 if "embalajes" not in st.session_state: st.session_state.embalajes = [crear_embalaje_vacio(0)]
 if "externos" not in st.session_state: st.session_state.externos = [crear_externo_vacio(0)]
 if "mermas_imp_manual" not in st.session_state: st.session_state.mermas_imp_manual = {}
+if "mermas_imp_digital_manual" not in st.session_state: st.session_state.mermas_imp_digital_manual = {}
 if "mermas_proc_manual" not in st.session_state: st.session_state.mermas_proc_manual = {}
 
 if "brf" not in st.session_state: st.session_state.brf = ""
@@ -658,6 +659,8 @@ def normalizar_import(di: dict):
 
     if isinstance(di.get("mermas_imp", None), dict):
         st.session_state.mermas_imp_manual = {int(k): int(v) for k, v in di["mermas_imp"].items()}
+    if isinstance(di.get("mermas_imp_digital", None), dict):
+        st.session_state.mermas_imp_digital_manual = {int(k): int(v) for k, v in di["mermas_imp_digital"].items()}
     if isinstance(di.get("mermas_proc", None), dict):
         st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in di["mermas_proc"].items()}
 
@@ -735,6 +738,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "embalajes": deepcopy(st.session_state.embalajes),
         "externos": deepcopy(st.session_state.externos),
         "mermas_imp": deepcopy(st.session_state.mermas_imp_manual),
+        "mermas_imp_digital": deepcopy(st.session_state.mermas_imp_digital_manual),
         "mermas_proc": deepcopy(st.session_state.mermas_proc_manual),
     }
     if resumen_compra is not None:
@@ -977,13 +981,21 @@ with tab_calculadora:
     st.divider()
 
     if lista_cants:
-        es_dig = es_digital_en_proyecto(st.session_state.piezas_dict)
+        # Mermas por defecto:
+        # - 'mermas_proc_manual' y 'mermas_imp_manual' se consideran la referencia "normal" (offset / general)
+        # - 'mermas_imp_digital_manual' es específica para impresión digital
         for q in lista_cants:
-            mp, mi = calcular_mermas_estandar(q, es_digital=es_dig)
+            mp_off, mi_off = calcular_mermas_estandar(q, es_digital=False)
+            _mp_dig, mi_dig = calcular_mermas_estandar(q, es_digital=True)
+
             if q not in st.session_state.mermas_proc_manual:
-                st.session_state.mermas_proc_manual[q] = mp
+                st.session_state.mermas_proc_manual[q] = mp_off
+
             if q not in st.session_state.mermas_imp_manual:
-                st.session_state.mermas_imp_manual[q] = mi
+                st.session_state.mermas_imp_manual[q] = mi_off
+
+            if q not in st.session_state.mermas_imp_digital_manual:
+                st.session_state.mermas_imp_digital_manual[q] = mi_dig
 
     # -----------------------------------------------------
     # PASO 2: TÉCNICO
@@ -1338,10 +1350,29 @@ with tab_calculadora:
     st.subheader("⚙️ 5. Gestión de Mermas (auto-relleno)")
     if lista_cants:
         for q in lista_cants:
-            c1, c2, c3 = st.columns([1, 2, 2])
+            c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
             c1.markdown(f"**{q} uds**")
-            st.session_state.mermas_imp_manual[q] = int(c2.number_input("Arranque impresión (hojas)", value=int(st.session_state.mermas_imp_manual.get(q, 0)), key=f"mi_{q}"))
-            st.session_state.mermas_proc_manual[q] = int(c3.number_input("Rodaje proceso (hojas)", value=int(st.session_state.mermas_proc_manual.get(q, 0)), key=f"mp_{q}"))
+            st.session_state.mermas_imp_manual[q] = int(
+                c2.number_input(
+                    "Arranque impresión OFFSET (hojas)",
+                    value=int(st.session_state.mermas_imp_manual.get(q, 0)),
+                    key=f"mi_{q}",
+                )
+            )
+            st.session_state.mermas_imp_digital_manual[q] = int(
+                c3.number_input(
+                    "Arranque impresión DIGITAL (hojas)",
+                    value=int(st.session_state.mermas_imp_digital_manual.get(q, 0)),
+                    key=f"mid_{q}",
+                )
+            )
+            st.session_state.mermas_proc_manual[q] = int(
+                c4.number_input(
+                    "Rodaje proceso (hojas)",
+                    value=int(st.session_state.mermas_proc_manual.get(q, 0)),
+                    key=f"mp_{q}",
+                )
+            )
     else:
         st.warning("Define cantidades en Paso 1.")
 
@@ -1357,7 +1388,15 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
 
     for q_n in lista_cants:
-        merma_imp_hojas = int(st.session_state.mermas_imp_manual.get(q_n, 0))
+        # Mermas:
+        # - Offset/general: mermas_imp_manual
+        # - Digital: mermas_imp_digital_manual (fallback a regla digital si no existe)
+        merma_imp_offset_hojas = int(st.session_state.mermas_imp_manual.get(q_n, 0))
+        merma_imp_digital_hojas = int(
+            st.session_state.mermas_imp_digital_manual.get(
+                q_n, calcular_mermas_estandar(q_n, es_digital=True)[1]
+            )
+        )
         merma_proc_hojas = int(st.session_state.mermas_proc_manual.get(q_n, 0))
 
         coste_f = 0.0
@@ -1402,11 +1441,24 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             nb = q_n * float(p.get("pliegos", 1.0))
             hp_produccion = nb + merma_proc_hojas
 
-            imprime_cara = (p.get("im", "No") != "No")
-            imprime_dorso = (p.get("pd", "Ninguno") != "Ninguno" and p.get("im_d", "No") != "No")
+            im_cara = p.get("im", "No")
+            im_dorso = p.get("im_d", "No")
 
-            hp_papel_f = hp_produccion + merma_imp_hojas if imprime_cara else hp_produccion
-            hp_papel_d = hp_produccion + merma_imp_hojas if imprime_dorso else hp_produccion
+            imprime_cara = (im_cara != "No")
+            imprime_dorso = (p.get("pd", "Ninguno") != "Ninguno" and im_dorso != "No")
+
+            # 👇 Merma de impresión depende del tipo (Offset vs Digital)
+            if imprime_cara:
+                merma_cara = merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas
+                hp_papel_f = hp_produccion + merma_cara
+            else:
+                hp_papel_f = hp_produccion
+
+            if imprime_dorso:
+                merma_d = merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas
+                hp_papel_d = hp_produccion + merma_d
+            else:
+                hp_papel_d = hp_produccion
 
             w = float(p.get("w", 0))
             h = float(p.get("h", 0))
@@ -1637,7 +1689,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             "det_piezas": det_f,
             "embalajes": emb_det,
             "externos": ext_det,
-            "mermas": {"impresion_hojas": merma_imp_hojas, "proceso_hojas": merma_proc_hojas},
+            "mermas": {"impresion_offset_hojas": merma_imp_offset_hojas, "impresion_digital_hojas": merma_imp_digital_hojas, "proceso_hojas": merma_proc_hojas},
             "debug": debug_log
         }
 
