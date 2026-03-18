@@ -1451,14 +1451,20 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             if imprime_cara:
                 merma_cara = merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas
                 hp_papel_f = hp_produccion + merma_cara
+                # Hojas de IMPRESIÓN (y laminado digital) deben ser netas + merma de impresión del tipo
+                hp_imp_f = nb + (merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas)
             else:
                 hp_papel_f = hp_produccion
+                hp_imp_f = 0
 
             if imprime_dorso:
                 merma_d = merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas
                 hp_papel_d = hp_produccion + merma_d
+                # Hojas de IMPRESIÓN (y laminado digital) deben ser netas + merma de impresión del tipo
+                hp_imp_d = nb + (merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas)
             else:
                 hp_papel_d = hp_produccion
+                hp_imp_d = 0
 
             w = float(p.get("w", 0))
             h = float(p.get("h", 0))
@@ -1545,17 +1551,19 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_imp_dorso = 0.0
 
             if p.get("im","No") == "Digital":
-                c_imp_cara = hp_papel_f * m2_papel * 6.5
+                # Digital: impresión y laminado usan HOJAS NETAS + merma de impresión DIGITAL
+                c_imp_cara = hp_imp_f * m2_papel * 6.5
                 if bool(p.get("ld", False)):
-                    c_pel_total += hp_produccion * m2_papel * float(db.get("laminado_digital", 3.5))
+                    c_pel_total += hp_imp_f * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im","No") == "Offset":
                 tintas_cara = int(p.get("nt",0)) + (1 if bool(p.get("ba",False)) else 0)
                 c_imp_cara = coste_offset_por_tinta(int(round(nb))) * tintas_cara
 
             if p.get("im_d","No") == "Digital":
-                c_imp_dorso = hp_papel_d * m2_papel * 6.5
+                # Digital: impresión y laminado usan HOJAS NETAS + merma de impresión DIGITAL
+                c_imp_dorso = hp_imp_d * m2_papel * 6.5
                 if bool(p.get("ld_d", False)):
-                    c_pel_total += hp_produccion * m2_papel * float(db.get("laminado_digital", 3.5))
+                    c_pel_total += hp_imp_d * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im_d","No") == "Offset":
                 tintas_dorso = int(p.get("nt_d",0)) + (1 if bool(p.get("ba_d",False)) else 0)
                 c_imp_dorso = coste_offset_por_tinta(int(round(nb))) * tintas_dorso
