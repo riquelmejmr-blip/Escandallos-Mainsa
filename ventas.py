@@ -1686,6 +1686,23 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             cu = float(emb.get("costes", {}).get(q_n, 0.0))
             emb_compra_total += cu * q_n
             emb_det.append({"nombre": emb.get("nombre",""), "tipo": emb.get("tipo",""), "material": emb.get("material",""), "coste_unit_compra": cu})
+        # ✅ Venta de embalajes por separado (si hay varios, se reflejan en el resumen)
+        # Se calcula por opción de embalaje: precio venta unitario y total (aplicando margen_embalajes).
+        pv_emb_por_embalaje = []  # lista de dicts: {"key": ..., "unit": ..., "total": ...}
+        for j, emb in enumerate(st.session_state.embalajes):
+            nombre_emb = str(emb.get("nombre", "")).strip() or f"EMB_{j+1}"
+            cu_compra = float(emb.get("costes", {}).get(q_n, 0.0))
+            pv_unit = cu_compra * margen_embalajes
+            pv_tot = pv_unit * q_n
+            # clave estable para dataframe (evitar caracteres raros)
+            nombre_key = re.sub(r"[\r\n\t]+", " ", nombre_emb)
+            pv_emb_por_embalaje.append({
+                "key_unit": f"Precio venta embalaje - {nombre_key} (unitario)",
+                "key_tot": f"Precio venta embalaje - {nombre_key} (TOTAL)",
+                "unit": pv_unit,
+                "total": pv_tot,
+            })
+
         tot_cat["materiales"]["embalajes_compra"] += emb_compra_total
 
         ext_total = 0.0
@@ -1738,16 +1755,25 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         pvp_prod_emb_extras = pv_producido_total + pv_emb_total + pv_extras_total
         unit_prod_emb_extras = pvp_prod_emb_extras / q_n if q_n > 0 else 0.0
 
-        res_final.append({
+        row_resumen = {
             "Cantidad": q_n,
             "Precio venta material (unitario)": f"{pv_material_unit:.3f}€",
             "Precio venta extras (unitario)": f"{pv_extras_unit:.3f}€",
-            "Precio venta embalaje (unitario)": f"{(pv_emb_total/q_n):.3f}€",
+            # Total de embalajes (suma de todas las opciones)
+            "Precio venta embalaje (unitario)": f"{(pv_emb_total/q_n):.3f}€" if q_n > 0 else "0.000€",
+        }
+        # ✅ Si hay varios embalajes, añadimos columnas por cada opción (unitario y total)
+        if len(pv_emb_por_embalaje) > 1:
+            for emb_pv in pv_emb_por_embalaje:
+                row_resumen[emb_pv["key_unit"]] = f"{emb_pv['unit']:.3f}€"
+                row_resumen[emb_pv["key_tot"]] = f"{emb_pv['total']:.2f}€"
+        row_resumen.update({
             "Precio venta troquel (TOTAL)": f"{tot_pv_trq:.2f}€",
             "Precio venta unitario (prod+emb+extras)": f"{unit_prod_emb_extras:.3f}€",
             "Precio venta unitario (todo)": f"{unit_todo:.3f}€",
-            "Precio venta total": f"{pvp_total_todo:.2f}€"
+            "Precio venta total": f"{pvp_total_todo:.2f}€",
         })
+        res_final.append(row_resumen)
 
         desc_full[q_n] = {
             "det_piezas": det_f,
@@ -1995,17 +2021,35 @@ if modo_comercial and res_final:
 else:
     if res_final:
         st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
-        df = pd.DataFrame(res_final)[[
+        st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
+        df_full = pd.DataFrame(res_final)
+
+        # Columnas base (siempre)
+        base_cols = [
             "Cantidad",
             "Precio venta material (unitario)",
             "Precio venta extras (unitario)",
             "Precio venta embalaje (unitario)",
+        ]
+
+        # ✅ Columnas dinámicas por embalaje (solo si hay más de 1)
+        emb_cols = []
+        if isinstance(st.session_state.get("embalajes", None), list) and len(st.session_state.embalajes) > 1:
+            for emb in st.session_state.embalajes:
+                nombre_emb = str(emb.get("nombre", "")).strip() or "EMB"
+                nombre_key = re.sub(r"[\r\n\t]+", " ", nombre_emb)
+                emb_cols.append(f"Precio venta embalaje - {nombre_key} (unitario)")
+                emb_cols.append(f"Precio venta embalaje - {nombre_key} (TOTAL)")
+
+        tail_cols = [
             "Precio venta troquel (TOTAL)",
             "Precio venta unitario (prod+emb+extras)",
             "Precio venta unitario (todo)",
-            "Precio venta total"
-        ]]
-        st.dataframe(df, use_container_width=True)
+            "Precio venta total",
+        ]
+
+        cols = [c for c in (base_cols + emb_cols + tail_cols) if c in df_full.columns]
+        st.dataframe(df_full[cols], use_container_width=True)
 
 # =========================================================
 # TAB DEBUG (SIEMPRE)
