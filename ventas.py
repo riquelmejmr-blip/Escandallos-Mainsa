@@ -1450,7 +1450,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "manipulacion": 0.0,
                 "dificultad": 0.0,
                 "externos": 0.0,
-            }
+            },
+            "embalajes_venta": pv_emb_por_embalaje
         }
 
         # Descuentos de compra por bloque (BD)
@@ -1697,6 +1698,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             # clave estable para dataframe (evitar caracteres raros)
             nombre_key = re.sub(r"[\r\n\t]+", " ", nombre_emb)
             pv_emb_por_embalaje.append({
+                "nombre": nombre_key,
                 "key_unit": f"Precio venta embalaje - {nombre_key} (unitario)",
                 "key_tot": f"Precio venta embalaje - {nombre_key} (TOTAL)",
                 "unit": pv_unit,
@@ -1940,6 +1942,34 @@ if modo_comercial and res_final:
         emb_html += f"<div class='small'>• <b>{emb.get('nombre','')}</b> — {emb.get('tipo','')} — {emb.get('material','')} — {L:.0f}×{W:.0f}×{H:.0f} mm</div>"
     emb_html += "</div>"
 
+    # ✅ Si hay varias opciones de embalaje, mostramos el precio de venta por separado en la oferta
+    if len(st.session_state.embalajes) > 1:
+        # Construimos columnas en base a la primera cantidad disponible
+        _any_q = next(iter(resumen_costes_export.keys()), None)
+        _cols = []
+        if _any_q is not None:
+            _cols = [d.get("nombre","") for d in (resumen_costes_export.get(_any_q, {}).get("embalajes_venta", []) or [])]
+        if _cols:
+            emb_html += "<div class='card' style='margin-top:10px;'>"
+            emb_html += "<div class='small muted'>Precios de venta por opción de embalaje (no incluidos en el precio del producto).</div>"
+            emb_html += "<table class='comercial-table' style='margin-top:10px;'>"
+            # cabecera
+            emb_html += "<tr><th>Cantidad</th>"
+            for n in _cols:
+                emb_html += f"<th>{n} (€/ud)</th><th>{n} (TOTAL)</th>"
+            emb_html += "</tr>"
+            # filas
+            for row in resumen_costes_export.values():
+                q = int(row.get("Cantidad", 0))
+                emb_v = row.get("embalajes_venta", []) or []
+                emb_map = {str(e.get("nombre","")): e for e in emb_v}
+                emb_html += f"<tr><td>{q}</td>"
+                for n in _cols:
+                    e = emb_map.get(n, {})
+                    emb_html += f"<td>{float(e.get('unit',0.0)):.3f}€</td><td>{float(e.get('total',0.0)):.2f}€</td>"
+                emb_html += "</tr>"
+            emb_html += "</table></div>"
+
     ext_html = "<div class='sec-title'>📌 Externos</div><div class='card'>"
     if st.session_state.externos:
         for ext in st.session_state.externos:
@@ -1989,7 +2019,7 @@ if modo_comercial and res_final:
     if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
         opc_html += "<div class='sec-title'>🧩 Opcionales (a parte)</div>"
         opc_html += "<div class='card'>"
-        opc_html += f"<div class='small muted'>Precios opcionales NO incluidos en el precio mostrado (incluyen margen {float(st.session_state.margen):.2f}).</div>"
+        opc_html += "<div class='small muted'>Precios opcionales NO incluidos en el precio mostrado.</div>"
         opc_html += "<table class='comercial-table' style='margin-top:10px;'>" \
                    "<tr><th>Cantidad</th><th>Rellenado (€/ud)</th><th>Rellenado (TOTAL)</th><th>Armado (€/ud)</th><th>Armado (TOTAL)</th></tr>"
         for row in resumen_costes_export.values():
