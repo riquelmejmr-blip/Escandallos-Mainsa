@@ -975,9 +975,9 @@ with tab_calculadora:
         st.number_input("Tiempo/ud", min_value=0.0, value=float(st.session_state.t_input), step=1.0, key="t_input")
 
         st.markdown("**Opcionales (a parte)**")
-        st.checkbox("Rellenado", value=bool(st.session_state.rell_enabled), key=\"rell_enabled\")
+        st.checkbox("Rellenado", value=bool(st.session_state.rell_enabled), key="rell_enabled")
         st.number_input("Tiempo/ud Rellenado", min_value=0.0, value=float(st.session_state.rell_t_input), step=1.0, key="rell_t_input", disabled=not bool(st.session_state.rell_enabled))
-        st.checkbox("Armado", value=bool(st.session_state.arm_enabled), key=\"arm_enabled\")
+        st.checkbox("Armado", value=bool(st.session_state.arm_enabled), key="arm_enabled")
         st.number_input("Tiempo/ud Armado", min_value=0.0, value=float(st.session_state.arm_t_input), step=1.0, key="arm_t_input", disabled=not bool(st.session_state.arm_enabled))
 
     lista_cants = parse_cantidades(st.session_state.cants_str_saved)
