@@ -350,6 +350,11 @@ if "cants_str_saved" not in st.session_state: st.session_state.cants_str_saved =
 if "unidad_t" not in st.session_state: st.session_state.unidad_t = "Segundos"
 if "t_input" not in st.session_state: st.session_state.t_input = 0.0
 
+if "rell_enabled" not in st.session_state: st.session_state.rell_enabled = False
+if "rell_t_input" not in st.session_state: st.session_state.rell_t_input = 0.0
+if "arm_enabled" not in st.session_state: st.session_state.arm_enabled = False
+if "arm_t_input" not in st.session_state: st.session_state.arm_t_input = 0.0
+
 if "dif_ud" not in st.session_state: st.session_state.dif_ud = 0.091
 if "imp_fijo_pvp" not in st.session_state: st.session_state.imp_fijo_pvp = 500.0
 if "margen" not in st.session_state: st.session_state.margen = 2.2
@@ -583,6 +588,20 @@ def normalizar_import(di: dict):
         if "t_input" in manip:
             st.session_state.t_input = float(manip["t_input"])
 
+        # ✅ Opcionales (compatibles hacia atrás)
+        rell = manip.get("rellenado", {})
+        if isinstance(rell, dict):
+            if "enabled" in rell:
+                st.session_state.rell_enabled = bool(rell.get("enabled", False))
+            if "t_input" in rell:
+                st.session_state.rell_t_input = float(rell.get("t_input", 0.0))
+        arm = manip.get("armado", {})
+        if isinstance(arm, dict):
+            if "enabled" in arm:
+                st.session_state.arm_enabled = bool(arm.get("enabled", False))
+            if "t_input" in arm:
+                st.session_state.arm_t_input = float(arm.get("t_input", 0.0))
+
     params = di.get("params", {})
     if isinstance(params, dict):
         if "dif_ud" in params: st.session_state.dif_ud = float(params["dif_ud"])
@@ -729,7 +748,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
         "cants_str": st.session_state.cants_str_saved,
-        "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input)},
+        "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input), "rellenado": {"enabled": bool(st.session_state.rell_enabled), "t_input": float(st.session_state.rell_t_input)}, "armado": {"enabled": bool(st.session_state.arm_enabled), "t_input": float(st.session_state.arm_t_input)}},
         "params": {"dif_ud": float(st.session_state.dif_ud), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
         "db_precios": deepcopy(st.session_state.db_precios),
         "db_descuentos": deepcopy(st.session_state.db_descuentos),
@@ -955,11 +974,23 @@ with tab_calculadora:
         st.radio("Manipulación", ["Segundos", "Minutos"], horizontal=True, key="unidad_t")
         st.number_input("Tiempo/ud", min_value=0.0, value=float(st.session_state.t_input), step=1.0, key="t_input")
 
+        st.markdown("**Opcionales (a parte)**")
+        st.checkbox("Rellenado", value=bool(st.session_state.rell_enabled), key=\"rell_enabled\")
+        st.number_input("Tiempo/ud Rellenado", min_value=0.0, value=float(st.session_state.rell_t_input), step=1.0, key="rell_t_input", disabled=not bool(st.session_state.rell_enabled))
+        st.checkbox("Armado", value=bool(st.session_state.arm_enabled), key=\"arm_enabled\")
+        st.number_input("Tiempo/ud Armado", min_value=0.0, value=float(st.session_state.arm_t_input), step=1.0, key="arm_t_input", disabled=not bool(st.session_state.arm_enabled))
+
     lista_cants = parse_cantidades(st.session_state.cants_str_saved)
 
     unidad_t = st.session_state.unidad_t
     t_input = float(st.session_state.t_input)
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
+
+    # Opcionales (a parte): mismas unidades que manipulación
+    rell_t_input = float(st.session_state.rell_t_input)
+    arm_t_input = float(st.session_state.arm_t_input)
+    seg_rell_total = (rell_t_input * 60) if unidad_t == "Minutos" else rell_t_input
+    seg_arm_total = (arm_t_input * 60) if unidad_t == "Minutos" else arm_t_input
 
     with st.expander("💰 Finanzas", expanded=False):
         st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2, key="dif_ud")
@@ -1624,6 +1655,31 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         tot_cat["procesos"]["manipulacion"] += c_mo_man
         tot_cat["procesos"]["dificultad"] += c_mo_dif
 
+        # Opcionales (a parte): Rellenado + Armado (se muestran como opción al cliente)
+        # Se calcula un PVP opcional aplicando el mismo margen de trabajo (st.session_state.margen).
+        # Se guardan también los costes base sin margen para uso interno / compatibilidad.
+        margen_trabajo = float(st.session_state.margen) if "margen" in st.session_state else 1.0
+
+        c_opt_rell_coste = (seg_rell_total/3600.0)*18.0*q_n if bool(st.session_state.rell_enabled) else 0.0
+        c_opt_arm_coste = (seg_arm_total/3600.0)*18.0*q_n if bool(st.session_state.arm_enabled) else 0.0
+
+        c_opt_rell_pvp = c_opt_rell_coste * margen_trabajo
+        c_opt_arm_pvp = c_opt_arm_coste * margen_trabajo
+
+        opcionales_cost = {
+            # Valores que se muestran al cliente (con margen)
+            "rellenado_total": float(c_opt_rell_pvp),
+            "armado_total": float(c_opt_arm_pvp),
+            "rellenado_unit": float(c_opt_rell_pvp / q_n) if q_n > 0 else 0.0,
+            "armado_unit": float(c_opt_arm_pvp / q_n) if q_n > 0 else 0.0,
+            # Costes internos sin margen
+            "rellenado_total_coste": float(c_opt_rell_coste),
+            "armado_total_coste": float(c_opt_arm_coste),
+            "rellenado_unit_coste": float(c_opt_rell_coste / q_n) if q_n > 0 else 0.0,
+            "armado_unit_coste": float(c_opt_arm_coste / q_n) if q_n > 0 else 0.0,
+            "margen_aplicado": float(margen_trabajo),
+        }
+
         emb_compra_total = 0.0
         emb_det = []
         for emb in st.session_state.embalajes:
@@ -1708,7 +1764,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             "Detalle piezas": det_f,
             "Detalle embalajes": emb_det,
             "Detalle externos": ext_det,
-            "Extras (detalle)": st.session_state.lista_extras_grabados
+            "Extras (detalle)": st.session_state.lista_extras_grabados,
+            "Opcionales (a parte)": opcionales_cost
         }
 
         resumen_costes_export[q_n] = {
@@ -1719,12 +1776,26 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "materiales_total": round(sum(tot_cat["materiales"].values()), 4),
                 "procesos_total": round(sum(tot_cat["procesos"].values()), 4),
                 "coste_total_compra_estimado": round(sum(tot_cat["materiales"].values()) + sum(tot_cat["procesos"].values()), 4)
+            },
+            "opcionales_a_parte": {
+                # Valores mostrados al cliente (con margen)
+                "rellenado_total": round(opcionales_cost.get("rellenado_total", 0.0), 4),
+                "armado_total": round(opcionales_cost.get("armado_total", 0.0), 4),
+                "rellenado_unit": round(opcionales_cost.get("rellenado_unit", 0.0), 6),
+                "armado_unit": round(opcionales_cost.get("armado_unit", 0.0), 6),
+                # Costes internos sin margen
+                "rellenado_total_coste": round(opcionales_cost.get("rellenado_total_coste", 0.0), 4),
+                "armado_total_coste": round(opcionales_cost.get("armado_total_coste", 0.0), 4),
+                "rellenado_unit_coste": round(opcionales_cost.get("rellenado_unit_coste", 0.0), 6),
+                "armado_unit_coste": round(opcionales_cost.get("armado_unit_coste", 0.0), 6),
+                "margen_aplicado": round(opcionales_cost.get("margen_aplicado", float(st.session_state.margen)), 4)
             }
         }
 
 safe_brf = re.sub(r'[\\/*?:"<>|]', "", st.session_state.brf or "Ref").replace(" ", "_")
 safe_cli = re.sub(r'[\\/*?:"<>|]', "", st.session_state.cli or "Cli").replace(" ", "_")
-st.session_state._export_filename = f"{safe_brf}_{safe_cli}.json"
+safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
+st.session_state._export_filename = f"{safe_brf}_{safe_cli}_{safe_desc}.json"
 
 export_data = construir_export(
     resumen_compra=compras_legible if compras_legible else None,
@@ -1771,6 +1842,18 @@ if modo_comercial and res_final:
         f"<span class='small muted'><b>Tiempo/ud:</b> {manip_unit_txt} &nbsp;|&nbsp; <b>Equivalente:</b> {manip_seg_txt}</span>"
         "</div>"
     )
+
+    # Opcionales (a parte)
+    if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
+        opt_lines = []
+        if bool(st.session_state.rell_enabled):
+            opt_lines.append(f"<span class='tag'>Rellenado</span><span class='small muted'>+ {seg_rell_total:g} seg/ud</span>")
+        if bool(st.session_state.arm_enabled):
+            opt_lines.append(f"<span class='tag'>Armado</span><span class='small muted'>+ {seg_arm_total:g} seg/ud</span>")
+        desc_html += "<div style='margin-bottom:10px;'>"
+        desc_html += "<span class='tag'>Opcionales</span> "
+        desc_html += " &nbsp; ".join(opt_lines)
+        desc_html += "</div>"
 
     for p in st.session_state.piezas_dict.values():
         base_info = ""
@@ -1875,7 +1958,21 @@ if modo_comercial and res_final:
         "</div>"
     )
 
-    oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, ext_html, tabla)
+        # Opcionales (a parte) - tabla
+    opc_html = ""
+    if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
+        opc_html += "<div class='sec-title'>🧩 Opcionales (a parte)</div>"
+        opc_html += "<div class='card'>"
+        opc_html += f"<div class='small muted'>Precios opcionales NO incluidos en el precio mostrado (incluyen margen {float(st.session_state.margen):.2f}).</div>"
+        opc_html += "<table class='comercial-table' style='margin-top:10px;'>" \
+                   "<tr><th>Cantidad</th><th>Rellenado (€/ud)</th><th>Rellenado (TOTAL)</th><th>Armado (€/ud)</th><th>Armado (TOTAL)</th></tr>"
+        for row in resumen_costes_export.values():
+            q = int(row.get("Cantidad", 0))
+            op = row.get("opcionales_a_parte", {}) or {}
+            opc_html += f"<tr><td>{q}</td><td>{float(op.get('rellenado_unit',0.0)):.3f}€</td><td>{float(op.get('rellenado_total',0.0)):.2f}€</td><td>{float(op.get('armado_unit',0.0)):.3f}€</td><td>{float(op.get('armado_total',0.0)):.2f}€</td></tr>"
+        opc_html += "</table></div>"
+
+    oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, (ext_html + opc_html), tabla)
     safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
     fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
 
@@ -1891,7 +1988,7 @@ if modo_comercial and res_final:
         "<div class='comercial-box'>"
         f"<div class='comercial-header'>OFERTA COMERCIAL - {st.session_state.cli or 'CLIENTE'}</div>"
         f"<div class='comercial-ref'>Ref. Briefing: {st.session_state.brf or '-'}</div>"
-        f"{desc_html}{extras_html}{emb_html}{ext_html}{tabla}"
+        f"{desc_html}{extras_html}{emb_html}{ext_html}{opc_html}{tabla}"
         "</div>",
         unsafe_allow_html=True
     )
