@@ -339,6 +339,7 @@ if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extra
 if "embalajes" not in st.session_state: st.session_state.embalajes = [crear_embalaje_vacio(0)]
 if "externos" not in st.session_state: st.session_state.externos = [crear_externo_vacio(0)]
 if "mermas_imp_manual" not in st.session_state: st.session_state.mermas_imp_manual = {}
+if "mermas_imp_digital_manual" not in st.session_state: st.session_state.mermas_imp_digital_manual = {}
 if "mermas_proc_manual" not in st.session_state: st.session_state.mermas_proc_manual = {}
 
 if "brf" not in st.session_state: st.session_state.brf = ""
@@ -348,6 +349,11 @@ if "cants_str_saved" not in st.session_state: st.session_state.cants_str_saved =
 
 if "unidad_t" not in st.session_state: st.session_state.unidad_t = "Segundos"
 if "t_input" not in st.session_state: st.session_state.t_input = 0.0
+
+if "rell_enabled" not in st.session_state: st.session_state.rell_enabled = False
+if "rell_t_input" not in st.session_state: st.session_state.rell_t_input = 0.0
+if "arm_enabled" not in st.session_state: st.session_state.arm_enabled = False
+if "arm_t_input" not in st.session_state: st.session_state.arm_t_input = 0.0
 
 if "dif_ud" not in st.session_state: st.session_state.dif_ud = 0.091
 if "imp_fijo_pvp" not in st.session_state: st.session_state.imp_fijo_pvp = 500.0
@@ -582,6 +588,20 @@ def normalizar_import(di: dict):
         if "t_input" in manip:
             st.session_state.t_input = float(manip["t_input"])
 
+        # ✅ Opcionales (compatibles hacia atrás)
+        rell = manip.get("rellenado", {})
+        if isinstance(rell, dict):
+            if "enabled" in rell:
+                st.session_state.rell_enabled = bool(rell.get("enabled", False))
+            if "t_input" in rell:
+                st.session_state.rell_t_input = float(rell.get("t_input", 0.0))
+        arm = manip.get("armado", {})
+        if isinstance(arm, dict):
+            if "enabled" in arm:
+                st.session_state.arm_enabled = bool(arm.get("enabled", False))
+            if "t_input" in arm:
+                st.session_state.arm_t_input = float(arm.get("t_input", 0.0))
+
     params = di.get("params", {})
     if isinstance(params, dict):
         if "dif_ud" in params: st.session_state.dif_ud = float(params["dif_ud"])
@@ -658,6 +678,8 @@ def normalizar_import(di: dict):
 
     if isinstance(di.get("mermas_imp", None), dict):
         st.session_state.mermas_imp_manual = {int(k): int(v) for k, v in di["mermas_imp"].items()}
+    if isinstance(di.get("mermas_imp_digital", None), dict):
+        st.session_state.mermas_imp_digital_manual = {int(k): int(v) for k, v in di["mermas_imp_digital"].items()}
     if isinstance(di.get("mermas_proc", None), dict):
         st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in di["mermas_proc"].items()}
 
@@ -726,7 +748,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
         "cants_str": st.session_state.cants_str_saved,
-        "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input)},
+        "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input), "rellenado": {"enabled": bool(st.session_state.rell_enabled), "t_input": float(st.session_state.rell_t_input)}, "armado": {"enabled": bool(st.session_state.arm_enabled), "t_input": float(st.session_state.arm_t_input)}},
         "params": {"dif_ud": float(st.session_state.dif_ud), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
         "db_precios": deepcopy(st.session_state.db_precios),
         "db_descuentos": deepcopy(st.session_state.db_descuentos),
@@ -735,6 +757,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "embalajes": deepcopy(st.session_state.embalajes),
         "externos": deepcopy(st.session_state.externos),
         "mermas_imp": deepcopy(st.session_state.mermas_imp_manual),
+        "mermas_imp_digital": deepcopy(st.session_state.mermas_imp_digital_manual),
         "mermas_proc": deepcopy(st.session_state.mermas_proc_manual),
     }
     if resumen_compra is not None:
@@ -951,11 +974,23 @@ with tab_calculadora:
         st.radio("Manipulación", ["Segundos", "Minutos"], horizontal=True, key="unidad_t")
         st.number_input("Tiempo/ud", min_value=0.0, value=float(st.session_state.t_input), step=1.0, key="t_input")
 
+        st.markdown("**Opcionales (a parte)**")
+        st.checkbox("Rellenado", value=bool(st.session_state.rell_enabled), key="rell_enabled")
+        st.number_input("Tiempo/ud Rellenado", min_value=0.0, value=float(st.session_state.rell_t_input), step=1.0, key="rell_t_input", disabled=not bool(st.session_state.rell_enabled))
+        st.checkbox("Armado", value=bool(st.session_state.arm_enabled), key="arm_enabled")
+        st.number_input("Tiempo/ud Armado", min_value=0.0, value=float(st.session_state.arm_t_input), step=1.0, key="arm_t_input", disabled=not bool(st.session_state.arm_enabled))
+
     lista_cants = parse_cantidades(st.session_state.cants_str_saved)
 
     unidad_t = st.session_state.unidad_t
     t_input = float(st.session_state.t_input)
     seg_man_total = t_input * 60 if unidad_t == "Minutos" else t_input
+
+    # Opcionales (a parte): mismas unidades que manipulación
+    rell_t_input = float(st.session_state.rell_t_input)
+    arm_t_input = float(st.session_state.arm_t_input)
+    seg_rell_total = (rell_t_input * 60) if unidad_t == "Minutos" else rell_t_input
+    seg_arm_total = (arm_t_input * 60) if unidad_t == "Minutos" else arm_t_input
 
     with st.expander("💰 Finanzas", expanded=False):
         st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2, key="dif_ud")
@@ -977,13 +1012,21 @@ with tab_calculadora:
     st.divider()
 
     if lista_cants:
-        es_dig = es_digital_en_proyecto(st.session_state.piezas_dict)
+        # Mermas por defecto:
+        # - 'mermas_proc_manual' y 'mermas_imp_manual' se consideran la referencia "normal" (offset / general)
+        # - 'mermas_imp_digital_manual' es específica para impresión digital
         for q in lista_cants:
-            mp, mi = calcular_mermas_estandar(q, es_digital=es_dig)
+            mp_off, mi_off = calcular_mermas_estandar(q, es_digital=False)
+            _mp_dig, mi_dig = calcular_mermas_estandar(q, es_digital=True)
+
             if q not in st.session_state.mermas_proc_manual:
-                st.session_state.mermas_proc_manual[q] = mp
+                st.session_state.mermas_proc_manual[q] = mp_off
+
             if q not in st.session_state.mermas_imp_manual:
-                st.session_state.mermas_imp_manual[q] = mi
+                st.session_state.mermas_imp_manual[q] = mi_off
+
+            if q not in st.session_state.mermas_imp_digital_manual:
+                st.session_state.mermas_imp_digital_manual[q] = mi_dig
 
     # -----------------------------------------------------
     # PASO 2: TÉCNICO
@@ -1338,10 +1381,29 @@ with tab_calculadora:
     st.subheader("⚙️ 5. Gestión de Mermas (auto-relleno)")
     if lista_cants:
         for q in lista_cants:
-            c1, c2, c3 = st.columns([1, 2, 2])
+            c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
             c1.markdown(f"**{q} uds**")
-            st.session_state.mermas_imp_manual[q] = int(c2.number_input("Arranque impresión (hojas)", value=int(st.session_state.mermas_imp_manual.get(q, 0)), key=f"mi_{q}"))
-            st.session_state.mermas_proc_manual[q] = int(c3.number_input("Rodaje proceso (hojas)", value=int(st.session_state.mermas_proc_manual.get(q, 0)), key=f"mp_{q}"))
+            st.session_state.mermas_imp_manual[q] = int(
+                c2.number_input(
+                    "Arranque impresión OFFSET (hojas)",
+                    value=int(st.session_state.mermas_imp_manual.get(q, 0)),
+                    key=f"mi_{q}",
+                )
+            )
+            st.session_state.mermas_imp_digital_manual[q] = int(
+                c3.number_input(
+                    "Arranque impresión DIGITAL (hojas)",
+                    value=int(st.session_state.mermas_imp_digital_manual.get(q, 0)),
+                    key=f"mid_{q}",
+                )
+            )
+            st.session_state.mermas_proc_manual[q] = int(
+                c4.number_input(
+                    "Rodaje proceso (hojas)",
+                    value=int(st.session_state.mermas_proc_manual.get(q, 0)),
+                    key=f"mp_{q}",
+                )
+            )
     else:
         st.warning("Define cantidades en Paso 1.")
 
@@ -1357,7 +1419,15 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
     tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
 
     for q_n in lista_cants:
-        merma_imp_hojas = int(st.session_state.mermas_imp_manual.get(q_n, 0))
+        # Mermas:
+        # - Offset/general: mermas_imp_manual
+        # - Digital: mermas_imp_digital_manual (fallback a regla digital si no existe)
+        merma_imp_offset_hojas = int(st.session_state.mermas_imp_manual.get(q_n, 0))
+        merma_imp_digital_hojas = int(
+            st.session_state.mermas_imp_digital_manual.get(
+                q_n, calcular_mermas_estandar(q_n, es_digital=True)[1]
+            )
+        )
         merma_proc_hojas = int(st.session_state.mermas_proc_manual.get(q_n, 0))
 
         coste_f = 0.0
@@ -1380,7 +1450,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "manipulacion": 0.0,
                 "dificultad": 0.0,
                 "externos": 0.0,
-            }
+            },
+            "embalajes_venta": pv_emb_por_embalaje
         }
 
         # Descuentos de compra por bloque (BD)
@@ -1402,11 +1473,30 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             nb = q_n * float(p.get("pliegos", 1.0))
             hp_produccion = nb + merma_proc_hojas
 
-            imprime_cara = (p.get("im", "No") != "No")
-            imprime_dorso = (p.get("pd", "Ninguno") != "Ninguno" and p.get("im_d", "No") != "No")
+            im_cara = p.get("im", "No")
+            im_dorso = p.get("im_d", "No")
 
-            hp_papel_f = hp_produccion + merma_imp_hojas if imprime_cara else hp_produccion
-            hp_papel_d = hp_produccion + merma_imp_hojas if imprime_dorso else hp_produccion
+            imprime_cara = (im_cara != "No")
+            imprime_dorso = (p.get("pd", "Ninguno") != "Ninguno" and im_dorso != "No")
+
+            # 👇 Merma de impresión depende del tipo (Offset vs Digital)
+            if imprime_cara:
+                merma_cara = merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas
+                hp_papel_f = hp_produccion + merma_cara
+                # Hojas de IMPRESIÓN (y laminado digital) deben ser netas + merma de impresión del tipo
+                hp_imp_f = nb + (merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas)
+            else:
+                hp_papel_f = hp_produccion
+                hp_imp_f = 0
+
+            if imprime_dorso:
+                merma_d = merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas
+                hp_papel_d = hp_produccion + merma_d
+                # Hojas de IMPRESIÓN (y laminado digital) deben ser netas + merma de impresión del tipo
+                hp_imp_d = nb + (merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas)
+            else:
+                hp_papel_d = hp_produccion
+                hp_imp_d = 0
 
             w = float(p.get("w", 0))
             h = float(p.get("h", 0))
@@ -1493,17 +1583,19 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_imp_dorso = 0.0
 
             if p.get("im","No") == "Digital":
-                c_imp_cara = hp_papel_f * m2_papel * 6.5
+                # Digital: impresión y laminado usan HOJAS NETAS + merma de impresión DIGITAL
+                c_imp_cara = hp_imp_f * m2_papel * 6.5
                 if bool(p.get("ld", False)):
-                    c_pel_total += hp_produccion * m2_papel * float(db.get("laminado_digital", 3.5))
+                    c_pel_total += hp_imp_f * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im","No") == "Offset":
                 tintas_cara = int(p.get("nt",0)) + (1 if bool(p.get("ba",False)) else 0)
                 c_imp_cara = coste_offset_por_tinta(int(round(nb))) * tintas_cara
 
             if p.get("im_d","No") == "Digital":
-                c_imp_dorso = hp_papel_d * m2_papel * 6.5
+                # Digital: impresión y laminado usan HOJAS NETAS + merma de impresión DIGITAL
+                c_imp_dorso = hp_imp_d * m2_papel * 6.5
                 if bool(p.get("ld_d", False)):
-                    c_pel_total += hp_produccion * m2_papel * float(db.get("laminado_digital", 3.5))
+                    c_pel_total += hp_imp_d * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im_d","No") == "Offset":
                 tintas_dorso = int(p.get("nt_d",0)) + (1 if bool(p.get("ba_d",False)) else 0)
                 c_imp_dorso = coste_offset_por_tinta(int(round(nb))) * tintas_dorso
@@ -1564,12 +1656,55 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         tot_cat["procesos"]["manipulacion"] += c_mo_man
         tot_cat["procesos"]["dificultad"] += c_mo_dif
 
+        # Opcionales (a parte): Rellenado + Armado (se muestran como opción al cliente)
+        # Se calcula un PVP opcional aplicando el mismo margen de trabajo (st.session_state.margen).
+        # Se guardan también los costes base sin margen para uso interno / compatibilidad.
+        margen_trabajo = float(st.session_state.margen) if "margen" in st.session_state else 1.0
+
+        c_opt_rell_coste = (seg_rell_total/3600.0)*18.0*q_n if bool(st.session_state.rell_enabled) else 0.0
+        c_opt_arm_coste = (seg_arm_total/3600.0)*18.0*q_n if bool(st.session_state.arm_enabled) else 0.0
+
+        c_opt_rell_pvp = c_opt_rell_coste * margen_trabajo
+        c_opt_arm_pvp = c_opt_arm_coste * margen_trabajo
+
+        opcionales_cost = {
+            # Valores que se muestran al cliente (con margen)
+            "rellenado_total": float(c_opt_rell_pvp),
+            "armado_total": float(c_opt_arm_pvp),
+            "rellenado_unit": float(c_opt_rell_pvp / q_n) if q_n > 0 else 0.0,
+            "armado_unit": float(c_opt_arm_pvp / q_n) if q_n > 0 else 0.0,
+            # Costes internos sin margen
+            "rellenado_total_coste": float(c_opt_rell_coste),
+            "armado_total_coste": float(c_opt_arm_coste),
+            "rellenado_unit_coste": float(c_opt_rell_coste / q_n) if q_n > 0 else 0.0,
+            "armado_unit_coste": float(c_opt_arm_coste / q_n) if q_n > 0 else 0.0,
+            "margen_aplicado": float(margen_trabajo),
+        }
+
         emb_compra_total = 0.0
         emb_det = []
         for emb in st.session_state.embalajes:
             cu = float(emb.get("costes", {}).get(q_n, 0.0))
             emb_compra_total += cu * q_n
             emb_det.append({"nombre": emb.get("nombre",""), "tipo": emb.get("tipo",""), "material": emb.get("material",""), "coste_unit_compra": cu})
+        # ✅ Venta de embalajes por separado (si hay varios, se reflejan en el resumen)
+        # Se calcula por opción de embalaje: precio venta unitario y total (aplicando margen_embalajes).
+        pv_emb_por_embalaje = []  # lista de dicts: {"key": ..., "unit": ..., "total": ...}
+        for j, emb in enumerate(st.session_state.embalajes):
+            nombre_emb = str(emb.get("nombre", "")).strip() or f"EMB_{j+1}"
+            cu_compra = float(emb.get("costes", {}).get(q_n, 0.0))
+            pv_unit = cu_compra * margen_embalajes
+            pv_tot = pv_unit * q_n
+            # clave estable para dataframe (evitar caracteres raros)
+            nombre_key = re.sub(r"[\r\n\t]+", " ", nombre_emb)
+            pv_emb_por_embalaje.append({
+                "nombre": nombre_key,
+                "key_unit": f"Precio venta embalaje - {nombre_key} (unitario)",
+                "key_tot": f"Precio venta embalaje - {nombre_key} (TOTAL)",
+                "unit": pv_unit,
+                "total": pv_tot,
+            })
+
         tot_cat["materiales"]["embalajes_compra"] += emb_compra_total
 
         ext_total = 0.0
@@ -1622,22 +1757,31 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         pvp_prod_emb_extras = pv_producido_total + pv_emb_total + pv_extras_total
         unit_prod_emb_extras = pvp_prod_emb_extras / q_n if q_n > 0 else 0.0
 
-        res_final.append({
+        row_resumen = {
             "Cantidad": q_n,
             "Precio venta material (unitario)": f"{pv_material_unit:.3f}€",
             "Precio venta extras (unitario)": f"{pv_extras_unit:.3f}€",
-            "Precio venta embalaje (unitario)": f"{(pv_emb_total/q_n):.3f}€",
+            # Total de embalajes (suma de todas las opciones)
+            "Precio venta embalaje (unitario)": f"{(pv_emb_total/q_n):.3f}€" if q_n > 0 else "0.000€",
+        }
+        # ✅ Si hay varios embalajes, añadimos columnas por cada opción (unitario y total)
+        if len(pv_emb_por_embalaje) > 1:
+            for emb_pv in pv_emb_por_embalaje:
+                row_resumen[emb_pv["key_unit"]] = f"{emb_pv['unit']:.3f}€"
+                row_resumen[emb_pv["key_tot"]] = f"{emb_pv['total']:.2f}€"
+        row_resumen.update({
             "Precio venta troquel (TOTAL)": f"{tot_pv_trq:.2f}€",
             "Precio venta unitario (prod+emb+extras)": f"{unit_prod_emb_extras:.3f}€",
             "Precio venta unitario (todo)": f"{unit_todo:.3f}€",
-            "Precio venta total": f"{pvp_total_todo:.2f}€"
+            "Precio venta total": f"{pvp_total_todo:.2f}€",
         })
+        res_final.append(row_resumen)
 
         desc_full[q_n] = {
             "det_piezas": det_f,
             "embalajes": emb_det,
             "externos": ext_det,
-            "mermas": {"impresion_hojas": merma_imp_hojas, "proceso_hojas": merma_proc_hojas},
+            "mermas": {"impresion_offset_hojas": merma_imp_offset_hojas, "impresion_digital_hojas": merma_imp_digital_hojas, "proceso_hojas": merma_proc_hojas},
             "debug": debug_log
         }
 
@@ -1648,7 +1792,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             "Detalle piezas": det_f,
             "Detalle embalajes": emb_det,
             "Detalle externos": ext_det,
-            "Extras (detalle)": st.session_state.lista_extras_grabados
+            "Extras (detalle)": st.session_state.lista_extras_grabados,
+            "Opcionales (a parte)": opcionales_cost
         }
 
         resumen_costes_export[q_n] = {
@@ -1659,12 +1804,26 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "materiales_total": round(sum(tot_cat["materiales"].values()), 4),
                 "procesos_total": round(sum(tot_cat["procesos"].values()), 4),
                 "coste_total_compra_estimado": round(sum(tot_cat["materiales"].values()) + sum(tot_cat["procesos"].values()), 4)
+            },
+            "opcionales_a_parte": {
+                # Valores mostrados al cliente (con margen)
+                "rellenado_total": round(opcionales_cost.get("rellenado_total", 0.0), 4),
+                "armado_total": round(opcionales_cost.get("armado_total", 0.0), 4),
+                "rellenado_unit": round(opcionales_cost.get("rellenado_unit", 0.0), 6),
+                "armado_unit": round(opcionales_cost.get("armado_unit", 0.0), 6),
+                # Costes internos sin margen
+                "rellenado_total_coste": round(opcionales_cost.get("rellenado_total_coste", 0.0), 4),
+                "armado_total_coste": round(opcionales_cost.get("armado_total_coste", 0.0), 4),
+                "rellenado_unit_coste": round(opcionales_cost.get("rellenado_unit_coste", 0.0), 6),
+                "armado_unit_coste": round(opcionales_cost.get("armado_unit_coste", 0.0), 6),
+                "margen_aplicado": round(opcionales_cost.get("margen_aplicado", float(st.session_state.margen)), 4)
             }
         }
 
 safe_brf = re.sub(r'[\\/*?:"<>|]', "", st.session_state.brf or "Ref").replace(" ", "_")
 safe_cli = re.sub(r'[\\/*?:"<>|]', "", st.session_state.cli or "Cli").replace(" ", "_")
-st.session_state._export_filename = f"{safe_brf}_{safe_cli}.json"
+safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
+st.session_state._export_filename = f"{safe_brf}_{safe_cli}_{safe_desc}.json"
 
 export_data = construir_export(
     resumen_compra=compras_legible if compras_legible else None,
@@ -1711,6 +1870,18 @@ if modo_comercial and res_final:
         f"<span class='small muted'><b>Tiempo/ud:</b> {manip_unit_txt} &nbsp;|&nbsp; <b>Equivalente:</b> {manip_seg_txt}</span>"
         "</div>"
     )
+
+    # Opcionales (a parte)
+    if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
+        opt_lines = []
+        if bool(st.session_state.rell_enabled):
+            opt_lines.append(f"<span class='tag'>Rellenado</span><span class='small muted'>+ {seg_rell_total:g} seg/ud</span>")
+        if bool(st.session_state.arm_enabled):
+            opt_lines.append(f"<span class='tag'>Armado</span><span class='small muted'>+ {seg_arm_total:g} seg/ud</span>")
+        desc_html += "<div style='margin-bottom:10px;'>"
+        desc_html += "<span class='tag'>Opcionales</span> "
+        desc_html += " &nbsp; ".join(opt_lines)
+        desc_html += "</div>"
 
     for p in st.session_state.piezas_dict.values():
         base_info = ""
@@ -1771,6 +1942,34 @@ if modo_comercial and res_final:
         emb_html += f"<div class='small'>• <b>{emb.get('nombre','')}</b> — {emb.get('tipo','')} — {emb.get('material','')} — {L:.0f}×{W:.0f}×{H:.0f} mm</div>"
     emb_html += "</div>"
 
+    # ✅ Si hay varias opciones de embalaje, mostramos el precio de venta por separado en la oferta
+    if len(st.session_state.embalajes) > 1:
+        # Construimos columnas en base a la primera cantidad disponible
+        _any_q = next(iter(resumen_costes_export.keys()), None)
+        _cols = []
+        if _any_q is not None:
+            _cols = [d.get("nombre","") for d in (resumen_costes_export.get(_any_q, {}).get("embalajes_venta", []) or [])]
+        if _cols:
+            emb_html += "<div class='card' style='margin-top:10px;'>"
+            emb_html += "<div class='small muted'>Precios de venta por opción de embalaje (no incluidos en el precio del producto).</div>"
+            emb_html += "<table class='comercial-table' style='margin-top:10px;'>"
+            # cabecera
+            emb_html += "<tr><th>Cantidad</th>"
+            for n in _cols:
+                emb_html += f"<th>{n} (€/ud)</th><th>{n} (TOTAL)</th>"
+            emb_html += "</tr>"
+            # filas
+            for row in resumen_costes_export.values():
+                q = int(row.get("Cantidad", 0))
+                emb_v = row.get("embalajes_venta", []) or []
+                emb_map = {str(e.get("nombre","")): e for e in emb_v}
+                emb_html += f"<tr><td>{q}</td>"
+                for n in _cols:
+                    e = emb_map.get(n, {})
+                    emb_html += f"<td>{float(e.get('unit',0.0)):.3f}€</td><td>{float(e.get('total',0.0)):.2f}€</td>"
+                emb_html += "</tr>"
+            emb_html += "</table></div>"
+
     ext_html = "<div class='sec-title'>📌 Externos</div><div class='card'>"
     if st.session_state.externos:
         for ext in st.session_state.externos:
@@ -1815,7 +2014,21 @@ if modo_comercial and res_final:
         "</div>"
     )
 
-    oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, ext_html, tabla)
+        # Opcionales (a parte) - tabla
+    opc_html = ""
+    if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
+        opc_html += "<div class='sec-title'>🧩 Opcionales (a parte)</div>"
+        opc_html += "<div class='card'>"
+        opc_html += "<div class='small muted'>Precios opcionales NO incluidos en el precio mostrado.</div>"
+        opc_html += "<table class='comercial-table' style='margin-top:10px;'>" \
+                   "<tr><th>Cantidad</th><th>Rellenado (€/ud)</th><th>Rellenado (TOTAL)</th><th>Armado (€/ud)</th><th>Armado (TOTAL)</th></tr>"
+        for row in resumen_costes_export.values():
+            q = int(row.get("Cantidad", 0))
+            op = row.get("opcionales_a_parte", {}) or {}
+            opc_html += f"<tr><td>{q}</td><td>{float(op.get('rellenado_unit',0.0)):.3f}€</td><td>{float(op.get('rellenado_total',0.0)):.2f}€</td><td>{float(op.get('armado_unit',0.0)):.3f}€</td><td>{float(op.get('armado_total',0.0)):.2f}€</td></tr>"
+        opc_html += "</table></div>"
+
+    oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, (ext_html + opc_html), tabla)
     safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
     fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
 
@@ -1831,24 +2044,42 @@ if modo_comercial and res_final:
         "<div class='comercial-box'>"
         f"<div class='comercial-header'>OFERTA COMERCIAL - {st.session_state.cli or 'CLIENTE'}</div>"
         f"<div class='comercial-ref'>Ref. Briefing: {st.session_state.brf or '-'}</div>"
-        f"{desc_html}{extras_html}{emb_html}{ext_html}{tabla}"
+        f"{desc_html}{extras_html}{emb_html}{ext_html}{opc_html}{tabla}"
         "</div>",
         unsafe_allow_html=True
     )
 else:
     if res_final:
         st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
-        df = pd.DataFrame(res_final)[[
+        st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
+        df_full = pd.DataFrame(res_final)
+
+        # Columnas base (siempre)
+        base_cols = [
             "Cantidad",
             "Precio venta material (unitario)",
             "Precio venta extras (unitario)",
             "Precio venta embalaje (unitario)",
+        ]
+
+        # ✅ Columnas dinámicas por embalaje (solo si hay más de 1)
+        emb_cols = []
+        if isinstance(st.session_state.get("embalajes", None), list) and len(st.session_state.embalajes) > 1:
+            for emb in st.session_state.embalajes:
+                nombre_emb = str(emb.get("nombre", "")).strip() or "EMB"
+                nombre_key = re.sub(r"[\r\n\t]+", " ", nombre_emb)
+                emb_cols.append(f"Precio venta embalaje - {nombre_key} (unitario)")
+                emb_cols.append(f"Precio venta embalaje - {nombre_key} (TOTAL)")
+
+        tail_cols = [
             "Precio venta troquel (TOTAL)",
             "Precio venta unitario (prod+emb+extras)",
             "Precio venta unitario (todo)",
-            "Precio venta total"
-        ]]
-        st.dataframe(df, use_container_width=True)
+            "Precio venta total",
+        ]
+
+        cols = [c for c in (base_cols + emb_cols + tail_cols) if c in df_full.columns]
+        st.dataframe(df_full[cols], use_container_width=True)
 
 # =========================================================
 # TAB DEBUG (SIEMPRE)
