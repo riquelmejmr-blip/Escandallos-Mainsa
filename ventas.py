@@ -204,6 +204,72 @@ def parse_cantidades(s: str):
             out.append(int(x))
     return out
 
+
+# =========================================================
+# IMPRESIONES POR CANTIDAD (multi-tirada)
+# =========================================================
+def _split_equal(total: int, n: int) -> list:
+    """Reparte 'total' en 'n' partes lo más igualadas posible."""
+    if n <= 1 or total <= 0:
+        return [int(total)] if total > 0 else []
+    base = total // n
+    rem = total % n
+    partes = [base + (1 if i < rem else 0) for i in range(n)]
+    return [p for p in partes if p > 0]
+
+def _parse_partes_str(s: str) -> list:
+    """Parsea '100+400+500' o '100, 400, 500' -> [100,400,500]."""
+    if not s:
+        return []
+    nums = re.split(r"[,+\s]+", str(s).strip())
+    out = []
+    for x in nums:
+        x = x.strip()
+        if x.isdigit():
+            v = int(x)
+            if v > 0:
+                out.append(v)
+    return out
+
+def obtener_partes_impresion_por_cantidad(q_total: int) -> list:
+    """Devuelve el desglose de impresiones para una cantidad concreta.
+
+    Regla:
+    - Si no hay configuración: 1 impresión con q_total.
+    - Si hay N impresiones: se reparte igual o se usa el desglose manual.
+    - Siempre normaliza para que la suma sea q_total (fallback a reparto igual).
+    """
+    if q_total <= 0:
+        return []
+    cfg_all = st.session_state.get("impresiones_by_qty", {})
+    if not isinstance(cfg_all, dict):
+        return [int(q_total)]
+    cfg = cfg_all.get(str(int(q_total)), None)
+    if not isinstance(cfg, dict):
+        return [int(q_total)]
+
+    try:
+        n = int(cfg.get("n", 1))
+    except Exception:
+        n = 1
+    n = max(1, n)
+    modo = str(cfg.get("modo", "igual")).lower().strip()
+    partes = cfg.get("partes", [])
+    if isinstance(partes, list):
+        try:
+            partes = [int(x) for x in partes if int(x) > 0]
+        except Exception:
+            partes = []
+    else:
+        partes = []
+
+    if n == 1:
+        return [int(q_total)]
+    if modo == "manual" and partes and sum(partes) == int(q_total) and len(partes) == n:
+        return partes
+
+    # Fallback: reparto igual
+    return _split_equal(int(q_total), int(n))
 # =========================================================
 # EMBALAJES (múltiples)
 # =========================================================
@@ -341,6 +407,7 @@ if "externos" not in st.session_state: st.session_state.externos = [crear_extern
 if "mermas_imp_manual" not in st.session_state: st.session_state.mermas_imp_manual = {}
 if "mermas_imp_digital_manual" not in st.session_state: st.session_state.mermas_imp_digital_manual = {}
 if "mermas_proc_manual" not in st.session_state: st.session_state.mermas_proc_manual = {}
+if "impresiones_by_qty" not in st.session_state: st.session_state.impresiones_by_qty = {}  # {str(cantidad): {"n": int, "modo": "igual"|"manual", "partes": [int,...]}}
 
 if "brf" not in st.session_state: st.session_state.brf = ""
 if "cli" not in st.session_state: st.session_state.cli = ""
@@ -415,6 +482,13 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
 
     for q in lista_cants:
         for k in [f"mi_{q}", f"mp_{q}"]:
+            if k in st.session_state:
+                del st.session_state[k]
+
+
+    # Impresiones por cantidad (multi-tirada)
+    for q in lista_cants:
+        for k in [f"impn_{q}", f"impigual_{q}", f"impman_{q}"]:
             if k in st.session_state:
                 del st.session_state[k]
 
@@ -494,6 +568,31 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
         st.session_state[f"ba_d_{pid}"] = bool(p.get("ba_d", False))
         st.session_state[f"ld_d_{pid}"] = bool(p.get("ld_d", False))
         st.session_state[f"pel_d_{pid}"] = p.get("pel_d", "Sin Peliculado")
+    # Impresiones por cantidad (multi-tirada)
+    cfg_all = st.session_state.get("impresiones_by_qty", {})
+    if not isinstance(cfg_all, dict):
+        cfg_all = {}
+    for q in lista_cants:
+        cfg = cfg_all.get(str(int(q)), {}) if isinstance(cfg_all.get(str(int(q)), {}), dict) else {}
+        try:
+            n = int(cfg.get("n", 1))
+        except Exception:
+            n = 1
+        n = max(1, n)
+        modo = str(cfg.get("modo", "igual")).lower().strip()
+        partes = cfg.get("partes", [])
+        if not isinstance(partes, list):
+            partes = []
+        st.session_state[f"impn_{q}"] = n
+        st.session_state[f"impigual_{q}"] = (modo != "manual")
+        if modo == "manual" and partes:
+            try:
+                st.session_state[f"impman_{q}"] = "+".join(str(int(x)) for x in partes)
+            except Exception:
+                st.session_state[f"impman_{q}"] = ""
+        else:
+            st.session_state.setdefault(f"impman_{q}", "")
+
 
 # =========================================================
 # IMPORT NORMALIZADO (ROBUSTO): GARANTIZA QUE SE CARGAN TODOS LOS CAMPOS
@@ -690,6 +789,42 @@ def normalizar_import(di: dict):
     if isinstance(di.get("mermas_proc", None), dict):
         st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in di["mermas_proc"].items()}
 
+    # Impresiones por cantidad (multi-tirada) - opcional en JSON
+    if isinstance(di.get("impresiones_by_qty", None), dict):
+        cfg_new = {}
+        for k, v in di["impresiones_by_qty"].items():
+            try:
+                qk = int(k)
+            except Exception:
+                continue
+            if not isinstance(v, dict):
+                continue
+            try:
+                n = int(v.get("n", 1))
+            except Exception:
+                n = 1
+            n = max(1, n)
+            modo = str(v.get("modo", "igual")).lower().strip()
+            partes = v.get("partes", [])
+            if isinstance(partes, list):
+                try:
+                    partes = [int(x) for x in partes if int(x) > 0]
+                except Exception:
+                    partes = []
+            else:
+                partes = []
+            if n == 1:
+                modo = "igual"
+                partes = [qk]
+            elif modo == "manual" and (not partes or sum(partes) != qk or len(partes) != n):
+                # Normalizamos a reparto igual si el manual no cuadra
+                modo = "igual"
+                partes = _split_equal(qk, n)
+            elif modo != "manual":
+                partes = _split_equal(qk, n)
+            cfg_new[str(qk)] = {"n": n, "modo": modo, "partes": partes}
+        st.session_state.impresiones_by_qty = cfg_new
+
     emb = di.get("embalajes", None)
     if isinstance(emb, list) and len(emb) > 0:
         new_list = []
@@ -766,6 +901,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "mermas_imp": deepcopy(st.session_state.mermas_imp_manual),
         "mermas_imp_digital": deepcopy(st.session_state.mermas_imp_digital_manual),
         "mermas_proc": deepcopy(st.session_state.mermas_proc_manual),
+        "impresiones_by_qty": deepcopy(st.session_state.get("impresiones_by_qty", {})),
     }
     if resumen_compra is not None:
         data["compras_legible"] = resumen_compra
@@ -1048,6 +1184,70 @@ with tab_calculadora:
 
             if q not in st.session_state.mermas_imp_digital_manual:
                 st.session_state.mermas_imp_digital_manual[q] = mi_dig
+
+        # -----------------------------------------------------
+        # IMPRESIONES POR CANTIDAD (multi-tirada)
+        # -----------------------------------------------------
+        if lista_cants:
+            with st.expander("🖨️ Impresiones por cantidad (desglose)", expanded=False):
+                st.caption("Si una misma cantidad se imprime en varias tiradas (p.ej. 100+400+500), indícalo aquí. "
+                           "Solo afecta a: (1) coste de impresión y (2) merma de cartoncillo (una merma extra por cada impresión). "
+                           "El resto de procesos mantiene su merma habitual.")
+                cfg_all = st.session_state.get("impresiones_by_qty", {})
+                if not isinstance(cfg_all, dict):
+                    cfg_all = {}
+                    st.session_state.impresiones_by_qty = cfg_all
+
+                for q in lista_cants:
+                    cfg = cfg_all.get(str(int(q)), {}) if isinstance(cfg_all.get(str(int(q)), {}), dict) else {}
+                    try:
+                        n_def = int(cfg.get("n", 1))
+                    except Exception:
+                        n_def = 1
+                    n_def = max(1, n_def)
+                    modo_def = str(cfg.get("modo", "igual")).lower().strip()
+                    igual_def = (modo_def != "manual")
+                    partes_def = cfg.get("partes", []) if isinstance(cfg.get("partes", []), list) else []
+                    try:
+                        partes_def_str = "+".join(str(int(x)) for x in partes_def) if partes_def else ""
+                    except Exception:
+                        partes_def_str = ""
+
+                    c1, c2 = st.columns([1, 3])
+                    with c1:
+                        n_imp = st.number_input(f"{q} uds · Nº impresiones", min_value=1, step=1, value=int(st.session_state.get(f"impn_{q}", n_def)), key=f"impn_{q}")
+                    with c2:
+                        igual = st.checkbox("Repartir a partes iguales", value=bool(st.session_state.get(f"impigual_{q}", igual_def)), key=f"impigual_{q}")
+
+                    partes = []
+                    if int(n_imp) <= 1:
+                        partes = [int(q)]
+                        cfg_all[str(int(q))] = {"n": 1, "modo": "igual", "partes": partes}
+                        st.caption("Tirada única.")
+                        continue
+
+                    if bool(igual):
+                        partes = _split_equal(int(q), int(n_imp))
+                        cfg_all[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
+                        st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+                    else:
+                        txt = st.text_input(
+                            "Desglose (ej: 100+400+500)",
+                            value=str(st.session_state.get(f"impman_{q}", partes_def_str)),
+                            key=f"impman_{q}"
+                        )
+                        partes_manual = _parse_partes_str(txt)
+                        if partes_manual and len(partes_manual) == int(n_imp) and sum(partes_manual) == int(q):
+                            partes = partes_manual
+                            cfg_all[str(int(q))] = {"n": int(n_imp), "modo": "manual", "partes": partes}
+                            st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+                        else:
+                            partes = _split_equal(int(q), int(n_imp))
+                            cfg_all[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
+                            st.warning("El desglose manual no cuadra (nº partes o suma). Se ha aplicado reparto igual.")
+                            st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+
+                st.session_state.impresiones_by_qty = cfg_all
 
     # -----------------------------------------------------
     # PASO 2: TÉCNICO
@@ -1478,6 +1678,12 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         det_f = []
         debug_log = []
 
+
+        # Impresiones por cantidad (multi-tirada): p.ej. 100+400+500 para una misma cantidad.
+        # Solo afecta a coste de impresión y a la merma extra de cartoncillo por impresión.
+        partes_imp_units = obtener_partes_impresion_por_cantidad(int(q_n))
+        n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
+
         tot_cat = {
             "materiales": {
                 "cartoncillo": 0.0,
@@ -1524,23 +1730,18 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             imprime_dorso = (p.get("pd", "Ninguno") != "Ninguno" and im_dorso != "No")
 
             # 👇 Merma de impresión depende del tipo (Offset vs Digital)
+            # Multi-tirada: la merma extra de cartoncillo se cuenta 1 vez por impresión.
             if imprime_cara:
                 merma_cara = merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas
-                hp_papel_f = hp_produccion + merma_cara
-                # Hojas de IMPRESIÓN (y laminado digital) deben ser netas + merma de impresión del tipo
-                hp_imp_f = nb + (merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas)
+                hp_papel_f = hp_produccion + (merma_cara * int(n_impresiones_qty))
             else:
                 hp_papel_f = hp_produccion
-                hp_imp_f = 0
 
             if imprime_dorso:
                 merma_d = merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas
-                hp_papel_d = hp_produccion + merma_d
-                # Hojas de IMPRESIÓN (y laminado digital) deben ser netas + merma de impresión del tipo
-                hp_imp_d = nb + (merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas)
+                hp_papel_d = hp_produccion + (merma_d * int(n_impresiones_qty))
             else:
                 hp_papel_d = hp_produccion
-                hp_imp_d = 0
 
             w = float(p.get("w", 0))
             h = float(p.get("h", 0))
@@ -1626,23 +1827,33 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_imp_cara = 0.0
             c_imp_dorso = 0.0
 
+            # Impresión (multi-tirada): el coste se calcula por cada impresión (tirada).
+            # La merma de impresión se aplica por tirada según la cantidad seleccionada.
             if p.get("im","No") == "Digital":
-                # Digital: impresión y laminado usan HOJAS NETAS + merma de impresión DIGITAL
-                c_imp_cara = hp_imp_f * m2_papel * 6.5
-                if bool(p.get("ld", False)):
-                    c_pel_total += hp_imp_f * m2_papel * float(db.get("laminado_digital", 3.5))
+                for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
+                    nb_run = int(q_run) * float(p.get("pliegos", 1.0))
+                    hp_imp_run = nb_run + merma_imp_digital_hojas
+                    c_imp_cara += hp_imp_run * m2_papel * 6.5
+                    if bool(p.get("ld", False)):
+                        c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im","No") == "Offset":
                 tintas_cara = int(p.get("nt",0)) + (1 if bool(p.get("ba",False)) else 0)
-                c_imp_cara = coste_offset_por_tinta(int(round(nb))) * tintas_cara
+                for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
+                    nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
+                    c_imp_cara += coste_offset_por_tinta(int(nb_run)) * tintas_cara
 
             if p.get("im_d","No") == "Digital":
-                # Digital: impresión y laminado usan HOJAS NETAS + merma de impresión DIGITAL
-                c_imp_dorso = hp_imp_d * m2_papel * 6.5
-                if bool(p.get("ld_d", False)):
-                    c_pel_total += hp_imp_d * m2_papel * float(db.get("laminado_digital", 3.5))
+                for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
+                    nb_run = int(q_run) * float(p.get("pliegos", 1.0))
+                    hp_imp_run = nb_run + merma_imp_digital_hojas
+                    c_imp_dorso += hp_imp_run * m2_papel * 6.5
+                    if bool(p.get("ld_d", False)):
+                        c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im_d","No") == "Offset":
                 tintas_dorso = int(p.get("nt_d",0)) + (1 if bool(p.get("ba_d",False)) else 0)
-                c_imp_dorso = coste_offset_por_tinta(int(round(nb))) * tintas_dorso
+                for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
+                    nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
+                    c_imp_dorso += coste_offset_por_tinta(int(nb_run)) * tintas_dorso
 
             c_imp_total = c_imp_cara + c_imp_dorso
 
