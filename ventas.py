@@ -558,11 +558,16 @@ def _normalizar_pieza_dict(pid: int, v: dict):
     base["pel_d"] = str(base.get("pel_d", "Sin Peliculado"))
 
     base["cor_default"] = str(base.get("cor_default", "Troquelado"))
+    _allowed_cor = {"Troquelado", "Plotter", "Sin corte"}
+    if base["cor_default"] not in _allowed_cor:
+        base["cor_default"] = "Troquelado"
     if not isinstance(base.get("cor_by_qty", {}), dict):
         base["cor_by_qty"] = {}
     else:
-        base["cor_by_qty"] = {str(k): str(vv) for k, vv in base["cor_by_qty"].items()}
-
+        base["cor_by_qty"] = {
+            str(k): (str(vv) if str(vv) in _allowed_cor else base["cor_default"])
+            for k, vv in base["cor_by_qty"].items()
+        }
     base["cobrar_arreglo"] = _coerce_bool(base.get("cobrar_arreglo", True), True)
     base["pv_troquel"] = _coerce_float(base.get("pv_troquel", 0.0), 0.0)
 
@@ -1085,6 +1090,25 @@ with tab_calculadora:
             st.session_state[f"w_{pid}"] = int(info["w"])
             st.session_state[f"h_{pid}"] = int(info["h"])
 
+
+    def callback_corte_default(pid, cants):
+        """Sincroniza el corte por cantidad con el corte por defecto."""
+        new_val = st.session_state.get(f"cor_def_{pid}", "Troquelado")
+        # Actualiza widgets por cantidad
+        for q in cants:
+            st.session_state[f"cor_qty_{pid}_{q}"] = new_val
+        # Actualiza estructura en memoria (por si se usa en cálculos sin rerun completo)
+        try:
+            pieza = st.session_state.piezas_dict.get(pid, None)
+            if isinstance(pieza, dict):
+                pieza["cor_default"] = new_val
+                if not isinstance(pieza.get("cor_by_qty", {}), dict):
+                    pieza["cor_by_qty"] = {}
+                for q in cants:
+                    pieza["cor_by_qty"][str(q)] = new_val
+        except Exception:
+            pass
+
     for p_id, p in st.session_state.piezas_dict.items():
         with st.expander(f"🛠 {p.get('nombre','Forma')} - {p.get('h',0)}x{p.get('w',0)} mm", expanded=True):
             col1, col2, col3 = st.columns(3)
@@ -1185,10 +1209,14 @@ with tab_calculadora:
 
             with col3:
                 st.markdown("##### Corte")
-                opts_cor = ["Troquelado", "Plotter"]
+                opts_cor = ["Sin corte", "Troquelado", "Plotter"]
                 val_cor = p.get("cor_default", p.get("cor", "Troquelado"))
-                idx_cor = opts_cor.index(val_cor) if val_cor in opts_cor else 0
-                p["cor_default"] = st.selectbox("Corte (por defecto)", opts_cor, index=idx_cor, key=f"cor_def_{p_id}")
+                idx_troq = opts_cor.index("Troquelado")
+                idx_cor = opts_cor.index(val_cor) if val_cor in opts_cor else idx_troq
+                p["cor_default"] = st.selectbox(
+                    "Corte (por defecto)", opts_cor, index=idx_cor, key=f"cor_def_{p_id}",
+                    on_change=callback_corte_default, args=(p_id, lista_cants,)
+                )
 
                 if lista_cants:
                     st.caption("Corte por cantidad (opcional):")
@@ -1616,12 +1644,17 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 cor_sel = p["cor_by_qty"].get(str(q_n), cor_sel)
 
             cat = "Grande (> 1000x700)" if (h>1000 or w>700) else ("Pequeño (< 1000x700)" if (h<1000 and w<700) else "Mediano (Estándar)")
+            c_troquel_taller = 0.0
+            c_plotter = 0.0
             if cor_sel == "Troquelado":
                 arr = float(db["troquelado"][cat]["arranque"]) * f_narba if bool(p.get("cobrar_arreglo", True)) else 0.0
                 tiro = float(db["troquelado"][cat]["tiro"]) * f_narba
                 c_troquel_taller = arr + (hp_produccion * tiro)
-            else:
+            elif cor_sel == "Plotter":
                 c_plotter = hp_produccion * float(db["plotter"]["precio_hoja"])
+            else:
+                # "Sin corte": no suma coste de troquel ni plotter
+                pass
 
             sub = c_cart_cara + c_cart_dorso + c_ondulado + c_rigido + c_contracolado + c_imp_total + c_pel_total + c_troquel_taller + c_plotter
             coste_f += sub
