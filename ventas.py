@@ -808,7 +808,10 @@ def _mark_json_download():
 
 with st.sidebar:
     st.header("📦 JSON / Visualización")
-    modo_comercial = st.checkbox("🌟 VISTA OFERTA", value=st.session_state.get("modo_oferta", False), key="modo_oferta")
+    # 🌟 VISTA OFERTA siempre activa (sin toggle)
+    st.session_state["modo_oferta"] = True
+    modo_comercial = True
+    st.caption("🌟 VISTA OFERTA activa")
 
     st.divider()
 
