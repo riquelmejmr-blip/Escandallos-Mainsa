@@ -375,6 +375,8 @@ if "db_descuentos" not in st.session_state:
 if "_last_import_hash" not in st.session_state: st.session_state._last_import_hash = None
 if "_export_blob" not in st.session_state: st.session_state._export_blob = None
 if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
+if "_json_downloaded" not in st.session_state: st.session_state._json_downloaded = False
+if "_json_downloaded_filename" not in st.session_state: st.session_state._json_downloaded_filename = ""
 
 # =========================================================
 # FIX IMPORT: PURGE KEYS DE WIDGETS
@@ -798,6 +800,12 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 # =========================================================
 # SIDEBAR (visualización + import/export)
 # =========================================================
+
+def _mark_json_download():
+    """Marca en session_state que el JSON se ha descargado (para no olvidarse)."""
+    st.session_state._json_downloaded = True
+    st.session_state._json_downloaded_filename = st.session_state.get("_export_filename", "")
+
 with st.sidebar:
     st.header("📦 JSON / Visualización")
     modo_comercial = st.checkbox("🌟 VISTA OFERTA", value=st.session_state.get("modo_oferta", False), key="modo_oferta")
@@ -831,8 +839,12 @@ with st.sidebar:
                 "💾 Descargar JSON",
                 data=st.session_state._export_blob,
                 file_name=st.session_state._export_filename,
-                mime="application/json"
+                mime="application/json",
+                on_click=_mark_json_download,
+                key="dl_json_sidebar"
             )
+            if st.session_state.get("_json_downloaded", False):
+                st.success(f"✅ JSON descargado: {st.session_state.get('_json_downloaded_filename', '') or st.session_state._export_filename}")
         else:
             st.caption("Calcula una vez para habilitar la exportación.")
 
@@ -1860,6 +1872,8 @@ export_data = construir_export(
     resumen_costes=resumen_costes_export if resumen_costes_export else None
 )
 st.session_state._export_blob = json.dumps(export_data, indent=4, ensure_ascii=False)
+st.session_state._json_downloaded = False
+st.session_state._json_downloaded_filename = ""
 
 # =========================================================
 # SALIDAS
@@ -2054,6 +2068,20 @@ if modo_comercial and res_final:
     oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, (ext_html + emb_opts_html + opc_html), tabla)
     safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
     fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
+
+    # Acceso rápido también en el panel lateral (sin quitar el botón de arriba)
+    with st.sidebar:
+        st.divider()
+        st.subheader("📄 Oferta comercial")
+        st.download_button(
+            "⬇️ Descargar OFERTA (HTML)",
+            data=oferta_html.encode("utf-8"),
+            file_name=fname_html,
+            mime="text/html",
+            use_container_width=True,
+            key="dl_oferta_html_sidebar"
+        )
+
 
     st.download_button(
         "⬇️ Descargar VISTA OFERTA (HTML)",
