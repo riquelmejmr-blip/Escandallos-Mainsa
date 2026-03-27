@@ -7,6 +7,68 @@ from copy import deepcopy
 import hashlib
 
 # =========================================================
+# Helpers (mínimo)
+# =========================================================
+MARGEN_NORMAL = 2.2
+MARGEN_ESPECIAL = 2.1
+COMERCIALES_MARGEN_ESPECIAL = {52, 47, 46, 62}
+CLIENTES_MARGEN_ESPECIAL = {"PLANETA", "ILIDIA"}
+
+
+def _parse_comercial_num(value: str):
+    """Devuelve el número de comercial si es interpretable, si no None."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    m = re.search(r"(\d+)", s)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _cliente_tiene_margen_especial(cliente: str) -> bool:
+    if cliente is None:
+        return False
+    c = str(cliente).upper()
+    return any(k in c for k in CLIENTES_MARGEN_ESPECIAL)
+
+
+def _margen_por_comercial(n) -> float:
+    if n is None:
+        return MARGEN_NORMAL
+    return MARGEN_ESPECIAL if n in COMERCIALES_MARGEN_ESPECIAL else MARGEN_NORMAL
+
+
+def _margen_sugerido(com1: str, com2: str, cliente: str) -> float:
+    # Si el cliente es especial, manda 2.1.
+    if _cliente_tiene_margen_especial(cliente):
+        return MARGEN_ESPECIAL
+
+    n1 = _parse_comercial_num(com1)
+    n2 = _parse_comercial_num(com2)
+    return min(_margen_por_comercial(n1), _margen_por_comercial(n2))
+
+
+def _aplicar_margen_auto_si_procede() -> None:
+    """Actualiza st.session_state.margen solo si el usuario no lo ha sobreescrito."""
+    sugerido = float(_margen_sugerido(st.session_state.comercial_1, st.session_state.comercial_2, st.session_state.cli))
+    actual = float(st.session_state.margen)
+    last_auto = float(st.session_state.last_auto_margen)
+
+    # Si el margen actual coincide con el último auto, interpretamos que el usuario no lo tocó.
+    if (actual == last_auto) and (sugerido != actual):
+        st.session_state.margen = sugerido
+        st.session_state.last_auto_margen = sugerido
+    else:
+        # Aun así guardamos el sugerido para la próxima comparación.
+        st.session_state.last_auto_margen = sugerido
+
+# =========================================================
 # 1) CONFIGURACIÓN
 # =========================================================
 st.set_page_config(page_title="MAINSA ADMIN V44", layout="wide")
@@ -204,6 +266,122 @@ def parse_cantidades(s: str):
             out.append(int(x))
     return out
 
+
+# =========================================================
+# IMPRESIONES POR CANTIDAD (multi-tirada)
+# =========================================================
+def _split_equal(total: int, n: int) -> list:
+    """Reparte 'total' en 'n' partes lo más igualadas posible."""
+    if n <= 1 or total <= 0:
+        return [int(total)] if total > 0 else []
+    base = total // n
+    rem = total % n
+    partes = [base + (1 if i < rem else 0) for i in range(n)]
+    return [p for p in partes if p > 0]
+
+def _parse_partes_str(s: str) -> list:
+    """Parsea '100+400+500' o '100, 400, 500' -> [100,400,500]."""
+    if not s:
+        return []
+    nums = re.split(r"[,+\s]+", str(s).strip())
+    out = []
+    for x in nums:
+        x = x.strip()
+        if x.isdigit():
+            v = int(x)
+            if v > 0:
+                out.append(v)
+    return out
+
+def obtener_partes_impresion_por_cantidad(q_total: int) -> list:
+    """Devuelve el desglose de impresiones para una cantidad concreta.
+
+    Regla:
+    - Si no hay configuración: 1 impresión con q_total.
+    - Si hay N impresiones: se reparte igual o se usa el desglose manual.
+    - Siempre normaliza para que la suma sea q_total (fallback a reparto igual).
+    """
+    if q_total <= 0:
+        return []
+    cfg_all = st.session_state.get("impresiones_by_qty", {})
+    if not isinstance(cfg_all, dict):
+        return [int(q_total)]
+    cfg = cfg_all.get(str(int(q_total)), None)
+    if not isinstance(cfg, dict):
+        return [int(q_total)]
+
+    try:
+        n = int(cfg.get("n", 1))
+    except Exception:
+        n = 1
+    n = max(1, n)
+    modo = str(cfg.get("modo", "igual")).lower().strip()
+    partes = cfg.get("partes", [])
+    if isinstance(partes, list):
+        try:
+            partes = [int(x) for x in partes if int(x) > 0]
+        except Exception:
+            partes = []
+    else:
+        partes = []
+
+    if n == 1:
+        return [int(q_total)]
+    if modo == "manual" and partes and sum(partes) == int(q_total) and len(partes) == n:
+        return partes
+
+    # Fallback: reparto igual
+    return _split_equal(int(q_total), int(n))
+
+
+def obtener_partes_impresion_por_formato(pid: int, q_total: int) -> list:
+    """Devuelve el desglose de impresiones para una cantidad concreta, PERO por formato (forma).
+
+    - Se activa solo si el TIC (checkbox) del formato está activo.
+    - Si no está activo, devuelve 1 impresión con q_total.
+    - Si existe configuración por formato, la aplica.
+    - Fallback de compatibilidad: si no hay cfg por formato, usa 'impresiones_by_qty' (global legacy).
+    """
+    if q_total <= 0:
+        return []
+    pid_key = str(int(pid))
+
+    enabled_all = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
+    enabled = False
+    if isinstance(enabled_all, dict):
+        enabled = bool(enabled_all.get(pid_key, False))
+    if not enabled:
+        return [int(q_total)]
+
+    cfg_fmt_all = st.session_state.get("impresiones_by_qty_fmt", {})
+    if isinstance(cfg_fmt_all, dict):
+        cfg_all = cfg_fmt_all.get(pid_key, {})
+        if isinstance(cfg_all, dict):
+            cfg = cfg_all.get(str(int(q_total)), None)
+            if isinstance(cfg, dict):
+                try:
+                    n = int(cfg.get("n", 1))
+                except Exception:
+                    n = 1
+                n = max(1, n)
+                modo = str(cfg.get("modo", "igual")).lower().strip()
+                partes = cfg.get("partes", [])
+                if isinstance(partes, list):
+                    try:
+                        partes = [int(x) for x in partes if int(x) > 0]
+                    except Exception:
+                        partes = []
+                else:
+                    partes = []
+
+                if n == 1:
+                    return [int(q_total)]
+                if modo == "manual" and partes and sum(partes) == int(q_total) and len(partes) == n:
+                    return partes
+                return _split_equal(int(q_total), int(n))
+
+    # Legacy global (por si venimos de JSON antiguo)
+    return obtener_partes_impresion_por_cantidad(int(q_total))
 # =========================================================
 # EMBALAJES (múltiples)
 # =========================================================
@@ -341,6 +519,9 @@ if "externos" not in st.session_state: st.session_state.externos = [crear_extern
 if "mermas_imp_manual" not in st.session_state: st.session_state.mermas_imp_manual = {}
 if "mermas_imp_digital_manual" not in st.session_state: st.session_state.mermas_imp_digital_manual = {}
 if "mermas_proc_manual" not in st.session_state: st.session_state.mermas_proc_manual = {}
+if "impresiones_by_qty" not in st.session_state: st.session_state.impresiones_by_qty = {}  # {str(cantidad): {"n": int, "modo": "igual"|"manual", "partes": [int,...]}}
+if "impresiones_by_qty_fmt" not in st.session_state: st.session_state.impresiones_by_qty_fmt = {}  # {str(pid): {str(cantidad): {"n": int, "modo": "igual"|"manual", "partes": [int,...]}}}
+if "impresiones_by_qty_fmt_enabled" not in st.session_state: st.session_state.impresiones_by_qty_fmt_enabled = {}  # {str(pid): bool}
 
 if "brf" not in st.session_state: st.session_state.brf = ""
 if "cli" not in st.session_state: st.session_state.cli = ""
@@ -356,8 +537,13 @@ if "arm_enabled" not in st.session_state: st.session_state.arm_enabled = False
 if "arm_t_input" not in st.session_state: st.session_state.arm_t_input = 0.0
 
 if "dif_ud" not in st.session_state: st.session_state.dif_ud = 0.091
+if "dif_preset_sel" not in st.session_state: st.session_state.dif_preset_sel = "0,091 (standard)"
 if "imp_fijo_pvp" not in st.session_state: st.session_state.imp_fijo_pvp = 500.0
 if "margen" not in st.session_state: st.session_state.margen = 2.2
+if "comercial_1" not in st.session_state: st.session_state.comercial_1 = ""
+if "comercial_2" not in st.session_state: st.session_state.comercial_2 = ""
+if "last_auto_margen" not in st.session_state: st.session_state.last_auto_margen = float(st.session_state.margen)
+
 
 if "descuento_procesos" not in st.session_state: st.session_state.descuento_procesos = 0.0
 if "margen_extras" not in st.session_state: st.session_state.margen_extras = 1.4
@@ -375,6 +561,8 @@ if "db_descuentos" not in st.session_state:
 if "_last_import_hash" not in st.session_state: st.session_state._last_import_hash = None
 if "_export_blob" not in st.session_state: st.session_state._export_blob = None
 if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
+if "_json_downloaded" not in st.session_state: st.session_state._json_downloaded = False
+if "_json_downloaded_filename" not in st.session_state: st.session_state._json_downloaded_filename = ""
 
 # =========================================================
 # FIX IMPORT: PURGE KEYS DE WIDGETS
@@ -415,6 +603,20 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         for k in [f"mi_{q}", f"mp_{q}"]:
             if k in st.session_state:
                 del st.session_state[k]
+
+
+    # Impresiones por cantidad (multi-tirada)
+    for q in lista_cants:
+        for k in [f"impn_{q}", f"impigual_{q}", f"impman_{q}"]:
+            if k in st.session_state:
+                del st.session_state[k]
+
+    # Impresiones por cantidad (multi-tirada) - POR FORMATO
+    for pid in list(st.session_state.get("piezas_dict", {}).keys()):
+        for q in lista_cants:
+            for k in [f"impact_{pid}", f"impn_{pid}_{q}", f"impigual_{pid}_{q}", f"impman_{pid}_{q}"]:
+                if k in st.session_state:
+                    del st.session_state[k]
 
     for i in range(max(0, extras_len)):
         for k in [f"exc_{i}", f"exq_{i}", f"exd_{i}"]:
@@ -492,6 +694,60 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
         st.session_state[f"ba_d_{pid}"] = bool(p.get("ba_d", False))
         st.session_state[f"ld_d_{pid}"] = bool(p.get("ld_d", False))
         st.session_state[f"pel_d_{pid}"] = p.get("pel_d", "Sin Peliculado")
+    # Impresiones por cantidad (multi-tirada)
+    cfg_all = st.session_state.get("impresiones_by_qty", {})
+    if not isinstance(cfg_all, dict):
+        cfg_all = {}
+    for q in lista_cants:
+        cfg = cfg_all.get(str(int(q)), {}) if isinstance(cfg_all.get(str(int(q)), {}), dict) else {}
+        try:
+            n = int(cfg.get("n", 1))
+        except Exception:
+            n = 1
+        n = max(1, n)
+        modo = str(cfg.get("modo", "igual")).lower().strip()
+        partes = cfg.get("partes", [])
+        if not isinstance(partes, list):
+            partes = []
+        st.session_state[f"impn_{q}"] = n
+        st.session_state[f"impigual_{q}"] = (modo != "manual")
+        if modo == "manual" and partes:
+            try:
+                st.session_state[f"impman_{q}"] = "+".join(str(int(x)) for x in partes)
+            except Exception:
+                st.session_state[f"impman_{q}"] = ""
+        else:
+            st.session_state.setdefault(f"impman_{q}", "")
+
+    # Impresiones por cantidad (multi-tirada) - POR FORMATO (si viene en JSON)
+    cfg_fmt_all = st.session_state.get("impresiones_by_qty_fmt", {})
+    en_all = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
+    if isinstance(cfg_fmt_all, dict) and isinstance(en_all, dict):
+        for pid, _p in piezas_dict.items():
+            pid_key = str(int(pid))
+            st.session_state[f"impact_{pid}"] = bool(en_all.get(pid_key, False))
+            cfg_fmt = cfg_fmt_all.get(pid_key, {}) if isinstance(cfg_fmt_all.get(pid_key, {}), dict) else {}
+            for q in lista_cants:
+                cfg = cfg_fmt.get(str(int(q)), {}) if isinstance(cfg_fmt.get(str(int(q)), {}), dict) else {}
+                try:
+                    n = int(cfg.get("n", 1))
+                except Exception:
+                    n = 1
+                n = max(1, n)
+                modo = str(cfg.get("modo", "igual")).lower().strip()
+                partes = cfg.get("partes", [])
+                if not isinstance(partes, list):
+                    partes = []
+                st.session_state[f"impn_{pid}_{q}"] = n
+                st.session_state[f"impigual_{pid}_{q}"] = (modo != "manual")
+                if modo == "manual" and partes:
+                    try:
+                        st.session_state[f"impman_{pid}_{q}"] = "+".join(str(int(x)) for x in partes)
+                    except Exception:
+                        st.session_state[f"impman_{pid}_{q}"] = ""
+                else:
+                    st.session_state.setdefault(f"impman_{pid}_{q}", "")
+
 
 # =========================================================
 # IMPORT NORMALIZADO (ROBUSTO): GARANTIZA QUE SE CARGAN TODOS LOS CAMPOS
@@ -558,11 +814,16 @@ def _normalizar_pieza_dict(pid: int, v: dict):
     base["pel_d"] = str(base.get("pel_d", "Sin Peliculado"))
 
     base["cor_default"] = str(base.get("cor_default", "Troquelado"))
+    _allowed_cor = {"Troquelado", "Plotter", "Sin corte"}
+    if base["cor_default"] not in _allowed_cor:
+        base["cor_default"] = "Troquelado"
     if not isinstance(base.get("cor_by_qty", {}), dict):
         base["cor_by_qty"] = {}
     else:
-        base["cor_by_qty"] = {str(k): str(vv) for k, vv in base["cor_by_qty"].items()}
-
+        base["cor_by_qty"] = {
+            str(k): (str(vv) if str(vv) in _allowed_cor else base["cor_default"])
+            for k, vv in base["cor_by_qty"].items()
+        }
     base["cobrar_arreglo"] = _coerce_bool(base.get("cobrar_arreglo", True), True)
     base["pv_troquel"] = _coerce_float(base.get("pv_troquel", 0.0), 0.0)
 
@@ -683,6 +944,97 @@ def normalizar_import(di: dict):
     if isinstance(di.get("mermas_proc", None), dict):
         st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in di["mermas_proc"].items()}
 
+    # Impresiones por cantidad (multi-tirada) - opcional en JSON
+    if isinstance(di.get("impresiones_by_qty", None), dict):
+        cfg_new = {}
+        for k, v in di["impresiones_by_qty"].items():
+            try:
+                qk = int(k)
+            except Exception:
+                continue
+            if not isinstance(v, dict):
+                continue
+            try:
+                n = int(v.get("n", 1))
+            except Exception:
+                n = 1
+            n = max(1, n)
+            modo = str(v.get("modo", "igual")).lower().strip()
+            partes = v.get("partes", [])
+            if isinstance(partes, list):
+                try:
+                    partes = [int(x) for x in partes if int(x) > 0]
+                except Exception:
+                    partes = []
+            else:
+                partes = []
+            if n == 1:
+                modo = "igual"
+                partes = [qk]
+            elif modo == "manual" and (not partes or sum(partes) != qk or len(partes) != n):
+                # Normalizamos a reparto igual si el manual no cuadra
+                modo = "igual"
+                partes = _split_equal(qk, n)
+            elif modo != "manual":
+                partes = _split_equal(qk, n)
+            cfg_new[str(qk)] = {"n": n, "modo": modo, "partes": partes}
+        st.session_state.impresiones_by_qty = cfg_new
+
+
+    # Impresiones por cantidad (multi-tirada) - POR FORMATO (nuevo, opcional en JSON)
+    if isinstance(di.get("impresiones_by_qty_fmt", None), dict):
+        cfg_fmt_new = {}
+        for pid_k, cfg_pid in di["impresiones_by_qty_fmt"].items():
+            try:
+                pid_int = int(pid_k)
+            except Exception:
+                continue
+            if not isinstance(cfg_pid, dict):
+                continue
+            cfg_q_new = {}
+            for k, v in cfg_pid.items():
+                try:
+                    qk = int(k)
+                except Exception:
+                    continue
+                if not isinstance(v, dict):
+                    continue
+                try:
+                    n = int(v.get("n", 1))
+                except Exception:
+                    n = 1
+                n = max(1, n)
+                modo = str(v.get("modo", "igual")).lower().strip()
+                partes = v.get("partes", [])
+                if isinstance(partes, list):
+                    try:
+                        partes = [int(x) for x in partes if int(x) > 0]
+                    except Exception:
+                        partes = []
+                else:
+                    partes = []
+                if n == 1:
+                    modo = "igual"
+                    partes = [qk]
+                elif modo == "manual" and (not partes or sum(partes) != qk or len(partes) != n):
+                    modo = "igual"
+                    partes = _split_equal(qk, n)
+                elif modo != "manual":
+                    partes = _split_equal(qk, n)
+                cfg_q_new[str(qk)] = {"n": n, "modo": modo, "partes": partes}
+            cfg_fmt_new[str(pid_int)] = cfg_q_new
+        st.session_state.impresiones_by_qty_fmt = cfg_fmt_new
+
+    if isinstance(di.get("impresiones_by_qty_fmt_enabled", None), dict):
+        en_new = {}
+        for k, v in di["impresiones_by_qty_fmt_enabled"].items():
+            try:
+                pid_int = int(k)
+            except Exception:
+                continue
+            en_new[str(pid_int)] = bool(v)
+        st.session_state.impresiones_by_qty_fmt_enabled = en_new
+
     emb = di.get("embalajes", None)
     if isinstance(emb, list) and len(emb) > 0:
         new_list = []
@@ -743,10 +1095,12 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         piezas_out[str(int(pid))] = deepcopy(p)
 
     data = {
-        "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
         "brf": st.session_state.brf,
+        "comercial_1": st.session_state.comercial_1,
+        "comercial_2": st.session_state.comercial_2,
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
+        "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input), "rellenado": {"enabled": bool(st.session_state.rell_enabled), "t_input": float(st.session_state.rell_t_input)}, "armado": {"enabled": bool(st.session_state.arm_enabled), "t_input": float(st.session_state.arm_t_input)}},
         "params": {"dif_ud": float(st.session_state.dif_ud), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
@@ -759,6 +1113,9 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "mermas_imp": deepcopy(st.session_state.mermas_imp_manual),
         "mermas_imp_digital": deepcopy(st.session_state.mermas_imp_digital_manual),
         "mermas_proc": deepcopy(st.session_state.mermas_proc_manual),
+        "impresiones_by_qty": deepcopy(st.session_state.get("impresiones_by_qty", {})),
+        "impresiones_by_qty_fmt": deepcopy(st.session_state.get("impresiones_by_qty_fmt", {})),
+        "impresiones_by_qty_fmt_enabled": deepcopy(st.session_state.get("impresiones_by_qty_fmt_enabled", {})),
     }
     if resumen_compra is not None:
         data["compras_legible"] = resumen_compra
@@ -793,9 +1150,18 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 # =========================================================
 # SIDEBAR (visualización + import/export)
 # =========================================================
+
+def _mark_json_download():
+    """Marca en session_state que el JSON se ha descargado (para no olvidarse)."""
+    st.session_state._json_downloaded = True
+    st.session_state._json_downloaded_filename = st.session_state.get("_export_filename", "")
+
 with st.sidebar:
     st.header("📦 JSON / Visualización")
-    modo_comercial = st.checkbox("🌟 VISTA OFERTA", value=st.session_state.get("modo_oferta", False), key="modo_oferta")
+    # 🌟 VISTA OFERTA siempre activa (sin toggle)
+    st.session_state["modo_oferta"] = True
+    modo_comercial = True
+    st.caption("🌟 VISTA OFERTA activa")
 
     st.divider()
 
@@ -826,8 +1192,12 @@ with st.sidebar:
                 "💾 Descargar JSON",
                 data=st.session_state._export_blob,
                 file_name=st.session_state._export_filename,
-                mime="application/json"
+                mime="application/json",
+                on_click=_mark_json_download,
+                key="dl_json_sidebar"
             )
+            if st.session_state.get("_json_downloaded", False):
+                st.success(f"✅ JSON descargado: {st.session_state.get('_json_downloaded_filename', '') or st.session_state._export_filename}")
         else:
             st.caption("Calcula una vez para habilitar la exportación.")
 
@@ -966,7 +1336,10 @@ with tab_calculadora:
     cA, cB, cC = st.columns([2, 2, 3])
     with cA:
         st.text_input("Nº Briefing", key="brf")
+        st.text_input("Nº Comercial 1", key="comercial_1")
+        st.text_input("Nº Comercial 2 (opcional)", key="comercial_2")
         st.text_input("Cliente", key="cli")
+        _aplicar_margen_auto_si_procede()
     with cB:
         st.text_input("Descripción", key="desc")
         st.text_input("Cantidades (ej: 500, 1000)", key="cants_str_saved")
@@ -979,6 +1352,42 @@ with tab_calculadora:
         st.number_input("Tiempo/ud Rellenado", min_value=0.0, value=float(st.session_state.rell_t_input), step=1.0, key="rell_t_input", disabled=not bool(st.session_state.rell_enabled))
         st.checkbox("Armado", value=bool(st.session_state.arm_enabled), key="arm_enabled")
         st.number_input("Tiempo/ud Armado", min_value=0.0, value=float(st.session_state.arm_t_input), step=1.0, key="arm_t_input", disabled=not bool(st.session_state.arm_enabled))
+
+        st.markdown("**Dificultad**")
+        # Desplegable + editable: el desplegable aplica un valor rápido y el input permite afinarlo.
+        _dif_presets = [
+            ("0,000", 0.0),
+            ("0,020", 0.02),
+            ("0,050", 0.05),
+            ("0,091 (standard)", 0.091),
+            ("0,120", 0.12),
+            ("0,150", 0.15),
+            ("Personalizado", None),
+        ]
+
+        # Inicializa selección en base al valor actual si coincide con un preset
+        _dif_actual = float(st.session_state.dif_ud)
+        _dif_labels = [p[0] for p in _dif_presets]
+        _dif_values = [p[1] for p in _dif_presets]
+
+        _idx = None
+        for i, v in enumerate(_dif_values):
+            if v is None:
+                continue
+            if abs(float(v) - _dif_actual) < 1e-9:
+                _idx = i
+                break
+        if _idx is None:
+            _idx = _dif_labels.index("Personalizado")
+
+        sel = st.selectbox("Preset dificultad", _dif_labels, index=_idx, key="dif_preset_sel")
+        sel_val = _dif_presets[_dif_labels.index(sel)][1]
+        if sel_val is not None:
+            # Si eliges un preset, se aplica automáticamente
+            st.session_state.dif_ud = float(sel_val)
+
+        # Editable siempre (si está en preset, puedes ajustarlo manualmente igualmente)
+        st.number_input("Dificultad (€/ud)", min_value=0.0, step=0.001, value=float(st.session_state.dif_ud), key="dif_ud")
 
     lista_cants = parse_cantidades(st.session_state.cants_str_saved)
 
@@ -994,7 +1403,6 @@ with tab_calculadora:
     seg_arm_total = (arm_t_input * 60) if unidad_t == "Minutos" else arm_t_input
 
     with st.expander("💰 Finanzas", expanded=False):
-        st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2, key="dif_ud")
         st.number_input("Fijo PVP (€)", value=float(st.session_state.imp_fijo_pvp), key="imp_fijo_pvp")
         st.number_input("Multiplicador", step=0.1, value=float(st.session_state.margen), key="margen")
 
@@ -1028,6 +1436,7 @@ with tab_calculadora:
 
             if q not in st.session_state.mermas_imp_digital_manual:
                 st.session_state.mermas_imp_digital_manual[q] = mi_dig
+
 
     # -----------------------------------------------------
     # PASO 2: TÉCNICO
@@ -1085,6 +1494,25 @@ with tab_calculadora:
             st.session_state[f"w_{pid}"] = int(info["w"])
             st.session_state[f"h_{pid}"] = int(info["h"])
 
+
+    def callback_corte_default(pid, cants):
+        """Sincroniza el corte por cantidad con el corte por defecto."""
+        new_val = st.session_state.get(f"cor_def_{pid}", "Troquelado")
+        # Actualiza widgets por cantidad
+        for q in cants:
+            st.session_state[f"cor_qty_{pid}_{q}"] = new_val
+        # Actualiza estructura en memoria (por si se usa en cálculos sin rerun completo)
+        try:
+            pieza = st.session_state.piezas_dict.get(pid, None)
+            if isinstance(pieza, dict):
+                pieza["cor_default"] = new_val
+                if not isinstance(pieza.get("cor_by_qty", {}), dict):
+                    pieza["cor_by_qty"] = {}
+                for q in cants:
+                    pieza["cor_by_qty"][str(q)] = new_val
+        except Exception:
+            pass
+
     for p_id, p in st.session_state.piezas_dict.items():
         with st.expander(f"🛠 {p.get('nombre','Forma')} - {p.get('h',0)}x{p.get('w',0)} mm", expanded=True):
             col1, col2, col3 = st.columns(3)
@@ -1115,6 +1543,93 @@ with tab_calculadora:
                 val_pel = p.get("pel", "Sin Peliculado")
                 idx_pel = opts_pel.index(val_pel) if val_pel in opts_pel else 0
                 p["pel"] = st.selectbox("Peliculado Cara", opts_pel, index=idx_pel, key=f"pel_{p_id}")
+
+                # -----------------------------------------------------
+                # IMPRESIONES POR CANTIDAD (multi-tirada) - POR FORMATO (TIC)
+                # -----------------------------------------------------
+                # Si una misma cantidad se imprime en varias tiradas (p.ej. 100+400+500) para ESTA forma,
+                # indícalo aquí. Solo afecta a: (1) coste de impresión y (2) merma de cartoncillo (una merma extra por cada impresión).
+                # El resto de procesos mantiene su merma habitual.
+                pid_key = str(int(p_id))
+                if "impresiones_by_qty_fmt_enabled" not in st.session_state:
+                    st.session_state.impresiones_by_qty_fmt_enabled = {}
+                if "impresiones_by_qty_fmt" not in st.session_state:
+                    st.session_state.impresiones_by_qty_fmt = {}
+
+                tic_def = bool(st.session_state.impresiones_by_qty_fmt_enabled.get(pid_key, False)) if isinstance(st.session_state.impresiones_by_qty_fmt_enabled, dict) else False
+                tic = st.checkbox("🖨️ Varias impresiones por cantidad (esta forma)", value=bool(st.session_state.get(f"impact_{p_id}", tic_def)), key=f"impact_{p_id}")
+                if isinstance(st.session_state.impresiones_by_qty_fmt_enabled, dict):
+                    st.session_state.impresiones_by_qty_fmt_enabled[pid_key] = bool(tic)
+
+                if bool(tic) and lista_cants:
+                    with st.expander("🖨️ Desglose de impresiones por cantidad (esta forma)", expanded=False):
+                        st.caption("Ejemplo: 1000 uds -> 3 impresiones: 100+400+500. "
+                                   "Solo afecta a coste de impresión y merma extra de cartoncillo por impresión.")
+                        cfg_fmt_all = st.session_state.impresiones_by_qty_fmt if isinstance(st.session_state.impresiones_by_qty_fmt, dict) else {}
+                        cfg_fmt = cfg_fmt_all.get(pid_key, {}) if isinstance(cfg_fmt_all.get(pid_key, {}), dict) else {}
+
+                        for q in lista_cants:
+                            cfg = cfg_fmt.get(str(int(q)), {}) if isinstance(cfg_fmt.get(str(int(q)), {}), dict) else {}
+                            try:
+                                n_def = int(cfg.get("n", 1))
+                            except Exception:
+                                n_def = 1
+                            n_def = max(1, n_def)
+                            modo_def = str(cfg.get("modo", "igual")).lower().strip()
+                            igual_def = (modo_def != "manual")
+                            partes_def = cfg.get("partes", []) if isinstance(cfg.get("partes", []), list) else []
+                            try:
+                                partes_def_str = "+".join(str(int(x)) for x in partes_def) if partes_def else ""
+                            except Exception:
+                                partes_def_str = ""
+
+                            c1i, c2i = st.columns([1, 3])
+                            with c1i:
+                                n_imp = st.number_input(
+                                    f"{q} uds · Nº impresiones",
+                                    min_value=1,
+                                    step=1,
+                                    value=int(st.session_state.get(f"impn_{p_id}_{q}", n_def)),
+                                    key=f"impn_{p_id}_{q}",
+                                )
+                            with c2i:
+                                igual = st.checkbox(
+                                    "Repartir a partes iguales",
+                                    value=bool(st.session_state.get(f"impigual_{p_id}_{q}", igual_def)),
+                                    key=f"impigual_{p_id}_{q}",
+                                )
+
+                            partes = []
+                            if int(n_imp) <= 1:
+                                partes = [int(q)]
+                                cfg_fmt[str(int(q))] = {"n": 1, "modo": "igual", "partes": partes}
+                                st.caption("Tirada única.")
+                                continue
+
+                            if bool(igual):
+                                partes = _split_equal(int(q), int(n_imp))
+                                cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
+                                st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+                            else:
+                                txt = st.text_input(
+                                    "Desglose (ej: 100+400+500)",
+                                    value=str(st.session_state.get(f"impman_{p_id}_{q}", partes_def_str)),
+                                    key=f"impman_{p_id}_{q}",
+                                )
+                                partes_manual = _parse_partes_str(txt)
+                                if partes_manual and len(partes_manual) == int(n_imp) and sum(partes_manual) == int(q):
+                                    partes = partes_manual
+                                    cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "manual", "partes": partes}
+                                    st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+                                else:
+                                    partes = _split_equal(int(q), int(n_imp))
+                                    cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
+                                    st.warning("El desglose manual no cuadra (nº partes o suma). Se ha aplicado reparto igual.")
+                                    st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+
+                        cfg_fmt_all[pid_key] = cfg_fmt
+                        st.session_state.impresiones_by_qty_fmt = cfg_fmt_all
+
 
             with col2:
                 opts_pf = list(db["cartoncillo"].keys())
@@ -1185,10 +1700,14 @@ with tab_calculadora:
 
             with col3:
                 st.markdown("##### Corte")
-                opts_cor = ["Troquelado", "Plotter"]
+                opts_cor = ["Sin corte", "Troquelado", "Plotter"]
                 val_cor = p.get("cor_default", p.get("cor", "Troquelado"))
-                idx_cor = opts_cor.index(val_cor) if val_cor in opts_cor else 0
-                p["cor_default"] = st.selectbox("Corte (por defecto)", opts_cor, index=idx_cor, key=f"cor_def_{p_id}")
+                idx_troq = opts_cor.index("Troquelado")
+                idx_cor = opts_cor.index(val_cor) if val_cor in opts_cor else idx_troq
+                p["cor_default"] = st.selectbox(
+                    "Corte (por defecto)", opts_cor, index=idx_cor, key=f"cor_def_{p_id}",
+                    on_change=callback_corte_default, args=(p_id, lista_cants,)
+                )
 
                 if lista_cants:
                     st.caption("Corte por cantidad (opcional):")
@@ -1435,6 +1954,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         det_f = []
         debug_log = []
 
+
         tot_cat = {
             "materiales": {
                 "cartoncillo": 0.0,
@@ -1471,6 +1991,11 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_troquel_taller = 0.0
             c_plotter = 0.0
 
+            # Impresiones por cantidad (multi-tirada) - POR FORMATO:
+            # Solo afecta a coste de impresión y a la merma extra de cartoncillo por impresión.
+            partes_imp_units = obtener_partes_impresion_por_formato(int(pid), int(q_n))
+            n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
+
             nb = q_n * float(p.get("pliegos", 1.0))
             hp_produccion = nb + merma_proc_hojas
 
@@ -1481,23 +2006,18 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             imprime_dorso = (p.get("pd", "Ninguno") != "Ninguno" and im_dorso != "No")
 
             # 👇 Merma de impresión depende del tipo (Offset vs Digital)
+            # Multi-tirada: la merma extra de cartoncillo se cuenta 1 vez por impresión.
             if imprime_cara:
                 merma_cara = merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas
-                hp_papel_f = hp_produccion + merma_cara
-                # Hojas de IMPRESIÓN (y laminado digital) deben ser netas + merma de impresión del tipo
-                hp_imp_f = nb + (merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas)
+                hp_papel_f = hp_produccion + (merma_cara * int(n_impresiones_qty))
             else:
                 hp_papel_f = hp_produccion
-                hp_imp_f = 0
 
             if imprime_dorso:
                 merma_d = merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas
-                hp_papel_d = hp_produccion + merma_d
-                # Hojas de IMPRESIÓN (y laminado digital) deben ser netas + merma de impresión del tipo
-                hp_imp_d = nb + (merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas)
+                hp_papel_d = hp_produccion + (merma_d * int(n_impresiones_qty))
             else:
                 hp_papel_d = hp_produccion
-                hp_imp_d = 0
 
             w = float(p.get("w", 0))
             h = float(p.get("h", 0))
@@ -1583,23 +2103,33 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_imp_cara = 0.0
             c_imp_dorso = 0.0
 
+            # Impresión (multi-tirada): el coste se calcula por cada impresión (tirada).
+            # La merma de impresión se aplica por tirada según la cantidad seleccionada.
             if p.get("im","No") == "Digital":
-                # Digital: impresión y laminado usan HOJAS NETAS + merma de impresión DIGITAL
-                c_imp_cara = hp_imp_f * m2_papel * 6.5
-                if bool(p.get("ld", False)):
-                    c_pel_total += hp_imp_f * m2_papel * float(db.get("laminado_digital", 3.5))
+                for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
+                    nb_run = int(q_run) * float(p.get("pliegos", 1.0))
+                    hp_imp_run = nb_run + merma_imp_digital_hojas
+                    c_imp_cara += hp_imp_run * m2_papel * 6.5
+                    if bool(p.get("ld", False)):
+                        c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im","No") == "Offset":
                 tintas_cara = int(p.get("nt",0)) + (1 if bool(p.get("ba",False)) else 0)
-                c_imp_cara = coste_offset_por_tinta(int(round(nb))) * tintas_cara
+                for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
+                    nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
+                    c_imp_cara += coste_offset_por_tinta(int(nb_run)) * tintas_cara
 
             if p.get("im_d","No") == "Digital":
-                # Digital: impresión y laminado usan HOJAS NETAS + merma de impresión DIGITAL
-                c_imp_dorso = hp_imp_d * m2_papel * 6.5
-                if bool(p.get("ld_d", False)):
-                    c_pel_total += hp_imp_d * m2_papel * float(db.get("laminado_digital", 3.5))
+                for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
+                    nb_run = int(q_run) * float(p.get("pliegos", 1.0))
+                    hp_imp_run = nb_run + merma_imp_digital_hojas
+                    c_imp_dorso += hp_imp_run * m2_papel * 6.5
+                    if bool(p.get("ld_d", False)):
+                        c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im_d","No") == "Offset":
                 tintas_dorso = int(p.get("nt_d",0)) + (1 if bool(p.get("ba_d",False)) else 0)
-                c_imp_dorso = coste_offset_por_tinta(int(round(nb))) * tintas_dorso
+                for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
+                    nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
+                    c_imp_dorso += coste_offset_por_tinta(int(nb_run)) * tintas_dorso
 
             c_imp_total = c_imp_cara + c_imp_dorso
 
@@ -1616,12 +2146,17 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 cor_sel = p["cor_by_qty"].get(str(q_n), cor_sel)
 
             cat = "Grande (> 1000x700)" if (h>1000 or w>700) else ("Pequeño (< 1000x700)" if (h<1000 and w<700) else "Mediano (Estándar)")
+            c_troquel_taller = 0.0
+            c_plotter = 0.0
             if cor_sel == "Troquelado":
                 arr = float(db["troquelado"][cat]["arranque"]) * f_narba if bool(p.get("cobrar_arreglo", True)) else 0.0
                 tiro = float(db["troquelado"][cat]["tiro"]) * f_narba
                 c_troquel_taller = arr + (hp_produccion * tiro)
-            else:
+            elif cor_sel == "Plotter":
                 c_plotter = hp_produccion * float(db["plotter"]["precio_hoja"])
+            else:
+                # "Sin corte": no suma coste de troquel ni plotter
+                pass
 
             sub = c_cart_cara + c_cart_dorso + c_ondulado + c_rigido + c_contracolado + c_imp_total + c_pel_total + c_troquel_taller + c_plotter
             coste_f += sub
@@ -1827,6 +2362,8 @@ export_data = construir_export(
     resumen_costes=resumen_costes_export if resumen_costes_export else None
 )
 st.session_state._export_blob = json.dumps(export_data, indent=4, ensure_ascii=False)
+st.session_state._json_downloaded = False
+st.session_state._json_downloaded_filename = ""
 
 # =========================================================
 # SALIDAS
@@ -2021,6 +2558,20 @@ if modo_comercial and res_final:
     oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, (ext_html + emb_opts_html + opc_html), tabla)
     safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
     fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
+
+    # Acceso rápido también en el panel lateral (sin quitar el botón de arriba)
+    with st.sidebar:
+        st.divider()
+        st.subheader("📄 Oferta comercial")
+        st.download_button(
+            "⬇️ Descargar OFERTA (HTML)",
+            data=oferta_html.encode("utf-8"),
+            file_name=fname_html,
+            mime="text/html",
+            use_container_width=True,
+            key="dl_oferta_html_sidebar"
+        )
+
 
     st.download_button(
         "⬇️ Descargar VISTA OFERTA (HTML)",
