@@ -537,6 +537,7 @@ if "arm_enabled" not in st.session_state: st.session_state.arm_enabled = False
 if "arm_t_input" not in st.session_state: st.session_state.arm_t_input = 0.0
 
 if "dif_ud" not in st.session_state: st.session_state.dif_ud = 0.091
+if "dif_preset_sel" not in st.session_state: st.session_state.dif_preset_sel = "0,091 (standard)"
 if "imp_fijo_pvp" not in st.session_state: st.session_state.imp_fijo_pvp = 500.0
 if "margen" not in st.session_state: st.session_state.margen = 2.2
 if "comercial_1" not in st.session_state: st.session_state.comercial_1 = ""
@@ -1350,6 +1351,42 @@ with tab_calculadora:
         st.checkbox("Armado", value=bool(st.session_state.arm_enabled), key="arm_enabled")
         st.number_input("Tiempo/ud Armado", min_value=0.0, value=float(st.session_state.arm_t_input), step=1.0, key="arm_t_input", disabled=not bool(st.session_state.arm_enabled))
 
+        st.markdown("**Dificultad**")
+        # Desplegable + editable: el desplegable aplica un valor rápido y el input permite afinarlo.
+        _dif_presets = [
+            ("0,000", 0.0),
+            ("0,020", 0.02),
+            ("0,050", 0.05),
+            ("0,091 (standard)", 0.091),
+            ("0,120", 0.12),
+            ("0,150", 0.15),
+            ("Personalizado", None),
+        ]
+
+        # Inicializa selección en base al valor actual si coincide con un preset
+        _dif_actual = float(st.session_state.dif_ud)
+        _dif_labels = [p[0] for p in _dif_presets]
+        _dif_values = [p[1] for p in _dif_presets]
+
+        _idx = None
+        for i, v in enumerate(_dif_values):
+            if v is None:
+                continue
+            if abs(float(v) - _dif_actual) < 1e-9:
+                _idx = i
+                break
+        if _idx is None:
+            _idx = _dif_labels.index("Personalizado")
+
+        sel = st.selectbox("Preset dificultad", _dif_labels, index=_idx, key="dif_preset_sel")
+        sel_val = _dif_presets[_dif_labels.index(sel)][1]
+        if sel_val is not None:
+            # Si eliges un preset, se aplica automáticamente
+            st.session_state.dif_ud = float(sel_val)
+
+        # Editable siempre (si está en preset, puedes ajustarlo manualmente igualmente)
+        st.number_input("Dificultad (€/ud)", min_value=0.0, step=0.001, value=float(st.session_state.dif_ud), key="dif_ud")
+
     lista_cants = parse_cantidades(st.session_state.cants_str_saved)
 
     unidad_t = st.session_state.unidad_t
@@ -1364,7 +1401,6 @@ with tab_calculadora:
     seg_arm_total = (arm_t_input * 60) if unidad_t == "Minutos" else arm_t_input
 
     with st.expander("💰 Finanzas", expanded=False):
-        st.number_input("Dificultad (€/ud)", min_value=0.0, step=0.001, value=float(st.session_state.dif_ud), key="dif_ud")
         st.number_input("Fijo PVP (€)", value=float(st.session_state.imp_fijo_pvp), key="imp_fijo_pvp")
         st.number_input("Multiplicador", step=0.1, value=float(st.session_state.margen), key="margen")
 
