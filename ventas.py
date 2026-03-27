@@ -270,6 +270,56 @@ def obtener_partes_impresion_por_cantidad(q_total: int) -> list:
 
     # Fallback: reparto igual
     return _split_equal(int(q_total), int(n))
+
+
+def obtener_partes_impresion_por_formato(pid: int, q_total: int) -> list:
+    """Devuelve el desglose de impresiones para una cantidad concreta, PERO por formato (forma).
+
+    - Se activa solo si el TIC (checkbox) del formato está activo.
+    - Si no está activo, devuelve 1 impresión con q_total.
+    - Si existe configuración por formato, la aplica.
+    - Fallback de compatibilidad: si no hay cfg por formato, usa 'impresiones_by_qty' (global legacy).
+    """
+    if q_total <= 0:
+        return []
+    pid_key = str(int(pid))
+
+    enabled_all = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
+    enabled = False
+    if isinstance(enabled_all, dict):
+        enabled = bool(enabled_all.get(pid_key, False))
+    if not enabled:
+        return [int(q_total)]
+
+    cfg_fmt_all = st.session_state.get("impresiones_by_qty_fmt", {})
+    if isinstance(cfg_fmt_all, dict):
+        cfg_all = cfg_fmt_all.get(pid_key, {})
+        if isinstance(cfg_all, dict):
+            cfg = cfg_all.get(str(int(q_total)), None)
+            if isinstance(cfg, dict):
+                try:
+                    n = int(cfg.get("n", 1))
+                except Exception:
+                    n = 1
+                n = max(1, n)
+                modo = str(cfg.get("modo", "igual")).lower().strip()
+                partes = cfg.get("partes", [])
+                if isinstance(partes, list):
+                    try:
+                        partes = [int(x) for x in partes if int(x) > 0]
+                    except Exception:
+                        partes = []
+                else:
+                    partes = []
+
+                if n == 1:
+                    return [int(q_total)]
+                if modo == "manual" and partes and sum(partes) == int(q_total) and len(partes) == n:
+                    return partes
+                return _split_equal(int(q_total), int(n))
+
+    # Legacy global (por si venimos de JSON antiguo)
+    return obtener_partes_impresion_por_cantidad(int(q_total))
 # =========================================================
 # EMBALAJES (múltiples)
 # =========================================================
@@ -408,6 +458,8 @@ if "mermas_imp_manual" not in st.session_state: st.session_state.mermas_imp_manu
 if "mermas_imp_digital_manual" not in st.session_state: st.session_state.mermas_imp_digital_manual = {}
 if "mermas_proc_manual" not in st.session_state: st.session_state.mermas_proc_manual = {}
 if "impresiones_by_qty" not in st.session_state: st.session_state.impresiones_by_qty = {}  # {str(cantidad): {"n": int, "modo": "igual"|"manual", "partes": [int,...]}}
+if "impresiones_by_qty_fmt" not in st.session_state: st.session_state.impresiones_by_qty_fmt = {}  # {str(pid): {str(cantidad): {"n": int, "modo": "igual"|"manual", "partes": [int,...]}}}
+if "impresiones_by_qty_fmt_enabled" not in st.session_state: st.session_state.impresiones_by_qty_fmt_enabled = {}  # {str(pid): bool}
 
 if "brf" not in st.session_state: st.session_state.brf = ""
 if "cli" not in st.session_state: st.session_state.cli = ""
@@ -491,6 +543,13 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         for k in [f"impn_{q}", f"impigual_{q}", f"impman_{q}"]:
             if k in st.session_state:
                 del st.session_state[k]
+
+    # Impresiones por cantidad (multi-tirada) - POR FORMATO
+    for pid in list(st.session_state.get("piezas_dict", {}).keys()):
+        for q in lista_cants:
+            for k in [f"impact_{pid}", f"impn_{pid}_{q}", f"impigual_{pid}_{q}", f"impman_{pid}_{q}"]:
+                if k in st.session_state:
+                    del st.session_state[k]
 
     for i in range(max(0, extras_len)):
         for k in [f"exc_{i}", f"exq_{i}", f"exd_{i}"]:
@@ -592,6 +651,35 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
                 st.session_state[f"impman_{q}"] = ""
         else:
             st.session_state.setdefault(f"impman_{q}", "")
+
+    # Impresiones por cantidad (multi-tirada) - POR FORMATO (si viene en JSON)
+    cfg_fmt_all = st.session_state.get("impresiones_by_qty_fmt", {})
+    en_all = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
+    if isinstance(cfg_fmt_all, dict) and isinstance(en_all, dict):
+        for pid, _p in piezas_dict.items():
+            pid_key = str(int(pid))
+            st.session_state[f"impact_{pid}"] = bool(en_all.get(pid_key, False))
+            cfg_fmt = cfg_fmt_all.get(pid_key, {}) if isinstance(cfg_fmt_all.get(pid_key, {}), dict) else {}
+            for q in lista_cants:
+                cfg = cfg_fmt.get(str(int(q)), {}) if isinstance(cfg_fmt.get(str(int(q)), {}), dict) else {}
+                try:
+                    n = int(cfg.get("n", 1))
+                except Exception:
+                    n = 1
+                n = max(1, n)
+                modo = str(cfg.get("modo", "igual")).lower().strip()
+                partes = cfg.get("partes", [])
+                if not isinstance(partes, list):
+                    partes = []
+                st.session_state[f"impn_{pid}_{q}"] = n
+                st.session_state[f"impigual_{pid}_{q}"] = (modo != "manual")
+                if modo == "manual" and partes:
+                    try:
+                        st.session_state[f"impman_{pid}_{q}"] = "+".join(str(int(x)) for x in partes)
+                    except Exception:
+                        st.session_state[f"impman_{pid}_{q}"] = ""
+                else:
+                    st.session_state.setdefault(f"impman_{pid}_{q}", "")
 
 
 # =========================================================
@@ -825,6 +913,61 @@ def normalizar_import(di: dict):
             cfg_new[str(qk)] = {"n": n, "modo": modo, "partes": partes}
         st.session_state.impresiones_by_qty = cfg_new
 
+
+    # Impresiones por cantidad (multi-tirada) - POR FORMATO (nuevo, opcional en JSON)
+    if isinstance(di.get("impresiones_by_qty_fmt", None), dict):
+        cfg_fmt_new = {}
+        for pid_k, cfg_pid in di["impresiones_by_qty_fmt"].items():
+            try:
+                pid_int = int(pid_k)
+            except Exception:
+                continue
+            if not isinstance(cfg_pid, dict):
+                continue
+            cfg_q_new = {}
+            for k, v in cfg_pid.items():
+                try:
+                    qk = int(k)
+                except Exception:
+                    continue
+                if not isinstance(v, dict):
+                    continue
+                try:
+                    n = int(v.get("n", 1))
+                except Exception:
+                    n = 1
+                n = max(1, n)
+                modo = str(v.get("modo", "igual")).lower().strip()
+                partes = v.get("partes", [])
+                if isinstance(partes, list):
+                    try:
+                        partes = [int(x) for x in partes if int(x) > 0]
+                    except Exception:
+                        partes = []
+                else:
+                    partes = []
+                if n == 1:
+                    modo = "igual"
+                    partes = [qk]
+                elif modo == "manual" and (not partes or sum(partes) != qk or len(partes) != n):
+                    modo = "igual"
+                    partes = _split_equal(qk, n)
+                elif modo != "manual":
+                    partes = _split_equal(qk, n)
+                cfg_q_new[str(qk)] = {"n": n, "modo": modo, "partes": partes}
+            cfg_fmt_new[str(pid_int)] = cfg_q_new
+        st.session_state.impresiones_by_qty_fmt = cfg_fmt_new
+
+    if isinstance(di.get("impresiones_by_qty_fmt_enabled", None), dict):
+        en_new = {}
+        for k, v in di["impresiones_by_qty_fmt_enabled"].items():
+            try:
+                pid_int = int(k)
+            except Exception:
+                continue
+            en_new[str(pid_int)] = bool(v)
+        st.session_state.impresiones_by_qty_fmt_enabled = en_new
+
     emb = di.get("embalajes", None)
     if isinstance(emb, list) and len(emb) > 0:
         new_list = []
@@ -902,6 +1045,8 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "mermas_imp_digital": deepcopy(st.session_state.mermas_imp_digital_manual),
         "mermas_proc": deepcopy(st.session_state.mermas_proc_manual),
         "impresiones_by_qty": deepcopy(st.session_state.get("impresiones_by_qty", {})),
+        "impresiones_by_qty_fmt": deepcopy(st.session_state.get("impresiones_by_qty_fmt", {})),
+        "impresiones_by_qty_fmt_enabled": deepcopy(st.session_state.get("impresiones_by_qty_fmt_enabled", {})),
     }
     if resumen_compra is not None:
         data["compras_legible"] = resumen_compra
@@ -1185,69 +1330,6 @@ with tab_calculadora:
             if q not in st.session_state.mermas_imp_digital_manual:
                 st.session_state.mermas_imp_digital_manual[q] = mi_dig
 
-        # -----------------------------------------------------
-        # IMPRESIONES POR CANTIDAD (multi-tirada)
-        # -----------------------------------------------------
-        if lista_cants:
-            with st.expander("🖨️ Impresiones por cantidad (desglose)", expanded=False):
-                st.caption("Si una misma cantidad se imprime en varias tiradas (p.ej. 100+400+500), indícalo aquí. "
-                           "Solo afecta a: (1) coste de impresión y (2) merma de cartoncillo (una merma extra por cada impresión). "
-                           "El resto de procesos mantiene su merma habitual.")
-                cfg_all = st.session_state.get("impresiones_by_qty", {})
-                if not isinstance(cfg_all, dict):
-                    cfg_all = {}
-                    st.session_state.impresiones_by_qty = cfg_all
-
-                for q in lista_cants:
-                    cfg = cfg_all.get(str(int(q)), {}) if isinstance(cfg_all.get(str(int(q)), {}), dict) else {}
-                    try:
-                        n_def = int(cfg.get("n", 1))
-                    except Exception:
-                        n_def = 1
-                    n_def = max(1, n_def)
-                    modo_def = str(cfg.get("modo", "igual")).lower().strip()
-                    igual_def = (modo_def != "manual")
-                    partes_def = cfg.get("partes", []) if isinstance(cfg.get("partes", []), list) else []
-                    try:
-                        partes_def_str = "+".join(str(int(x)) for x in partes_def) if partes_def else ""
-                    except Exception:
-                        partes_def_str = ""
-
-                    c1, c2 = st.columns([1, 3])
-                    with c1:
-                        n_imp = st.number_input(f"{q} uds · Nº impresiones", min_value=1, step=1, value=int(st.session_state.get(f"impn_{q}", n_def)), key=f"impn_{q}")
-                    with c2:
-                        igual = st.checkbox("Repartir a partes iguales", value=bool(st.session_state.get(f"impigual_{q}", igual_def)), key=f"impigual_{q}")
-
-                    partes = []
-                    if int(n_imp) <= 1:
-                        partes = [int(q)]
-                        cfg_all[str(int(q))] = {"n": 1, "modo": "igual", "partes": partes}
-                        st.caption("Tirada única.")
-                        continue
-
-                    if bool(igual):
-                        partes = _split_equal(int(q), int(n_imp))
-                        cfg_all[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
-                        st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
-                    else:
-                        txt = st.text_input(
-                            "Desglose (ej: 100+400+500)",
-                            value=str(st.session_state.get(f"impman_{q}", partes_def_str)),
-                            key=f"impman_{q}"
-                        )
-                        partes_manual = _parse_partes_str(txt)
-                        if partes_manual and len(partes_manual) == int(n_imp) and sum(partes_manual) == int(q):
-                            partes = partes_manual
-                            cfg_all[str(int(q))] = {"n": int(n_imp), "modo": "manual", "partes": partes}
-                            st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
-                        else:
-                            partes = _split_equal(int(q), int(n_imp))
-                            cfg_all[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
-                            st.warning("El desglose manual no cuadra (nº partes o suma). Se ha aplicado reparto igual.")
-                            st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
-
-                st.session_state.impresiones_by_qty = cfg_all
 
     # -----------------------------------------------------
     # PASO 2: TÉCNICO
@@ -1354,6 +1436,93 @@ with tab_calculadora:
                 val_pel = p.get("pel", "Sin Peliculado")
                 idx_pel = opts_pel.index(val_pel) if val_pel in opts_pel else 0
                 p["pel"] = st.selectbox("Peliculado Cara", opts_pel, index=idx_pel, key=f"pel_{p_id}")
+
+                # -----------------------------------------------------
+                # IMPRESIONES POR CANTIDAD (multi-tirada) - POR FORMATO (TIC)
+                # -----------------------------------------------------
+                # Si una misma cantidad se imprime en varias tiradas (p.ej. 100+400+500) para ESTA forma,
+                # indícalo aquí. Solo afecta a: (1) coste de impresión y (2) merma de cartoncillo (una merma extra por cada impresión).
+                # El resto de procesos mantiene su merma habitual.
+                pid_key = str(int(p_id))
+                if "impresiones_by_qty_fmt_enabled" not in st.session_state:
+                    st.session_state.impresiones_by_qty_fmt_enabled = {}
+                if "impresiones_by_qty_fmt" not in st.session_state:
+                    st.session_state.impresiones_by_qty_fmt = {}
+
+                tic_def = bool(st.session_state.impresiones_by_qty_fmt_enabled.get(pid_key, False)) if isinstance(st.session_state.impresiones_by_qty_fmt_enabled, dict) else False
+                tic = st.checkbox("🖨️ Varias impresiones por cantidad (esta forma)", value=bool(st.session_state.get(f"impact_{p_id}", tic_def)), key=f"impact_{p_id}")
+                if isinstance(st.session_state.impresiones_by_qty_fmt_enabled, dict):
+                    st.session_state.impresiones_by_qty_fmt_enabled[pid_key] = bool(tic)
+
+                if bool(tic) and lista_cants:
+                    with st.expander("🖨️ Desglose de impresiones por cantidad (esta forma)", expanded=False):
+                        st.caption("Ejemplo: 1000 uds -> 3 impresiones: 100+400+500. "
+                                   "Solo afecta a coste de impresión y merma extra de cartoncillo por impresión.")
+                        cfg_fmt_all = st.session_state.impresiones_by_qty_fmt if isinstance(st.session_state.impresiones_by_qty_fmt, dict) else {}
+                        cfg_fmt = cfg_fmt_all.get(pid_key, {}) if isinstance(cfg_fmt_all.get(pid_key, {}), dict) else {}
+
+                        for q in lista_cants:
+                            cfg = cfg_fmt.get(str(int(q)), {}) if isinstance(cfg_fmt.get(str(int(q)), {}), dict) else {}
+                            try:
+                                n_def = int(cfg.get("n", 1))
+                            except Exception:
+                                n_def = 1
+                            n_def = max(1, n_def)
+                            modo_def = str(cfg.get("modo", "igual")).lower().strip()
+                            igual_def = (modo_def != "manual")
+                            partes_def = cfg.get("partes", []) if isinstance(cfg.get("partes", []), list) else []
+                            try:
+                                partes_def_str = "+".join(str(int(x)) for x in partes_def) if partes_def else ""
+                            except Exception:
+                                partes_def_str = ""
+
+                            c1i, c2i = st.columns([1, 3])
+                            with c1i:
+                                n_imp = st.number_input(
+                                    f"{q} uds · Nº impresiones",
+                                    min_value=1,
+                                    step=1,
+                                    value=int(st.session_state.get(f"impn_{p_id}_{q}", n_def)),
+                                    key=f"impn_{p_id}_{q}",
+                                )
+                            with c2i:
+                                igual = st.checkbox(
+                                    "Repartir a partes iguales",
+                                    value=bool(st.session_state.get(f"impigual_{p_id}_{q}", igual_def)),
+                                    key=f"impigual_{p_id}_{q}",
+                                )
+
+                            partes = []
+                            if int(n_imp) <= 1:
+                                partes = [int(q)]
+                                cfg_fmt[str(int(q))] = {"n": 1, "modo": "igual", "partes": partes}
+                                st.caption("Tirada única.")
+                                continue
+
+                            if bool(igual):
+                                partes = _split_equal(int(q), int(n_imp))
+                                cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
+                                st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+                            else:
+                                txt = st.text_input(
+                                    "Desglose (ej: 100+400+500)",
+                                    value=str(st.session_state.get(f"impman_{p_id}_{q}", partes_def_str)),
+                                    key=f"impman_{p_id}_{q}",
+                                )
+                                partes_manual = _parse_partes_str(txt)
+                                if partes_manual and len(partes_manual) == int(n_imp) and sum(partes_manual) == int(q):
+                                    partes = partes_manual
+                                    cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "manual", "partes": partes}
+                                    st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+                                else:
+                                    partes = _split_equal(int(q), int(n_imp))
+                                    cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
+                                    st.warning("El desglose manual no cuadra (nº partes o suma). Se ha aplicado reparto igual.")
+                                    st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+
+                        cfg_fmt_all[pid_key] = cfg_fmt
+                        st.session_state.impresiones_by_qty_fmt = cfg_fmt_all
+
 
             with col2:
                 opts_pf = list(db["cartoncillo"].keys())
@@ -1679,11 +1848,6 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         debug_log = []
 
 
-        # Impresiones por cantidad (multi-tirada): p.ej. 100+400+500 para una misma cantidad.
-        # Solo afecta a coste de impresión y a la merma extra de cartoncillo por impresión.
-        partes_imp_units = obtener_partes_impresion_por_cantidad(int(q_n))
-        n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
-
         tot_cat = {
             "materiales": {
                 "cartoncillo": 0.0,
@@ -1719,6 +1883,11 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_pel_total = 0.0
             c_troquel_taller = 0.0
             c_plotter = 0.0
+
+            # Impresiones por cantidad (multi-tirada) - POR FORMATO:
+            # Solo afecta a coste de impresión y a la merma extra de cartoncillo por impresión.
+            partes_imp_units = obtener_partes_impresion_por_formato(int(pid), int(q_n))
+            n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
 
             nb = q_n * float(p.get("pliegos", 1.0))
             hp_produccion = nb + merma_proc_hojas
