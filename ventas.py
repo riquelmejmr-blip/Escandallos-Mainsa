@@ -496,6 +496,8 @@ def crear_forma_vacia(index):
         "pel": "Sin Peliculado",
         "pel_d": "Sin Peliculado",
         "ld": False, "ld_d": False,
+        "fr24": False,
+        "fr24_rate": 0.05,
         "cor_default": "Troquelado",
         "cor_by_qty": {},
         "cobrar_arreglo": True,
@@ -1094,10 +1096,20 @@ def construir_export(resumen_compra=None, resumen_costes=None):
     for pid, p in st.session_state.piezas_dict.items():
         piezas_out[str(int(pid))] = deepcopy(p)
 
+    # Comercial: exportamos el número si es interpretable (p.ej. "Comercial 52" -> "52").
+    # Mantiene compatibilidad: si no se puede interpretar, se exporta el texto tal cual.
+    _c1_raw = st.session_state.get("comercial_1", "")
+    _c2_raw = st.session_state.get("comercial_2", "")
+    _c1_num = _parse_comercial_num(_c1_raw)
+    _c2_num = _parse_comercial_num(_c2_raw)
+
+    c1_out = (str(_c1_num) if _c1_num is not None else str(_c1_raw or ""))
+    c2_out = (str(_c2_num) if _c2_num is not None else str(_c2_raw or ""))
+
     data = {
         "brf": st.session_state.brf,
-        "comercial_1": st.session_state.comercial_1,
-        "comercial_2": st.session_state.comercial_2,
+        "comercial_1": c1_out,
+        "comercial_2": c2_out,
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
         "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
@@ -1122,7 +1134,6 @@ def construir_export(resumen_compra=None, resumen_costes=None):
     if resumen_costes is not None:
         data["resumen_costes"] = resumen_costes
     return data
-
 # =========================================================
 # CSS
 # =========================================================
@@ -1543,6 +1554,23 @@ with tab_calculadora:
                 val_pel = p.get("pel", "Sin Peliculado")
                 idx_pel = opts_pel.index(val_pel) if val_pel in opts_pel else 0
                 p["pel"] = st.selectbox("Peliculado Cara", opts_pel, index=idx_pel, key=f"pel_{p_id}")
+
+                # -----------------------------------------------------
+                # TINTA ESPECIAL FR24 (extra por m²)
+                # -----------------------------------------------------
+                p["fr24"] = st.checkbox("🧪 Tinta especial FR24 (extra €/m²)", value=bool(p.get("fr24", False)), key=f"fr24_{p_id}")
+                if bool(p["fr24"]):
+                    p["fr24_rate"] = float(st.number_input(
+                        "Coste extra FR24 (€/m²)",
+                        min_value=0.0,
+                        max_value=999.0,
+                        value=float(p.get("fr24_rate", 0.05)),
+                        step=0.01,
+                        key=f"fr24r_{p_id}",
+                    ))
+                else:
+                    # Mantener el último valor configurado (si existe) para no perderlo al desactivar.
+                    p["fr24_rate"] = float(p.get("fr24_rate", 0.05))
 
                 # -----------------------------------------------------
                 # IMPRESIONES POR CANTIDAD (multi-tirada) - POR FORMATO (TIC)
@@ -2103,6 +2131,14 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_imp_cara = 0.0
             c_imp_dorso = 0.0
 
+            # FR24: tinta especial con coste extra por m² impreso.
+            fr24_enabled = bool(p.get("fr24", False))
+            try:
+                fr24_rate = float(p.get("fr24_rate", 0.05))
+            except Exception:
+                fr24_rate = 0.05
+            fr24_m2_total = 0.0
+
             # Impresión (multi-tirada): el coste se calcula por cada impresión (tirada).
             # La merma de impresión se aplica por tirada según la cantidad seleccionada.
             if p.get("im","No") == "Digital":
@@ -2110,6 +2146,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                     nb_run = int(q_run) * float(p.get("pliegos", 1.0))
                     hp_imp_run = nb_run + merma_imp_digital_hojas
                     c_imp_cara += hp_imp_run * m2_papel * 6.5
+                    if fr24_enabled and m2_papel > 0:
+                        fr24_m2_total += hp_imp_run * m2_papel
                     if bool(p.get("ld", False)):
                         c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im","No") == "Offset":
@@ -2117,12 +2155,16 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                     nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
                     c_imp_cara += coste_offset_por_tinta(int(nb_run)) * tintas_cara
+                    if fr24_enabled and m2_papel > 0:
+                        fr24_m2_total += nb_run * m2_papel
 
             if p.get("im_d","No") == "Digital":
                 for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                     nb_run = int(q_run) * float(p.get("pliegos", 1.0))
                     hp_imp_run = nb_run + merma_imp_digital_hojas
                     c_imp_dorso += hp_imp_run * m2_papel * 6.5
+                    if fr24_enabled and m2_papel > 0:
+                        fr24_m2_total += hp_imp_run * m2_papel
                     if bool(p.get("ld_d", False)):
                         c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im_d","No") == "Offset":
@@ -2130,8 +2172,15 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                     nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
                     c_imp_dorso += coste_offset_por_tinta(int(nb_run)) * tintas_dorso
+                    if fr24_enabled and m2_papel > 0:
+                        fr24_m2_total += nb_run * m2_papel
 
             c_imp_total = c_imp_cara + c_imp_dorso
+
+            c_fr24 = 0.0
+            if fr24_enabled and fr24_rate > 0 and fr24_m2_total > 0:
+                c_fr24 = fr24_m2_total * fr24_rate
+                c_imp_total += c_fr24
 
             c_pel_cara = 0.0
             c_pel_dorso = 0.0
@@ -2417,7 +2466,7 @@ if modo_comercial and res_final:
         desc_html += " &nbsp; ".join(opt_lines)
         desc_html += "</div>"
 
-    for p in st.session_state.piezas_dict.values():
+    for pid, p in st.session_state.piezas_dict.items():
         base_info = ""
         if p.get("tipo_base") == "Material Rígido":
             if bool(p.get("rig_manual", False)):
@@ -2449,6 +2498,31 @@ if modo_comercial and res_final:
         corte = p.get("cor_default","Troquelado")
         trq = f"{float(p.get('pv_troquel',0.0)):.2f}€"
 
+        # Varias impresiones (solo si está activado para esta forma) -> mostrar en oferta
+        impresiones_info_html = ""
+        enabled_all = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
+        enabled_fmt = False
+        if isinstance(enabled_all, dict):
+            enabled_fmt = bool(enabled_all.get(str(int(pid)), False))
+        if enabled_fmt:
+            q_list = []
+            try:
+                q_list = [int(r.get("Cantidad", 0)) for r in res_final if int(r.get("Cantidad", 0)) > 0]
+            except Exception:
+                q_list = []
+            lines = []
+            for qv in q_list:
+                partes = obtener_partes_impresion_por_formato(int(pid), int(qv))
+                if isinstance(partes, list) and len(partes) > 1:
+                    try:
+                        parts_txt = "+".join(str(int(x)) for x in partes)
+                    except Exception:
+                        parts_txt = "+".join(str(x) for x in partes)
+                    lines.append(f"{int(qv)} uds → {parts_txt}")
+            if lines:
+                impresiones_info_html = "<br><b>Varias impresiones:</b> " + " &nbsp;|&nbsp; ".join(lines)
+
+
         desc_html += (
             "<div style='margin-bottom:8px;'>"
             f"<span class='tag'>{p.get('nombre','')}</span>"
@@ -2457,8 +2531,7 @@ if modo_comercial and res_final:
             f"<b>Soporte:</b> {base_info}<br>"
             f"<b>Cara:</b> {cara} | <b>Imp:</b> {imp_c}{tintas_c} | <b>Pel:</b> {pel_c}<br>"
             f"<b>Dorso:</b> {dorso} | <b>Imp:</b> {imp_d}{tintas_d} | <b>Pel:</b> {pel_d}<br>"
-            f"<b>Corte (def):</b> {corte} | <b>Troquel (venta):</b> {trq}"
-            "</div></div>"
+            f"<b>Corte (def):</b> {corte} | <b>Troquel (venta):</b> {trq}" + impresiones_info_html + "</div></div>"
         )
     desc_html += "</div>"
 
