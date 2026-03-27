@@ -1094,10 +1094,20 @@ def construir_export(resumen_compra=None, resumen_costes=None):
     for pid, p in st.session_state.piezas_dict.items():
         piezas_out[str(int(pid))] = deepcopy(p)
 
+    # Comercial: exportamos el número si es interpretable (p.ej. "Comercial 52" -> "52").
+    # Mantiene compatibilidad: si no se puede interpretar, se exporta el texto tal cual.
+    _c1_raw = st.session_state.get("comercial_1", "")
+    _c2_raw = st.session_state.get("comercial_2", "")
+    _c1_num = _parse_comercial_num(_c1_raw)
+    _c2_num = _parse_comercial_num(_c2_raw)
+
+    c1_out = (str(_c1_num) if _c1_num is not None else str(_c1_raw or ""))
+    c2_out = (str(_c2_num) if _c2_num is not None else str(_c2_raw or ""))
+
     data = {
         "brf": st.session_state.brf,
-        "comercial_1": st.session_state.comercial_1,
-        "comercial_2": st.session_state.comercial_2,
+        "comercial_1": c1_out,
+        "comercial_2": c2_out,
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
         "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
@@ -1122,7 +1132,6 @@ def construir_export(resumen_compra=None, resumen_costes=None):
     if resumen_costes is not None:
         data["resumen_costes"] = resumen_costes
     return data
-
 # =========================================================
 # CSS
 # =========================================================
@@ -2417,7 +2426,7 @@ if modo_comercial and res_final:
         desc_html += " &nbsp; ".join(opt_lines)
         desc_html += "</div>"
 
-    for p in st.session_state.piezas_dict.values():
+    for pid, p in st.session_state.piezas_dict.items():
         base_info = ""
         if p.get("tipo_base") == "Material Rígido":
             if bool(p.get("rig_manual", False)):
@@ -2449,6 +2458,31 @@ if modo_comercial and res_final:
         corte = p.get("cor_default","Troquelado")
         trq = f"{float(p.get('pv_troquel',0.0)):.2f}€"
 
+        # Varias impresiones (solo si está activado para esta forma) -> mostrar en oferta
+        impresiones_info_html = ""
+        enabled_all = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
+        enabled_fmt = False
+        if isinstance(enabled_all, dict):
+            enabled_fmt = bool(enabled_all.get(str(int(pid)), False))
+        if enabled_fmt:
+            q_list = []
+            try:
+                q_list = [int(r.get("Cantidad", 0)) for r in res_final if int(r.get("Cantidad", 0)) > 0]
+            except Exception:
+                q_list = []
+            lines = []
+            for qv in q_list:
+                partes = obtener_partes_impresion_por_formato(int(pid), int(qv))
+                if isinstance(partes, list) and len(partes) > 1:
+                    try:
+                        parts_txt = "+".join(str(int(x)) for x in partes)
+                    except Exception:
+                        parts_txt = "+".join(str(x) for x in partes)
+                    lines.append(f"{int(qv)} uds → {parts_txt}")
+            if lines:
+                impresiones_info_html = "<br><b>Varias impresiones:</b> " + " &nbsp;|&nbsp; ".join(lines)
+
+
         desc_html += (
             "<div style='margin-bottom:8px;'>"
             f"<span class='tag'>{p.get('nombre','')}</span>"
@@ -2457,8 +2491,7 @@ if modo_comercial and res_final:
             f"<b>Soporte:</b> {base_info}<br>"
             f"<b>Cara:</b> {cara} | <b>Imp:</b> {imp_c}{tintas_c} | <b>Pel:</b> {pel_c}<br>"
             f"<b>Dorso:</b> {dorso} | <b>Imp:</b> {imp_d}{tintas_d} | <b>Pel:</b> {pel_d}<br>"
-            f"<b>Corte (def):</b> {corte} | <b>Troquel (venta):</b> {trq}"
-            "</div></div>"
+            f"<b>Corte (def):</b> {corte} | <b>Troquel (venta):</b> {trq}" + impresiones_info_html + "</div></div>"
         )
     desc_html += "</div>"
 
