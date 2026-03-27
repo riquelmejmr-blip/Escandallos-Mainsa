@@ -563,6 +563,8 @@ if "db_descuentos" not in st.session_state:
 if "_last_import_hash" not in st.session_state: st.session_state._last_import_hash = None
 if "_export_blob" not in st.session_state: st.session_state._export_blob = None
 if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
+if "_imported_compras_legible" not in st.session_state: st.session_state._imported_compras_legible = None
+if "_imported_resumen_costes" not in st.session_state: st.session_state._imported_resumen_costes = None
 if "_json_downloaded" not in st.session_state: st.session_state._json_downloaded = False
 if "_json_downloaded_filename" not in st.session_state: st.session_state._json_downloaded_filename = ""
 
@@ -926,6 +928,14 @@ def normalizar_import(di: dict):
             new_ids.append(pid)
 
     piezas_all = sorted(set(prev_piezas_ids + new_ids))
+
+    # ✅ Snapshots de costes (para preservar proyectos antiguos con precios vendidos)
+    if isinstance(di.get("compras_legible", None), dict):
+        st.session_state._imported_compras_legible = di["compras_legible"]
+    if isinstance(di.get("resumen_costes", None), dict):
+        st.session_state._imported_resumen_costes = di["resumen_costes"]
+
+
     purge_widget_keys_for_import(
         lista_cants=cants_all,
         piezas_ids=piezas_all,
@@ -2406,9 +2416,12 @@ safe_cli = re.sub(r'[\\/*?:"<>|]', "", st.session_state.cli or "Cli").replace(" 
 safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
 st.session_state._export_filename = f"{safe_brf}_{safe_cli}_{safe_desc}.json"
 
+resumen_compra_to_export = compras_legible if isinstance(compras_legible, dict) and len(compras_legible) > 0 else st.session_state.get("_imported_compras_legible")
+resumen_costes_to_export = resumen_costes_export if isinstance(resumen_costes_export, dict) and len(resumen_costes_export) > 0 else st.session_state.get("_imported_resumen_costes")
+
 export_data = construir_export(
-    resumen_compra=compras_legible if compras_legible else None,
-    resumen_costes=resumen_costes_export if resumen_costes_export else None
+    resumen_compra=resumen_compra_to_export,
+    resumen_costes=resumen_costes_to_export
 )
 st.session_state._export_blob = json.dumps(export_data, indent=4, ensure_ascii=False)
 st.session_state._json_downloaded = False
