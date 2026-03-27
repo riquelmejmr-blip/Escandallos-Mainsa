@@ -1095,10 +1095,12 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         piezas_out[str(int(pid))] = deepcopy(p)
 
     data = {
-        "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
         "brf": st.session_state.brf,
+        "comercial_1": st.session_state.comercial_1,
+        "comercial_2": st.session_state.comercial_2,
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
+        "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input), "rellenado": {"enabled": bool(st.session_state.rell_enabled), "t_input": float(st.session_state.rell_t_input)}, "armado": {"enabled": bool(st.session_state.arm_enabled), "t_input": float(st.session_state.arm_t_input)}},
         "params": {"dif_ud": float(st.session_state.dif_ud), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
