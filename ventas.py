@@ -230,32 +230,180 @@ FORMATOS_STD = {
 # =========================================================
 # MERMAS (AUTO)
 # =========================================================
-def calcular_mermas_estandar(n, es_digital=False):
-    """Devuelve (merma_rodaje_proceso_hojas, merma_arranque_impresion_hojas).
+def _tabla_merma_procesos_offset(hojas_netas: float) -> int:
+    """Merma de procesos en OFFSET según tabla del cliente.
 
-    Regla: merma de rodaje/proceso proporcional con tope máximo de 150 hojas.
+    IMPORTANTE:
+    - La tabla se aplica sobre *hojas/pliegos netos* (ya ajustados por formato: Pliegos/Ud).
+    - Redondea hacia arriba a hoja entera.
     """
-    # Rodaje proceso: proporcional pero capado
+    n = int(math.ceil(max(0.0, float(hojas_netas))))
+    # Tabla (Desde incl., Hasta incl., Merma)
+    tramos = [
+        (0, 99, 20),
+        (100, 149, 30),
+        (150, 200, 40),
+        (201, 600, 40),
+        (601, 1000, 60),
+        (1001, 1500, 60),
+        (1501, 2000, 80),
+        (2001, 3000, 80),
+        (3001, 3500, 100),
+        (3501, 5000, 100),
+        (5001, 8000, 120),
+        (8001, 10000, 120),
+        (10001, 13000, 140),
+        (13001, 15000, 140),
+    ]
+    for a, b, merma in tramos:
+        if a <= n <= b:
+            return int(merma)
+    # A partir de 15001
+    return 150
+
+
+def _merma_impresion_offset_por_pasadas(n_tintas: int, barniz: bool) -> int:
+    """Merma de impresión OFFSET por pasadas.
+
+    Regla:
+    - Base: 100 hojas.
+    - Máquina 4 cuerpos: nº pasadas = ceil((tintas + (barniz?1:0)) / 4).
+    - Merma = 100 + 50*(pasadas-1)
+    Ejemplos:
+      4 tintas -> 1 pasada -> 100
+      5 tintas -> 2 pasadas -> 150
+      6 tintas + barniz (7 aplicaciones) -> 2 pasadas -> 150
+      8 tintas + barniz (9 aplicaciones) -> 3 pasadas -> 200
+    """
+    apps = max(0, int(n_tintas)) + (1 if bool(barniz) else 0)
+    if apps <= 0:
+        return 0
+    pasadas = int(math.ceil(apps / 4.0))
+    return int(100 + 50 * max(0, pasadas - 1))
+
+
+def calcular_mermas_estandar(n_uds: int, pliegos_por_ud: float = 1.0, es_digital: bool = False,
+                            n_tintas: int = 4, barniz: bool = False) -> tuple[int, int]:
+    """Devuelve (merma_proceso_hojas, merma_impresion_hojas).
+
+    - Proceso (OFFSET): según tabla del cliente, aplicada a hojas netas = uds * pliegos_por_ud.
+    - Impresión:
+        * Offset: 100 + 50*(pasadas-1), con pasadas por (tintas + barniz) en grupos de 4.
+        * Digital: mantiene comportamiento anterior (10 hojas) salvo que se fuerce manualmente.
+    """
+    uds = max(0, int(n_uds))
+    pl = float(pliegos_por_ud) if pliegos_por_ud is not None else 1.0
+    hojas_netas = uds * pl
+
     if es_digital:
-        merma_proc = min(int(n * 0.02), 150)
-        return merma_proc, 10
+        merma_proc = min(int(math.ceil(hojas_netas * 0.02)), 150)
+        return int(merma_proc), 10
 
-    if n < 100:
-        merma_proc, merma_imp = 10, 150
-    elif n < 200:
-        merma_proc, merma_imp = 20, 175
-    elif n < 600:
-        merma_proc, merma_imp = 30, 200
-    elif n < 1000:
-        merma_proc, merma_imp = 40, 220
-    elif n < 2000:
-        merma_proc, merma_imp = 50, 250
+    merma_proc = _tabla_merma_procesos_offset(hojas_netas)
+    merma_imp = _merma_impresion_offset_por_pasadas(n_tintas=n_tintas, barniz=barniz)
+    return int(merma_proc), int(merma_imp)
+
+
+# =========================================================
+# MERMAS (SESSION HELPERS - compat JSON antiguo/nuevo)
+# =========================================================
+def _ss_get_merma_proc(pid: int, qty: int, default: int = 0) -> int:
+    """Obtiene merma de procesos por forma+cantidad.
+    Compatibilidad:
+    - Nuevo: mermas_proc_manual = {pid: {qty: val}}
+    - Antiguo: mermas_proc_manual = {qty: val}
+    """
+    d = st.session_state.get("mermas_proc_manual", {})
+    try:
+        pid_k = str(pid)
+        qty_k = str(int(qty))
+        if isinstance(d, dict):
+            if pid_k in d and isinstance(d.get(pid_k), dict):
+                sub = d[pid_k]
+                return int(sub.get(qty_k, sub.get(int(qty), default)))
+            if pid in d and isinstance(d.get(pid), dict):
+                sub = d[pid]
+                return int(sub.get(qty_k, sub.get(int(qty), default)))
+            # legacy
+            return int(d.get(qty_k, d.get(int(qty), default)))
+    except Exception:
+        pass
+    return int(default)
+
+
+def _ss_setdefault_merma_proc(pid: int, qty: int, value: int) -> None:
+    d = st.session_state.get("mermas_proc_manual", {})
+    if not isinstance(d, dict):
+        d = {}
+        st.session_state.mermas_proc_manual = d
+    pid_k = str(pid)
+    qty_k = str(int(qty))
+    if pid_k not in d or not isinstance(d.get(pid_k), dict):
+        d[pid_k] = {}
+    sub = d[pid_k]
+    if qty_k not in sub and int(qty) not in sub:
+        sub[qty_k] = int(value)
+
+
+def _ss_get_merma_imp(pid: int, qty: int, lado: str, default: int = 0) -> int:
+    """Merma de impresión OFFSET por forma+cantidad+lado ('cara'/'dorso').
+    Compatibilidad:
+    - Nuevo: mermas_imp_manual = {pid: {qty: {'cara': x, 'dorso': y}}}
+    - Intermedio: {pid: {qty: x}} -> aplica a ambos lados
+    - Antiguo: {qty: x} -> aplica a ambos lados
+    """
+    d = st.session_state.get("mermas_imp_manual", {})
+    try:
+        pid_k = str(pid)
+        qty_k = str(int(qty))
+        if isinstance(d, dict):
+            # nuevo
+            if pid_k in d and isinstance(d.get(pid_k), dict):
+                sub = d[pid_k]
+                v = sub.get(qty_k, sub.get(int(qty), None))
+                if isinstance(v, dict):
+                    return int(v.get(lado, default))
+                if v is not None:
+                    return int(v)
+            if pid in d and isinstance(d.get(pid), dict):
+                sub = d[pid]
+                v = sub.get(qty_k, sub.get(int(qty), None))
+                if isinstance(v, dict):
+                    return int(v.get(lado, default))
+                if v is not None:
+                    return int(v)
+            # legacy
+            v = d.get(qty_k, d.get(int(qty), None))
+            if isinstance(v, dict):
+                return int(v.get(lado, default))
+            if v is not None:
+                return int(v)
+    except Exception:
+        pass
+    return int(default)
+
+
+def _ss_setdefault_merma_imp(pid: int, qty: int, lado: str, value: int) -> None:
+    d = st.session_state.get("mermas_imp_manual", {})
+    if not isinstance(d, dict):
+        d = {}
+        st.session_state.mermas_imp_manual = d
+    pid_k = str(pid)
+    qty_k = str(int(qty))
+    if pid_k not in d or not isinstance(d.get(pid_k), dict):
+        d[pid_k] = {}
+    sub = d[pid_k]
+    if qty_k not in sub and int(qty) not in sub:
+        sub[qty_k] = {"cara": 0, "dorso": 0}
+    v = sub.get(qty_k, sub.get(int(qty), None))
+    if isinstance(v, dict):
+        if lado not in v:
+            v[lado] = int(value)
+        elif v[lado] in (None, ""):
+            v[lado] = int(value)
     else:
-        merma_proc, merma_imp = int(n * 0.03), 300
-
-    return min(int(merma_proc), 150), int(merma_imp)
-
-
+        # si era un entero, lo convertimos a dict para poder diferenciar lados
+        sub[qty_k] = {"cara": int(value), "dorso": int(value)}
 def parse_cantidades(s: str):
     if not s:
         return []
@@ -950,13 +1098,48 @@ def normalizar_import(di: dict):
         st.session_state.lista_extras_grabados = di["extras"]
 
     if isinstance(di.get("mermas_imp", None), dict):
-        st.session_state.mermas_imp_manual = {int(k): int(v) for k, v in di["mermas_imp"].items()}
+        # Compatibilidad:
+        # - Nuevo: {pid: {qty: {'cara':x,'dorso':y}}}
+        # - Antiguo: {qty: x}
+        mi = di.get("mermas_imp", {})
+        if mi and all(isinstance(v, dict) for v in mi.values()):
+            # asumimos nuevo por forma
+            out = {}
+            for pid_k, sub in mi.items():
+                if not isinstance(sub, dict):
+                    continue
+                out[str(pid_k)] = {}
+                for qk, vv in sub.items():
+                    if isinstance(vv, dict):
+                        out[str(pid_k)][str(qk)] = {
+                            "cara": int(vv.get("cara", 0)),
+                            "dorso": int(vv.get("dorso", 0)),
+                        }
+                    else:
+                        # valor único -> ambos lados
+                        out[str(pid_k)][str(qk)] = {"cara": int(vv), "dorso": int(vv)}
+            st.session_state.mermas_imp_manual = out
+        else:
+            # legacy por cantidad
+            st.session_state.mermas_imp_manual = {int(k): int(v) for k, v in mi.items() if str(k).isdigit()}
+
     if isinstance(di.get("mermas_imp_digital", None), dict):
         st.session_state.mermas_imp_digital_manual = {int(k): int(v) for k, v in di["mermas_imp_digital"].items()}
     if isinstance(di.get("mermas_proc", None), dict):
-        st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in di["mermas_proc"].items()}
-
-    # Impresiones por cantidad (multi-tirada) - opcional en JSON
+        # Compatibilidad:
+        # - Nuevo: {pid: {qty: val}}
+        # - Antiguo: {qty: val}
+        mp = di.get("mermas_proc", {})
+        if mp and all(isinstance(v, dict) for v in mp.values()):
+            out = {}
+            for pid_k, sub in mp.items():
+                if not isinstance(sub, dict):
+                    continue
+                out[str(pid_k)] = {str(qk): int(vv) for qk, vv in sub.items()}
+            st.session_state.mermas_proc_manual = out
+        else:
+            st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in mp.items() if str(k).isdigit()}
+# Impresiones por cantidad (multi-tirada) - opcional en JSON
     if isinstance(di.get("impresiones_by_qty", None), dict):
         cfg_new = {}
         for k, v in di["impresiones_by_qty"].items():
@@ -1442,24 +1625,41 @@ with tab_calculadora:
     st.divider()
 
     if lista_cants:
-        # Mermas por defecto:
-        # - 'mermas_proc_manual' y 'mermas_imp_manual' se consideran la referencia "normal" (offset / general)
-        # - 'mermas_imp_digital_manual' es específica para impresión digital
+        # Mermas por defecto (por FORMA + cantidad):
+        # - Procesos: tabla aplicada a hojas netas = uds * (pliegos/ud)
+        # - Impresión offset: 100 + 50*(pasadas-1) con pasadas = ceil((tintas + barniz)/4)
+        # Nota: siempre es editable en 'Gestión de Mermas'.
+        piezas = st.session_state.get("piezas_dict", {})
+        if isinstance(piezas, dict):
+            for pid, p in piezas.items():
+                pl = float(p.get("pliegos", 1.0))
+                # Defaults impresión (por lado) según configuración de la forma
+                im_c = p.get("im", "No")
+                nt_c = int(p.get("nt", 4))
+                ba_c = bool(p.get("ba", False))
+
+                im_d = p.get("im_d", "No")
+                nt_d = int(p.get("nt_d", 4))
+                ba_d = bool(p.get("ba_d", False))
+
+                for q in lista_cants:
+                    mp_off, _mi_ign = calcular_mermas_estandar(q, pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
+                    _ss_setdefault_merma_proc(int(pid), int(q), int(mp_off))
+
+                    # Merma impresión por lado (solo OFFSET)
+                    if im_c == "Offset":
+                        mi_c = _merma_impresion_offset_por_pasadas(nt_c, ba_c)
+                        _ss_setdefault_merma_imp(int(pid), int(q), "cara", int(mi_c))
+                    if im_d == "Offset":
+                        mi_d = _merma_impresion_offset_por_pasadas(nt_d, ba_d)
+                        _ss_setdefault_merma_imp(int(pid), int(q), "dorso", int(mi_d))
+
+        # Digital (global por cantidad, como hasta ahora)
         for q in lista_cants:
-            mp_off, mi_off = calcular_mermas_estandar(q, es_digital=False)
-            _mp_dig, mi_dig = calcular_mermas_estandar(q, es_digital=True)
-
-            if q not in st.session_state.mermas_proc_manual:
-                st.session_state.mermas_proc_manual[q] = mp_off
-
-            if q not in st.session_state.mermas_imp_manual:
-                st.session_state.mermas_imp_manual[q] = mi_off
-
-            if q not in st.session_state.mermas_imp_digital_manual:
-                st.session_state.mermas_imp_digital_manual[q] = mi_dig
-
-
-    # -----------------------------------------------------
+            _mp_dig, mi_dig = calcular_mermas_estandar(q, pliegos_por_ud=1.0, es_digital=True)
+            if q not in st.session_state.mermas_imp_digital_manual and str(q) not in st.session_state.mermas_imp_digital_manual:
+                st.session_state.mermas_imp_digital_manual[q] = int(mi_dig)
+# -----------------------------------------------------
     # PASO 2: TÉCNICO
     # -----------------------------------------------------
     st.header("Paso 2 · Datos técnicos")
@@ -1937,34 +2137,76 @@ with tab_calculadora:
 
     st.divider()
     st.subheader("⚙️ 5. Gestión de Mermas (auto-relleno)")
-    if lista_cants:
+    if not lista_cants:
+        st.warning("Define cantidades en Paso 1.")
+    else:
+        # Digital se mantiene global por cantidad (como estaba)
+        st.markdown("**Impresión DIGITAL (global por cantidad)**")
         for q in lista_cants:
-            c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
+            c1, c2 = st.columns([1, 3])
             c1.markdown(f"**{q} uds**")
-            st.session_state.mermas_imp_manual[q] = int(
-                c2.number_input(
-                    "Arranque impresión OFFSET (hojas)",
-                    value=int(st.session_state.mermas_imp_manual.get(q, 0)),
-                    key=f"mi_{q}",
-                )
-            )
             st.session_state.mermas_imp_digital_manual[q] = int(
-                c3.number_input(
+                c2.number_input(
                     "Arranque impresión DIGITAL (hojas)",
                     value=int(st.session_state.mermas_imp_digital_manual.get(q, 0)),
                     key=f"mid_{q}",
                 )
             )
-            st.session_state.mermas_proc_manual[q] = int(
-                c4.number_input(
-                    "Rodaje proceso (hojas)",
-                    value=int(st.session_state.mermas_proc_manual.get(q, 0)),
-                    key=f"mp_{q}",
-                )
-            )
-    else:
-        st.warning("Define cantidades en Paso 1.")
 
+        st.markdown("**OFFSET / Procesos (por Forma y cantidad)**")
+        piezas = st.session_state.get("piezas_dict", {})
+        if not isinstance(piezas, dict) or not piezas:
+            st.info("No hay formas definidas.")
+        else:
+            for pid, p in piezas.items():
+                nombre = p.get("nombre", f"Forma {pid}")
+                with st.expander(f"🧾 Mermas - {nombre}", expanded=False):
+                    # Cabecera
+                    for q in lista_cants:
+                        pl = float(p.get("pliegos", 1.0))
+                        mp_def, _ = calcular_mermas_estandar(int(q), pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
+
+                        # Defaults impresión por lado
+                        mi_def_c = _merma_impresion_offset_por_pasadas(int(p.get("nt", 4)), bool(p.get("ba", False))) if p.get("im", "No") == "Offset" else 0
+                        mi_def_d = _merma_impresion_offset_por_pasadas(int(p.get("nt_d", 4)), bool(p.get("ba_d", False))) if p.get("im_d", "No") == "Offset" else 0
+
+                        c0, c1, c2, c3 = st.columns([1, 2, 2, 2])
+                        c0.markdown(f"**{q} uds**")
+
+                        # Proceso
+                        v_proc = int(_ss_get_merma_proc(int(pid), int(q), int(mp_def)))
+                        # Guardamos la edición (si cambia)
+                        st.session_state.mermas_proc_manual.setdefault(str(pid), {})
+                        st.session_state.mermas_proc_manual[str(pid)][str(int(q))] = int(
+                            c1.number_input(
+                                "Rodaje proceso (hojas)",
+                                value=v_proc,
+                                key=f"mp_{pid}_{q}",
+                            )
+                        )
+
+                        # Impresión cara (OFFSET)
+                        v_c = int(_ss_get_merma_imp(int(pid), int(q), "cara", int(mi_def_c)))
+                        st.session_state.mermas_imp_manual.setdefault(str(pid), {})
+                        if str(int(q)) not in st.session_state.mermas_imp_manual[str(pid)] or not isinstance(st.session_state.mermas_imp_manual[str(pid)][str(int(q))], dict):
+                            st.session_state.mermas_imp_manual[str(pid)][str(int(q))] = {"cara": v_c, "dorso": int(_ss_get_merma_imp(int(pid), int(q), "dorso", int(mi_def_d)))}
+                        st.session_state.mermas_imp_manual[str(pid)][str(int(q))]["cara"] = int(
+                            c2.number_input(
+                                "Merma impresión OFFSET (cara)",
+                                value=v_c,
+                                key=f"mi_c_{pid}_{q}",
+                            )
+                        )
+
+                        # Impresión dorso (OFFSET)
+                        v_d = int(_ss_get_merma_imp(int(pid), int(q), "dorso", int(mi_def_d)))
+                        st.session_state.mermas_imp_manual[str(pid)][str(int(q))]["dorso"] = int(
+                            c3.number_input(
+                                "Merma impresión OFFSET (dorso)",
+                                value=v_d,
+                                key=f"mi_d_{pid}_{q}",
+                            )
+                        )
 # =========================================================
 # MOTOR DE CÁLCULO + DESGLOSE + COMPRAS
 # =========================================================
@@ -1978,15 +2220,13 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
 
     for q_n in lista_cants:
         # Mermas:
-        # - Offset/general: mermas_imp_manual
         # - Digital: mermas_imp_digital_manual (fallback a regla digital si no existe)
-        merma_imp_offset_hojas = int(st.session_state.mermas_imp_manual.get(q_n, 0))
+        # - Procesos e impresión OFFSET: por forma+cantidad (ver _ss_get_* en helpers)
         merma_imp_digital_hojas = int(
             st.session_state.mermas_imp_digital_manual.get(
                 q_n, calcular_mermas_estandar(q_n, es_digital=True)[1]
             )
         )
-        merma_proc_hojas = int(st.session_state.mermas_proc_manual.get(q_n, 0))
 
         coste_f = 0.0
         det_f = []
@@ -2034,8 +2274,11 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             partes_imp_units = obtener_partes_impresion_por_formato(int(pid), int(q_n))
             n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
 
-            nb = q_n * float(p.get("pliegos", 1.0))
-            hp_produccion = nb + merma_proc_hojas
+            pl = float(p.get("pliegos", 1.0))
+            nb = q_n * pl
+            mp_def, _mi_ign = calcular_mermas_estandar(q_n, pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
+            merma_proc_hojas = _ss_get_merma_proc(int(pid), int(q_n), int(mp_def))
+            hp_produccion = nb + int(merma_proc_hojas)
 
             im_cara = p.get("im", "No")
             im_dorso = p.get("im_d", "No")
@@ -2046,13 +2289,25 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             # 👇 Merma de impresión depende del tipo (Offset vs Digital)
             # Multi-tirada: la merma extra de cartoncillo se cuenta 1 vez por impresión.
             if imprime_cara:
-                merma_cara = merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas
+                if im_cara == "Digital":
+                    merma_cara = int(merma_imp_digital_hojas)
+                elif im_cara == "Offset":
+                    mi_def_c = _merma_impresion_offset_por_pasadas(int(p.get("nt", 4)), bool(p.get("ba", False)))
+                    merma_cara = int(_ss_get_merma_imp(int(pid), int(q_n), "cara", int(mi_def_c)))
+                else:
+                    merma_cara = 0
                 hp_papel_f = hp_produccion + (merma_cara * int(n_impresiones_qty))
             else:
                 hp_papel_f = hp_produccion
 
             if imprime_dorso:
-                merma_d = merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas
+                if im_dorso == "Digital":
+                    merma_d = int(merma_imp_digital_hojas)
+                elif im_dorso == "Offset":
+                    mi_def_d = _merma_impresion_offset_por_pasadas(int(p.get("nt_d", 4)), bool(p.get("ba_d", False)))
+                    merma_d = int(_ss_get_merma_imp(int(pid), int(q_n), "dorso", int(mi_def_d)))
+                else:
+                    merma_d = 0
                 hp_papel_d = hp_produccion + (merma_d * int(n_impresiones_qty))
             else:
                 hp_papel_d = hp_produccion
@@ -2364,7 +2619,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             "det_piezas": det_f,
             "embalajes": emb_det,
             "externos": ext_det,
-            "mermas": {"impresion_offset_hojas": merma_imp_offset_hojas, "impresion_digital_hojas": merma_imp_digital_hojas, "proceso_hojas": merma_proc_hojas},
+            "mermas": {"impresion_digital_hojas": merma_imp_digital_hojas, "procesos_por_forma": deepcopy(st.session_state.get("mermas_proc_manual", {})), "impresion_offset_por_forma": deepcopy(st.session_state.get("mermas_imp_manual", {}))},
             "debug": debug_log
         }
 
@@ -2411,10 +2666,22 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             ]
         }
 
-safe_brf = re.sub(r'[\\/*?:"<>|]', "", st.session_state.brf or "Ref").replace(" ", "_")
-safe_cli = re.sub(r'[\\/*?:"<>|]', "", st.session_state.cli or "Cli").replace(" ", "_")
-safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
-st.session_state._export_filename = f"{safe_brf}_{safe_cli}_{safe_desc}.json"
+safe_brf = re.sub(r'[\/*?:"<>|]', "", st.session_state.brf or "Ref").replace(" ", "_")
+safe_cli = re.sub(r'[\/*?:"<>|]', "", st.session_state.cli or "Cli").replace(" ", "_")
+safe_desc = re.sub(r'[\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
+# Incluir nº(s) de comercial en el nombre de archivo (si están informados)
+c1_num = _parse_comercial_num(st.session_state.get('comercial_1', ''))
+c2_num = _parse_comercial_num(st.session_state.get('comercial_2', ''))
+com_parts = []
+if c1_num is not None:
+    com_parts.append(f"C{c1_num}")
+if c2_num is not None:
+    com_parts.append(f"C{c2_num}")
+com_tag = "_".join(com_parts)
+if com_tag:
+    st.session_state._export_filename = f"{safe_brf}_{com_tag}_{safe_cli}_{safe_desc}.json"
+else:
+    st.session_state._export_filename = f"{safe_brf}_{safe_cli}_{safe_desc}.json"
 
 resumen_compra_to_export = compras_legible if isinstance(compras_legible, dict) and len(compras_legible) > 0 else st.session_state.get("_imported_compras_legible")
 resumen_costes_to_export = resumen_costes_export if isinstance(resumen_costes_export, dict) and len(resumen_costes_export) > 0 else st.session_state.get("_imported_resumen_costes")
@@ -2642,8 +2909,20 @@ if modo_comercial and res_final:
         opc_html += "</table></div>"
 
     oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, (ext_html + emb_opts_html + opc_html), tabla)
-    safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
-    fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
+    safe_desc = re.sub(r'[\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
+    # Incluir nº(s) de comercial en el nombre de archivo (si están informados)
+    c1_num = _parse_comercial_num(st.session_state.get('comercial_1', ''))
+    c2_num = _parse_comercial_num(st.session_state.get('comercial_2', ''))
+    com_parts = []
+    if c1_num is not None:
+        com_parts.append(f"C{c1_num}")
+    if c2_num is not None:
+        com_parts.append(f"C{c2_num}")
+    com_tag = "_".join(com_parts)
+    if com_tag:
+        fname_html = f"OFERTA_{safe_brf}_{com_tag}_{safe_cli}_{safe_desc}.html"
+    else:
+        fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
 
     # Acceso rápido también en el panel lateral (sin quitar el botón de arriba)
     with st.sidebar:
