@@ -7,6 +7,68 @@ from copy import deepcopy
 import hashlib
 
 # =========================================================
+# Helpers (mínimo)
+# =========================================================
+MARGEN_NORMAL = 2.2
+MARGEN_ESPECIAL = 2.1
+COMERCIALES_MARGEN_ESPECIAL = {52, 47, 46, 62}
+CLIENTES_MARGEN_ESPECIAL = {"PLANETA", "ILIDIA"}
+
+
+def _parse_comercial_num(value: str):
+    """Devuelve el número de comercial si es interpretable, si no None."""
+    if value is None:
+        return None
+    s = str(value).strip()
+    if not s:
+        return None
+    m = re.search(r"(\d+)", s)
+    if not m:
+        return None
+    try:
+        return int(m.group(1))
+    except Exception:
+        return None
+
+
+def _cliente_tiene_margen_especial(cliente: str) -> bool:
+    if cliente is None:
+        return False
+    c = str(cliente).upper()
+    return any(k in c for k in CLIENTES_MARGEN_ESPECIAL)
+
+
+def _margen_por_comercial(n) -> float:
+    if n is None:
+        return MARGEN_NORMAL
+    return MARGEN_ESPECIAL if n in COMERCIALES_MARGEN_ESPECIAL else MARGEN_NORMAL
+
+
+def _margen_sugerido(com1: str, com2: str, cliente: str) -> float:
+    # Si el cliente es especial, manda 2.1.
+    if _cliente_tiene_margen_especial(cliente):
+        return MARGEN_ESPECIAL
+
+    n1 = _parse_comercial_num(com1)
+    n2 = _parse_comercial_num(com2)
+    return min(_margen_por_comercial(n1), _margen_por_comercial(n2))
+
+
+def _aplicar_margen_auto_si_procede() -> None:
+    """Actualiza st.session_state.margen solo si el usuario no lo ha sobreescrito."""
+    sugerido = float(_margen_sugerido(st.session_state.comercial_1, st.session_state.comercial_2, st.session_state.cli))
+    actual = float(st.session_state.margen)
+    last_auto = float(st.session_state.last_auto_margen)
+
+    # Si el margen actual coincide con el último auto, interpretamos que el usuario no lo tocó.
+    if (actual == last_auto) and (sugerido != actual):
+        st.session_state.margen = sugerido
+        st.session_state.last_auto_margen = sugerido
+    else:
+        # Aun así guardamos el sugerido para la próxima comparación.
+        st.session_state.last_auto_margen = sugerido
+
+# =========================================================
 # 1) CONFIGURACIÓN
 # =========================================================
 st.set_page_config(page_title="MAINSA ADMIN V44", layout="wide")
@@ -477,6 +539,10 @@ if "arm_t_input" not in st.session_state: st.session_state.arm_t_input = 0.0
 if "dif_ud" not in st.session_state: st.session_state.dif_ud = 0.091
 if "imp_fijo_pvp" not in st.session_state: st.session_state.imp_fijo_pvp = 500.0
 if "margen" not in st.session_state: st.session_state.margen = 2.2
+if "comercial_1" not in st.session_state: st.session_state.comercial_1 = ""
+if "comercial_2" not in st.session_state: st.session_state.comercial_2 = ""
+if "last_auto_margen" not in st.session_state: st.session_state.last_auto_margen = float(st.session_state.margen)
+
 
 if "descuento_procesos" not in st.session_state: st.session_state.descuento_procesos = 0.0
 if "margen_extras" not in st.session_state: st.session_state.margen_extras = 1.4
@@ -1267,7 +1333,10 @@ with tab_calculadora:
     cA, cB, cC = st.columns([2, 2, 3])
     with cA:
         st.text_input("Nº Briefing", key="brf")
+        st.text_input("Nº Comercial 1", key="comercial_1")
+        st.text_input("Nº Comercial 2 (opcional)", key="comercial_2")
         st.text_input("Cliente", key="cli")
+        _aplicar_margen_auto_si_procede()
     with cB:
         st.text_input("Descripción", key="desc")
         st.text_input("Cantidades (ej: 500, 1000)", key="cants_str_saved")
@@ -1295,7 +1364,7 @@ with tab_calculadora:
     seg_arm_total = (arm_t_input * 60) if unidad_t == "Minutos" else arm_t_input
 
     with st.expander("💰 Finanzas", expanded=False):
-        st.selectbox("Dificultad (€/ud)", [0.02, 0.061, 0.091], index=2, key="dif_ud")
+        st.number_input("Dificultad (€/ud)", min_value=0.0, step=0.001, value=float(st.session_state.dif_ud), key="dif_ud")
         st.number_input("Fijo PVP (€)", value=float(st.session_state.imp_fijo_pvp), key="imp_fijo_pvp")
         st.number_input("Multiplicador", step=0.1, value=float(st.session_state.margen), key="margen")
 
