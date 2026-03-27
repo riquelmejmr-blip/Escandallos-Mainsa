@@ -266,18 +266,21 @@ def _merma_impresion_offset_por_pasadas(n_tintas: int, barniz: bool) -> int:
     """Merma de impresión OFFSET por pasadas.
 
     Regla:
-    - Base: 100 hojas.
+    - Base: 100 hojas (arranque mínimo).
     - Máquina 4 cuerpos: nº pasadas = ceil((tintas + (barniz?1:0)) / 4).
     - Merma = 100 + 50*(pasadas-1)
-    Ejemplos:
-      4 tintas -> 1 pasada -> 100
-      5 tintas -> 2 pasadas -> 150
-      6 tintas + barniz (7 aplicaciones) -> 2 pasadas -> 150
-      8 tintas + barniz (9 aplicaciones) -> 3 pasadas -> 200
+
+    Nota importante:
+    - Si por UI/JSON llega n_tintas vacío/0, igualmente aplicamos el mínimo de 100 hojas.
     """
-    apps = max(0, int(n_tintas)) + (1 if bool(barniz) else 0)
-    if apps <= 0:
-        return 0
+    # Robustez ante valores vacíos/None/strings
+    try:
+        tintas = int(n_tintas)
+    except Exception:
+        tintas = 0
+
+    tintas = max(0, tintas)
+    apps = max(1, tintas) + (1 if bool(barniz) else 0)  # mínimo 1 aplicación para garantizar arranque
     pasadas = int(math.ceil(apps / 4.0))
     return int(100 + 50 * max(0, pasadas - 1))
 
