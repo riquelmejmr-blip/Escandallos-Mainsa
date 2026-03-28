@@ -3328,6 +3328,212 @@ with tab_auditoria:
                     "> Nota: si has editado manualmente una merma, la app ya no la sobreescribe automáticamente."
                 )
 
+        # =========================================================
+        # Costes de materiales y procesos (con fórmulas matemáticas)
+        # =========================================================
+        comp_aud = compras_legible.get(q_sel, {}) if isinstance(compras_legible, dict) else {}
+        if comp_aud:
+            with st.expander("💶 Costes de materiales y procesos (con fórmulas)", expanded=False):
+                # 1) Totales por categoría (lo que realmente se está usando en el cálculo)
+                st.markdown("### Totales por categoría (esta cantidad)")
+                materiales_tot = (resumen_costes_export.get(q_sel, {}).get("materiales", {}) if isinstance(resumen_costes_export, dict) else {}) or {}
+                procesos_tot = (resumen_costes_export.get(q_sel, {}).get("procesos", {}) if isinstance(resumen_costes_export, dict) else {}) or {}
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Materiales**")
+                    if materiales_tot:
+                        st.dataframe(pd.DataFrame([materiales_tot]), use_container_width=True)
+                    else:
+                        st.caption("Sin materiales.")
+                with c2:
+                    st.markdown("**Procesos**")
+                    if procesos_tot:
+                        st.dataframe(pd.DataFrame([procesos_tot]), use_container_width=True)
+                    else:
+                        st.caption("Sin procesos.")
+
+                st.markdown("### Fórmulas aplicadas por proceso/material")
+                st.markdown("""- **Cartoncillo (cara/dorso)**:  
+  `coste = hp_papel * m2_papel * (gramaje_g_m2/1000) * precio_kg * f_cart`  
+  donde `hp_papel = hp_produccion + (merma_impresión * nº_impresiones)`
+
+- **Contracolado**:  
+  `coste = hp_produccion * m2_papel * peg_rate * capas_contracolado`
+
+- **Impresión DIGITAL** (por tirada):  
+  `coste = (nb_run + merma_digital) * m2_papel * 6.5`  
+  y si hay laminado digital: `+ (nb_run + merma_digital) * m2_papel * precio_laminado_digital`
+
+- **Impresión OFFSET** (por tirada):  
+  `coste = coste_offset_por_tinta(nb_run) * (tintas + barniz)`
+
+- **FR24** (si está activado):  
+  `extra_FR24 = (m2_impresos_totales) * eur_m2`
+
+- **Peliculado (OFFSET)**:  
+  `coste = hp_produccion * m2_papel * precio_peliculado * f_narba`
+
+- **Corte / Troquelado**:  
+  `coste = arranque + (hp_produccion * tiro)`  (si se cobra arreglo)
+
+- **Corte / Plotter**:  
+  `coste = hp_produccion * precio_hoja_plotter`
+
+> En Auditoría se muestran también las **sustituciones numéricas** para cada forma.
+""")
+                # 2) Detalle por forma con sustitución numérica (lo que ayuda a validar matemáticamente)
+                piezas_aud = st.session_state.get("piezas_dict", {}) or {}
+                lista_det = comp_aud.get("Detalle piezas", []) or []
+
+                # Mapear costes ya calculados por nombre de pieza (para comparar)
+                map_det = {}
+                for d in lista_det:
+                    try:
+                        map_det[str(d.get("Pieza",""))] = d
+                    except Exception:
+                        pass
+
+                def _ceil_int(x: float) -> int:
+                    try:
+                        return int(math.ceil(float(x)))
+                    except Exception:
+                        return int(x) if str(x).isdigit() else 0
+
+                for pid, p in piezas_aud.items():
+                    nombre = p.get("nombre", f"Forma {pid}")
+                    det_row = map_det.get(str(nombre), {})
+
+                    with st.expander(f"🧩 {nombre} · detalle matemático", expanded=False):
+                        # Datos base
+                        try:
+                            pl = float(p.get("pliegos", 1.0))
+                        except Exception:
+                            pl = 1.0
+                        uds = int(q_sel)
+                        nb = _ceil_int(uds * pl)  # pliegos netos reales
+
+                        # Mermas (proceso + impresión por lado) usando los mismos helpers que el motor
+                        mp_def = int(_tabla_merma_procesos_offset(int(nb)))
+                        mp_final = int(_ss_get_merma_proc(int(pid), int(q_sel), int(mp_def)))
+                        hp_produccion = int(nb) + int(mp_final)
+
+                        partes_imp_units = obtener_partes_impresion_por_formato(int(pid), int(q_sel))
+                        n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
+
+                        im_c = str(p.get("im", "No"))
+                        im_d = str(p.get("im_d", "No"))
+
+                        # Merma impresión (cara)
+                        merma_cara = 0
+                        if im_c == "Digital":
+                            merma_cara = int(merma_imp_digital_hojas)
+                        elif im_c == "Offset":
+                            mi_def_c = int(_merma_impresion_offset_por_pasadas(int(p.get("nt", 0)), bool(p.get("ba", False))))
+                            mi_final_c = int(_ss_get_merma_imp(int(pid), int(q_sel), "cara", int(mi_def_c)))
+                            merma_cara = mi_final_c
+                        # Merma impresión (dorso)
+                        merma_dorso = 0
+                        if im_d == "Digital":
+                            merma_dorso = int(merma_imp_digital_hojas)
+                        elif im_d == "Offset":
+                            mi_def_d = int(_merma_impresion_offset_por_pasadas(int(p.get("nt_d", 0)), bool(p.get("ba_d", False))))
+                            mi_final_d = int(_ss_get_merma_imp(int(pid), int(q_sel), "dorso", int(mi_def_d)))
+                            merma_dorso = mi_final_d
+
+                        hp_papel_f = hp_produccion + int(merma_cara) * int(n_impresiones_qty)
+                        hp_papel_d = hp_produccion + int(merma_dorso) * int(n_impresiones_qty)
+
+                        # Superficie (m2) del papel
+                        try:
+                            w = float(p.get("w", 0.0))
+                            h = float(p.get("h", 0.0))
+                            m2_papel = (w * h) / 1_000_000.0 if (w > 0 and h > 0) else 0.0
+                        except Exception:
+                            m2_papel = 0.0
+
+                        st.markdown("**Pliegos netos reales**")
+                        st.code(f"nb = ceil(uds * pliegos_por_ud) = ceil({uds} * {pl}) = {nb}")
+
+                        st.markdown("**Merma de procesos (tabla + final editable)**")
+                        st.code(
+                            f"mp_def = tabla(nb={nb}) = {mp_def}\n"
+                            f"mp_final = {mp_final}\n"
+                            f"hp_produccion = nb + mp_final = {nb} + {mp_final} = {hp_produccion}"
+                        )
+
+                        st.markdown("**Mermas de impresión y papel (por lado)**")
+                        st.code(
+                            f"n_impresiones = {n_impresiones_qty}\n"
+                            f"hp_papel_cara = hp_produccion + merma_cara*n_impresiones = {hp_produccion} + {merma_cara}*{n_impresiones_qty} = {hp_papel_f}\n"
+                            f"hp_papel_dorso = hp_produccion + merma_dorso*n_impresiones = {hp_produccion} + {merma_dorso}*{n_impresiones_qty} = {hp_papel_d}"
+                        )
+
+                        st.markdown("**Costes (resultado + fórmula con sustitución)**")
+
+                        # Cartoncillo
+                        try:
+                            pf = p.get("pf", "Ninguno")
+                            gf = float(p.get("gf", 0.0))
+                            precio_pf = float(db["cartoncillo"][pf]["precio_kg"]) if (pf != "Ninguno") else 0.0
+                        except Exception:
+                            pf, gf, precio_pf = "Ninguno", 0.0, 0.0
+
+                        try:
+                            pd_ = p.get("pd", "Ninguno")
+                            gd = float(p.get("gd", 0.0))
+                            precio_pd = float(db["cartoncillo"][pd_]["precio_kg"]) if (pd_ != "Ninguno") else 0.0
+                        except Exception:
+                            pd_, gd, precio_pd = "Ninguno", 0.0, 0.0
+
+                        if pf != "Ninguno" and m2_papel > 0 and gf > 0 and precio_pf > 0:
+                            calc = hp_papel_f * m2_papel * (gf/1000.0) * precio_pf * f_cart
+                            st.write(f"Cartoncillo Cara: {float(det_row.get('Cartoncillo Cara', 0.0)):.4f} €")
+                            st.code(f"= {hp_papel_f} * {m2_papel:.6f} * ({gf}/1000) * {precio_pf} * {f_cart} = {calc:.4f}")
+                        if pd_ != "Ninguno" and m2_papel > 0 and gd > 0 and precio_pd > 0:
+                            calc = hp_papel_d * m2_papel * (gd/1000.0) * precio_pd * f_cart
+                            st.write(f"Cartoncillo Dorso: {float(det_row.get('Cartoncillo Dorso', 0.0)):.4f} €")
+                            st.code(f"= {hp_papel_d} * {m2_papel:.6f} * ({gd}/1000) * {precio_pd} * {f_cart} = {calc:.4f}")
+
+                        # Contracolado (si aplica)
+                        try:
+                            capas_contracolado = int(p.get("capas", 0))
+                        except Exception:
+                            capas_contracolado = 0
+                        try:
+                            peg_rate = float(db["planchas"]["Microcanal / Canal 3"]["peg"]) * f_narba
+                        except Exception:
+                            peg_rate = 0.0
+                        if capas_contracolado > 0 and m2_papel > 0 and peg_rate > 0:
+                            calc = hp_produccion * m2_papel * peg_rate * capas_contracolado
+                            st.write(f"Contracolado: {float(det_row.get('Contracolado', 0.0)):.4f} €")
+                            st.code(f"= {hp_produccion} * {m2_papel:.6f} * {peg_rate:.6f} * {capas_contracolado} = {calc:.4f}")
+
+                        # Impresión (explicación)
+                        st.write(f"Impresión (total): {float(det_row.get('Impresión', 0.0)):.4f} €")
+                        st.markdown("- Cara y dorso se calculan **por tiradas** si hay 'varias impresiones'.")
+                        st.markdown("**Digital**: `(nb_run + merma_digital) * m2_papel * 6.5`")
+                        st.markdown("**Offset**: `coste_offset_por_tinta(nb_run) * (tintas + barniz)`")
+                        if bool(p.get("fr24", False)):
+                            try:
+                                fr24_rate = float(p.get("fr24_rate", 0.05))
+                            except Exception:
+                                fr24_rate = 0.05
+                            st.markdown(f"**FR24**: `m2_impresos_totales * {fr24_rate}`")
+
+                        # Peliculado
+                        st.write(f"Peliculado: {float(det_row.get('Peliculado', 0.0)):.4f} €")
+                        st.markdown("""**Offset**: `hp_produccion * m2_papel * precio_peliculado * f_narba`
+**Digital** (si aplica): `(nb_run + merma_digital) * m2_papel * precio_laminado_digital`""")
+
+                        # Corte
+                        st.write(f"Corte (Troquel/Plotter): {float(det_row.get('Corte (Troquel/Plotter)', 0.0)):.4f} €")
+                        st.markdown("""**Troquelado**: `arranque + hp_produccion * tiro`
+**Plotter**: `hp_produccion * precio_hoja_plotter`
+**Sin corte**: `0`""")
+
+                        # Subtotal
+                        st.write(f"Subtotal Pieza: {float(det_row.get('Subtotal Pieza', 0.0)):.4f} €")
+
         # Mostrar (si existe) el desglose interno ya calculado para esta cantidad
         if lista_cants_aud and desc_full:
             with st.expander("🧩 Datos internos: desc_full / compras_legible / resumen_costes", expanded=False):
