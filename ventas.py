@@ -417,26 +417,40 @@ def _ss_get_merma_imp(pid: int, qty: int, lado: str, default: int = 0) -> int:
 
 
 def _ss_setdefault_merma_imp(pid: int, qty: int, lado: str, value: int) -> None:
+    """Inicializa merma de impresión si no existe o si está a 0 en proyectos antiguos."""
     d = st.session_state.get("mermas_imp_manual", {})
     if not isinstance(d, dict):
         d = {}
         st.session_state.mermas_imp_manual = d
     pid_k = str(pid)
-    qty_k = str(int(qty))
+    qty_i = int(qty)
+    qty_k = str(qty_i)
     if pid_k not in d or not isinstance(d.get(pid_k), dict):
         d[pid_k] = {}
     sub = d[pid_k]
-    if qty_k not in sub and int(qty) not in sub:
-        sub[qty_k] = {"cara": 0, "dorso": 0}
-    v = sub.get(qty_k, sub.get(int(qty), None))
-    if isinstance(v, dict):
-        if lado not in v:
-            v[lado] = int(value)
-        elif v[lado] in (None, ""):
-            v[lado] = int(value)
-    else:
-        # si era un entero, lo convertimos a dict para poder diferenciar lados
-        sub[qty_k] = {"cara": int(value), "dorso": int(value)}
+
+    # Normalizamos a dict por lado ('cara'/'dorso')
+    v = sub.get(qty_k, sub.get(qty_i, None))
+    if not isinstance(v, dict):
+        # Si no existe o venía como entero legacy, lo convertimos.
+        if v is None:
+            v = {"cara": 0, "dorso": 0}
+        else:
+            try:
+                iv = int(v)
+            except Exception:
+                iv = 0
+            v = {"cara": iv, "dorso": iv}
+        sub[qty_k] = v
+
+    # Si el valor actual está vacío/0/negativo, escribimos el default calculado
+    try:
+        current = v.get(lado, 0)
+        current_i = int(current) if current not in (None, "") else 0
+    except Exception:
+        current_i = 0
+    if current_i <= 0:
+        v[lado] = int(value)
 def parse_cantidades(s: str):
     if not s:
         return []
