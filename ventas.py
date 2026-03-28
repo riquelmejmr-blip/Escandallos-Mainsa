@@ -350,37 +350,67 @@ def _ss_setdefault_merma_proc(pid: int, qty: int, value: int) -> None:
 
 def _ss_get_merma_imp(pid: int, qty: int, lado: str, default: int = 0) -> int:
     """Merma de impresión OFFSET por forma+cantidad+lado ('cara'/'dorso').
+
     Compatibilidad:
     - Nuevo: mermas_imp_manual = {pid: {qty: {'cara': x, 'dorso': y}}}
     - Intermedio: {pid: {qty: x}} -> aplica a ambos lados
     - Antiguo: {qty: x} -> aplica a ambos lados
+
+    Nota:
+    - Para evitar arrastres de proyectos antiguos, si hay un valor guardado <= 0 y el
+      default calculado es > 0, se considera "no inicializado" y se devuelve el default.
+      Además se actualiza en session_state para que el usuario lo vea/editable.
     """
     d = st.session_state.get("mermas_imp_manual", {})
+
+    def _sanitize(v: object) -> int | None:
+        try:
+            iv = int(v)  # type: ignore[arg-type]
+        except Exception:
+            return None
+        # Si está a 0/negativo y tenemos default > 0, lo tratamos como no inicializado
+        if iv <= 0 and int(default) > 0:
+            return None
+        return iv
+
     try:
         pid_k = str(pid)
-        qty_k = str(int(qty))
+        qty_i = int(qty)
+        qty_k = str(qty_i)
+
+        # Intentamos leer en orden: nuevo -> intermedio -> legacy
         if isinstance(d, dict):
-            # nuevo
-            if pid_k in d and isinstance(d.get(pid_k), dict):
-                sub = d[pid_k]
-                v = sub.get(qty_k, sub.get(int(qty), None))
-                if isinstance(v, dict):
-                    return int(v.get(lado, default))
-                if v is not None:
-                    return int(v)
-            if pid in d and isinstance(d.get(pid), dict):
-                sub = d[pid]
-                v = sub.get(qty_k, sub.get(int(qty), None))
-                if isinstance(v, dict):
-                    return int(v.get(lado, default))
-                if v is not None:
-                    return int(v)
-            # legacy
-            v = d.get(qty_k, d.get(int(qty), None))
+            # NUEVO / INTERMEDIO por pid
+            for pk in (pid_k, pid):
+                if pk in d and isinstance(d.get(pk), dict):
+                    sub = d[pk]
+                    v = sub.get(qty_k, sub.get(qty_i, None))
+                    if isinstance(v, dict):
+                        vv = _sanitize(v.get(lado, None))
+                        if vv is not None:
+                            return vv
+                    else:
+                        vv = _sanitize(v)
+                        if vv is not None:
+                            return vv
+
+            # LEGACY global por cantidad
+            v = d.get(qty_k, d.get(qty_i, None))
             if isinstance(v, dict):
-                return int(v.get(lado, default))
-            if v is not None:
-                return int(v)
+                vv = _sanitize(v.get(lado, None))
+                if vv is not None:
+                    return vv
+            else:
+                vv = _sanitize(v)
+                if vv is not None:
+                    return vv
+    except Exception:
+        pass
+
+    # Si llegamos aquí, devolvemos default y, si aplica, lo persistimos para que no quede a 0.
+    try:
+        if int(default) > 0:
+            _ss_setdefault_merma_imp(int(pid), int(qty), str(lado), int(default))
     except Exception:
         pass
     return int(default)
