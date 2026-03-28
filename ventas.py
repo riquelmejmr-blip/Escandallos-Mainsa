@@ -345,6 +345,45 @@ def _ss_autoupdate_merma_imp(pid: int, qty: int, lado: str, new_default: int) ->
         st.session_state.mermas_imp_manual[pid_k][qty_k][lado_k] = int(new_default)
         auto_qty[lado_k] = int(new_default)
 
+
+def _ss_sync_merma_imp_widget(pid: int, qty: int, lado: str, widget_key: str, new_default: int) -> None:
+    """Sincroniza la merma de impresión (cara/dorso) con el default calculado,
+    respetando si el usuario la ha editado manualmente.
+
+    Problema que resuelve:
+    - Streamlit mantiene el valor del widget en session_state. Si el usuario cambia tintas/barniz,
+      queremos recalcular el default (100+50*(pasadas-1)) y reflejarlo automáticamente *solo*
+      si el usuario no había sobreescrito ese campo.
+
+    Criterio de 'no sobreescrito':
+    - El valor actual del widget o el valor almacenado coincide con el último default auto, o es <=0 (legacy).
+    """
+    _ss_autoref_init()
+    pid_k = str(pid)
+    qty_k = str(int(qty))
+    lado_k = str(lado)
+
+    auto_pid = st.session_state.mermas_imp_auto_ref.setdefault(pid_k, {})
+    auto_qty = auto_pid.setdefault(qty_k, {})
+    old_auto = int(auto_qty.get(lado_k, int(new_default)))
+
+    try:
+        cur_widget = int(st.session_state.get(widget_key, 0) or 0)
+    except Exception:
+        cur_widget = 0
+
+    try:
+        cur_stored = int(_ss_get_merma_imp(pid, int(qty), lado_k, int(new_default)) or 0)
+    except Exception:
+        cur_stored = 0
+
+    # Si el usuario no ha tocado, actualizamos a new_default y guardamos la referencia auto
+    if (cur_widget <= 0) or (cur_widget == old_auto) or (cur_stored <= 0) or (cur_stored == old_auto):
+        st.session_state[widget_key] = int(new_default)
+        st.session_state.mermas_imp_manual.setdefault(pid_k, {})
+        st.session_state.mermas_imp_manual[pid_k].setdefault(qty_k, {"cara": 0, "dorso": 0})
+        st.session_state.mermas_imp_manual[pid_k][qty_k][lado_k] = int(new_default)
+        auto_qty[lado_k] = int(new_default)
 # =========================================================
 # MERMAS (SESSION HELPERS - compat JSON antiguo/nuevo)
 # =========================================================
@@ -2301,20 +2340,13 @@ with tab_calculadora:
                         # Cara
                         mi_key_c = f"mi_c_{pid}_{q}"
                         if is_offset_c:
-                            # Default auto según tintas/barniz (y se actualiza si el usuario no lo ha tocado)
-                            _ss_autoupdate_merma_imp(int(pid), int(q), "cara", int(mi_def_c))
+                            # Default auto según tintas/barniz (se recalcula si cambian y el usuario no lo ha tocado)
+                            _ss_sync_merma_imp_widget(int(pid), int(q), "cara", mi_key_c, int(mi_def_c))
                             v_c_auto = int(_ss_get_merma_imp(int(pid), int(q), "cara", int(mi_def_c)))
-
-                            # Streamlit prioriza el estado del widget: si está a 0 o coincide con el último auto, lo re-sincronizamos
-                            _ss_autoref_init()
-                            old_auto = int(st.session_state.mermas_imp_auto_ref.get(str(pid), {}).get(str(int(q)), {}).get("cara", v_c_auto))
-                            try:
-                                cur_widget = int(st.session_state.get(mi_key_c, 0) or 0)
-                            except Exception:
-                                cur_widget = 0
-                            if (cur_widget <= 0) or (cur_widget == old_auto):
+                            if mi_key_c not in st.session_state:
                                 st.session_state[mi_key_c] = int(v_c_auto)
 
+                            v_c = int(st.session_state.get(mi_key_c, int(v_c_auto)))
                             v_c = int(st.session_state.get(mi_key_c, int(v_c_auto)))
                             v_c_in = int(
                                 c2.number_input(
@@ -2339,18 +2371,13 @@ with tab_calculadora:
                         # Dorso
                         mi_key_d = f"mi_d_{pid}_{q}"
                         if is_offset_d:
-                            _ss_autoupdate_merma_imp(int(pid), int(q), "dorso", int(mi_def_d))
+                            # Default auto según tintas/barniz (se recalcula si cambian y el usuario no lo ha tocado)
+                            _ss_sync_merma_imp_widget(int(pid), int(q), "dorso", mi_key_d, int(mi_def_d))
                             v_d_auto = int(_ss_get_merma_imp(int(pid), int(q), "dorso", int(mi_def_d)))
-
-                            _ss_autoref_init()
-                            old_auto = int(st.session_state.mermas_imp_auto_ref.get(str(pid), {}).get(str(int(q)), {}).get("dorso", v_d_auto))
-                            try:
-                                cur_widget = int(st.session_state.get(mi_key_d, 0) or 0)
-                            except Exception:
-                                cur_widget = 0
-                            if (cur_widget <= 0) or (cur_widget == old_auto):
+                            if mi_key_d not in st.session_state:
                                 st.session_state[mi_key_d] = int(v_d_auto)
 
+                            v_d = int(st.session_state.get(mi_key_d, int(v_d_auto)))
                             v_d = int(st.session_state.get(mi_key_d, int(v_d_auto)))
                             v_d_in = int(
                                 c3.number_input(
