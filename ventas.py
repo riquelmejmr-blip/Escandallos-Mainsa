@@ -1532,7 +1532,7 @@ with st.sidebar:
 # =========================================================
 # PESTAÑAS (SIEMPRE ADMIN)
 # =========================================================
-tab_calculadora, tab_costes, tab_debug = st.tabs(["🧮 Calculadora", "💰 Base de Datos", "🔍 Desglose"])
+tab_calculadora, tab_costes, tab_auditoria, tab_debug = st.tabs(["🧮 Calculadora", "💰 Base de Datos", "🧾 Auditoría cálculos", "🔍 Desglose"])
 
 # =========================================================
 # TAB COSTES (siempre visible)
@@ -3163,6 +3163,184 @@ else:
         st.dataframe(df, use_container_width=True)
 
 # =========================================================
+
+# =========================================================
+# TAB AUDITORÍA (SIEMPRE)
+# =========================================================
+with tab_auditoria:
+    st.subheader("🧾 Auditoría de cálculos (trazabilidad)")
+
+    lista_cants_aud = parse_cantidades(st.session_state.cants_str_saved)
+
+    if not lista_cants_aud:
+        st.info("No hay cantidades definidas para auditar.")
+    else:
+        q_sel = st.selectbox("Cantidad a auditar:", lista_cants_aud, key="aud_sel_qty")
+
+        # Resumen inputs principales
+        with st.expander("🔎 Entradas principales del proyecto", expanded=False):
+            st.write(
+                {
+                    "briefing": st.session_state.get("brief", ""),
+                    "comercial_1": st.session_state.get("comercial_1", ""),
+                    "comercial_2": st.session_state.get("comercial_2", ""),
+                    "cliente": st.session_state.get("cli", ""),
+                    "descripcion": st.session_state.get("desc", ""),
+                    "margen": st.session_state.get("margen", None),
+                }
+            )
+
+        piezas = st.session_state.get("piezas_dict", {}) or {}
+        if not isinstance(piezas, dict) or not piezas:
+            st.info("No hay formas definidas.")
+        else:
+            # Tabla: por forma, mostrar matemáticamente hojas netas, mermas y pasadas
+            rows = []
+            for pid, p in piezas.items():
+                try:
+                    pid_i = int(pid)
+                except Exception:
+                    pid_i = int(str(pid)) if str(pid).isdigit() else 0
+
+                nombre = p.get("nombre", f"Forma {pid}")
+
+                # Formato (pliegos por unidad)
+                try:
+                    pliegos_por_ud = float(p.get("pliegos", 1.0))
+                except Exception:
+                    pliegos_por_ud = 1.0
+
+                # Hojas netas reales (ajustadas por formato)
+                try:
+                    hojas_netas = int(math.ceil(float(q_sel) * float(pliegos_por_ud)))
+                except Exception:
+                    hojas_netas = int(q_sel)
+
+                # Merma procesos (tabla) y valor final (editable)
+                mp_tabla = int(_tabla_merma_procesos_offset(hojas_netas))
+                mp_final = int(_ss_get_merma_proc(int(pid_i), int(q_sel), int(mp_tabla)))
+
+                mp_manual = False
+                try:
+                    mp_manual = str(pid) in st.session_state.get("mermas_proc_manual", {}) and str(int(q_sel)) in st.session_state.mermas_proc_manual.get(str(pid), {})
+                except Exception:
+                    mp_manual = False
+
+                # Impresión (cara)
+                im_c = str(p.get("im", "No")).strip()
+                is_offset_c = im_c.lower() == "offset"
+                try:
+                    nt_c = int(p.get("nt", 4))
+                except Exception:
+                    nt_c = 0
+                ba_c = bool(p.get("ba", False))
+                apps_c = (max(1, max(0, nt_c)) + (1 if ba_c else 0)) if is_offset_c else 0
+                pasadas_c = int(math.ceil(apps_c / 4.0)) if is_offset_c else 0
+                mi_def_c = int(_merma_impresion_offset_por_pasadas(nt_c, ba_c)) if is_offset_c else 0
+                mi_final_c = int(_ss_get_merma_imp(int(pid_i), int(q_sel), "cara", int(mi_def_c))) if is_offset_c else 0
+
+                mi_manual_c = False
+                try:
+                    mi_manual_c = (
+                        str(pid) in st.session_state.get("mermas_imp_manual", {})
+                        and str(int(q_sel)) in st.session_state.mermas_imp_manual.get(str(pid), {})
+                        and isinstance(st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))], dict)
+                        and "cara" in st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))]
+                    )
+                except Exception:
+                    mi_manual_c = False
+
+                # Impresión (dorso)
+                im_d = str(p.get("im_d", "No")).strip()
+                is_offset_d = im_d.lower() == "offset"
+                try:
+                    nt_d = int(p.get("nt_d", 4))
+                except Exception:
+                    nt_d = 0
+                ba_d = bool(p.get("ba_d", False))
+                apps_d = (max(1, max(0, nt_d)) + (1 if ba_d else 0)) if is_offset_d else 0
+                pasadas_d = int(math.ceil(apps_d / 4.0)) if is_offset_d else 0
+                mi_def_d = int(_merma_impresion_offset_por_pasadas(nt_d, ba_d)) if is_offset_d else 0
+                mi_final_d = int(_ss_get_merma_imp(int(pid_i), int(q_sel), "dorso", int(mi_def_d))) if is_offset_d else 0
+
+                mi_manual_d = False
+                try:
+                    mi_manual_d = (
+                        str(pid) in st.session_state.get("mermas_imp_manual", {})
+                        and str(int(q_sel)) in st.session_state.mermas_imp_manual.get(str(pid), {})
+                        and isinstance(st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))], dict)
+                        and "dorso" in st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))]
+                    )
+                except Exception:
+                    mi_manual_d = False
+
+                # FR24 (si aplica)
+                fr24_on = bool(p.get("fr24_on", False))
+                try:
+                    fr24_eur_m2 = float(p.get("fr24_eur_m2", 0.05))
+                except Exception:
+                    fr24_eur_m2 = 0.05
+
+                rows.append(
+                    {
+                        "Forma": nombre,
+                        "Pliegos/Ud": pliegos_por_ud,
+                        "Uds": int(q_sel),
+                        "Hojas netas": hojas_netas,
+                        "Merma proceso (tabla)": mp_tabla,
+                        "Merma proceso (final)": mp_final,
+                        "Merma proc editada": "Sí" if mp_manual else "No",
+                        "Impr. cara": im_c,
+                        "Tintas cara": nt_c if is_offset_c else "",
+                        "Barniz cara": "Sí" if (is_offset_c and ba_c) else ("No" if is_offset_c else ""),
+                        "Apps cara": apps_c if is_offset_c else "",
+                        "Pasadas cara": pasadas_c if is_offset_c else "",
+                        "Merma imp cara (def)": mi_def_c if is_offset_c else "",
+                        "Merma imp cara (final)": mi_final_c if is_offset_c else "",
+                        "Merma imp cara editada": "Sí" if mi_manual_c else ("No" if is_offset_c else ""),
+                        "Impr. dorso": im_d,
+                        "Tintas dorso": nt_d if is_offset_d else "",
+                        "Barniz dorso": "Sí" if (is_offset_d and ba_d) else ("No" if is_offset_d else ""),
+                        "Apps dorso": apps_d if is_offset_d else "",
+                        "Pasadas dorso": pasadas_d if is_offset_d else "",
+                        "Merma imp dorso (def)": mi_def_d if is_offset_d else "",
+                        "Merma imp dorso (final)": mi_final_d if is_offset_d else "",
+                        "Merma imp dorso editada": "Sí" if mi_manual_d else ("No" if is_offset_d else ""),
+                        "FR24": "Sí" if fr24_on else "No",
+                        "FR24 €/m²": fr24_eur_m2 if fr24_on else "",
+                    }
+                )
+
+            df_aud = pd.DataFrame(rows)
+            st.dataframe(df_aud, use_container_width=True)
+
+            # Fórmulas (explicación matemática) para el usuario
+            with st.expander("📐 Fórmulas aplicadas (esta cantidad)", expanded=False):
+                st.markdown(
+                    "- **Hojas netas reales (por forma y cantidad)**  \n"
+                    "  `hojas_netas = ceil(uds * pliegos_por_ud)`\n\n"
+                    "- **Merma procesos (OFFSET)** (según tabla)  \n"
+                    "  Se evalúa la tabla con `hojas_netas` y devuelve la merma correspondiente (editable).\n\n"
+                    "- **Merma impresión OFFSET (por lado)**  \n"
+                    "  `apps = max(1, tintas) + (1 si barniz else 0)`  \n"
+                    "  `pasadas = ceil(apps / 4)`  \n"
+                    "  `merma_imp = 100 + 50 * (pasadas - 1)`  (editable)\n\n"
+                    "> Nota: si has editado manualmente una merma, la app ya no la sobreescribe automáticamente."
+                )
+
+        # Mostrar (si existe) el desglose interno ya calculado para esta cantidad
+        if lista_cants_aud and desc_full:
+            with st.expander("🧩 Datos internos: desc_full / compras_legible / resumen_costes", expanded=False):
+                st.markdown("**desc_full (por cantidad)**")
+                st.json(desc_full.get(q_sel, {}))
+
+                st.markdown("**compras_legible (por cantidad)**")
+                st.json(compras_legible.get(q_sel, {}))
+
+                st.markdown("**resumen_costes (por cantidad)**")
+                st.json(resumen_costes.get(q_sel, {}))
+
+
 # TAB DEBUG (SIEMPRE)
 # =========================================================
 with tab_debug:
