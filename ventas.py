@@ -2233,8 +2233,10 @@ with tab_calculadora:
                         mp_def, _ = calcular_mermas_estandar(int(q), pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
 
                         # Defaults impresión por lado
-                        mi_def_c = _merma_impresion_offset_por_pasadas(int(p.get("nt", 4)), bool(p.get("ba", False))) if str(p.get("im", "No")).strip().lower() == "offset" else 0
-                        mi_def_d = _merma_impresion_offset_por_pasadas(int(p.get("nt_d", 4)), bool(p.get("ba_d", False))) if str(p.get("im_d", "No")).strip().lower() == "offset" else 0
+                        is_offset_c = str(p.get("im", "No")).strip().lower() == "offset"
+                        is_offset_d = str(p.get("im_d", "No")).strip().lower() == "offset"
+                        mi_def_c = _merma_impresion_offset_por_pasadas(int(p.get("nt", 4)), bool(p.get("ba", False))) if is_offset_c else 0
+                        mi_def_d = _merma_impresion_offset_por_pasadas(int(p.get("nt_d", 4)), bool(p.get("ba_d", False))) if is_offset_d else 0
 
                         c0, c1, c2, c3 = st.columns([1, 2, 2, 2])
                         c0.markdown(f"**{q} uds**")
@@ -2251,28 +2253,71 @@ with tab_calculadora:
                             )
                         )
 
-                        # Impresión cara (OFFSET)
-                        v_c = int(_ss_get_merma_imp(int(pid), int(q), "cara", int(mi_def_c)))
+                        # Impresión cara/dorso (OFFSET)
                         st.session_state.mermas_imp_manual.setdefault(str(pid), {})
-                        if str(int(q)) not in st.session_state.mermas_imp_manual[str(pid)] or not isinstance(st.session_state.mermas_imp_manual[str(pid)][str(int(q))], dict):
-                            st.session_state.mermas_imp_manual[str(pid)][str(int(q))] = {"cara": v_c, "dorso": int(_ss_get_merma_imp(int(pid), int(q), "dorso", int(mi_def_d)))}
-                        st.session_state.mermas_imp_manual[str(pid)][str(int(q))]["cara"] = int(
+                        qk = str(int(q))
+                        if qk not in st.session_state.mermas_imp_manual[str(pid)] or not isinstance(st.session_state.mermas_imp_manual[str(pid)][qk], dict):
+                            st.session_state.mermas_imp_manual[str(pid)][qk] = {"cara": 0, "dorso": 0}
+
+                        # Cara
+                        mi_key_c = f"mi_c_{pid}_{q}"
+                        if is_offset_c:
+                            # Si el widget viene de un proyecto antiguo con 0, lo inicializamos con el default calculado
+                            try:
+                                cur = int(st.session_state.get(mi_key_c, 0) or 0)
+                            except Exception:
+                                cur = 0
+                            if cur <= 0:
+                                st.session_state[mi_key_c] = int(_ss_get_merma_imp(int(pid), int(q), "cara", int(mi_def_c)))
+                            v_c = int(st.session_state.get(mi_key_c, int(mi_def_c)))
+                            v_c_in = int(
+                                c2.number_input(
+                                    "Merma impresión OFFSET (cara)",
+                                    value=v_c,
+                                    key=mi_key_c,
+                                )
+                            )
+                            st.session_state.mermas_imp_manual[str(pid)][qk]["cara"] = v_c_in
+                        else:
+                            # Si no es Offset, no aplicamos merma de impresión
+                            if mi_key_c not in st.session_state:
+                                st.session_state[mi_key_c] = 0
                             c2.number_input(
                                 "Merma impresión OFFSET (cara)",
-                                value=v_c,
-                                key=f"mi_c_{pid}_{q}",
+                                value=0,
+                                key=mi_key_c,
+                                disabled=True,
                             )
-                        )
+                            st.session_state.mermas_imp_manual[str(pid)][qk]["cara"] = 0
 
-                        # Impresión dorso (OFFSET)
-                        v_d = int(_ss_get_merma_imp(int(pid), int(q), "dorso", int(mi_def_d)))
-                        st.session_state.mermas_imp_manual[str(pid)][str(int(q))]["dorso"] = int(
+                        # Dorso
+                        mi_key_d = f"mi_d_{pid}_{q}"
+                        if is_offset_d:
+                            try:
+                                cur = int(st.session_state.get(mi_key_d, 0) or 0)
+                            except Exception:
+                                cur = 0
+                            if cur <= 0:
+                                st.session_state[mi_key_d] = int(_ss_get_merma_imp(int(pid), int(q), "dorso", int(mi_def_d)))
+                            v_d = int(st.session_state.get(mi_key_d, int(mi_def_d)))
+                            v_d_in = int(
+                                c3.number_input(
+                                    "Merma impresión OFFSET (dorso)",
+                                    value=v_d,
+                                    key=mi_key_d,
+                                )
+                            )
+                            st.session_state.mermas_imp_manual[str(pid)][qk]["dorso"] = v_d_in
+                        else:
+                            if mi_key_d not in st.session_state:
+                                st.session_state[mi_key_d] = 0
                             c3.number_input(
                                 "Merma impresión OFFSET (dorso)",
-                                value=v_d,
-                                key=f"mi_d_{pid}_{q}",
+                                value=0,
+                                key=mi_key_d,
+                                disabled=True,
                             )
-                        )
+                            st.session_state.mermas_imp_manual[str(pid)][qk]["dorso"] = 0
 # =========================================================
 # MOTOR DE CÁLCULO + DESGLOSE + COMPRAS
 # =========================================================
