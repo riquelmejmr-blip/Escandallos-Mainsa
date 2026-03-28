@@ -1797,9 +1797,19 @@ with tab_calculadora:
                 p["w"] = c_w.number_input("Ancho Papel (mm)", 0, 5000, value=int(p.get("w", 0)), key=f"w_{p_id}")
 
                 opts_im = ["Offset", "Digital", "No"]
-                val_im = p.get("im", "No")
-                idx_im = opts_im.index(val_im) if val_im in opts_im else 2
-                p["im"] = st.selectbox("Impresión Cara", opts_im, index=idx_im, key=f"im_{p_id}")
+val_im_raw = p.get("im", "No")
+val_im_norm = str(val_im_raw).strip().lower()
+if val_im_norm in ("offset", "off"):
+    val_im = "Offset"
+elif val_im_norm in ("digital", "dig"):
+    val_im = "Digital"
+elif val_im_norm in ("no", "ninguno", "none", ""):
+    val_im = "No"
+else:
+    # Compatibilidad: si viene algo raro de JSON antiguo, mantenemos "No"
+    val_im = "No"
+idx_im = opts_im.index(val_im)
+p["im"] = st.selectbox("Impresión Cara", opts_im, index=idx_im, key=f"im_{p_id}")
 
                 if p["im"] == "Offset":
                     p["nt"] = st.number_input("Tintas Cara", 0, 6, int(p.get("nt", 4)), key=f"nt_{p_id}")
@@ -2012,9 +2022,18 @@ with tab_calculadora:
 
                 if p.get("pd", "Ninguno") != "Ninguno":
                     opts_imd = ["Offset", "Digital", "No"]
-                    val_imd = p.get("im_d", "No")
-                    idx_imd = opts_imd.index(val_imd) if val_imd in opts_imd else 2
-                    p["im_d"] = st.selectbox("Impresión Dorso", opts_imd, index=idx_imd, key=f"im_d_{p_id}")
+val_imd_raw = p.get("im_d", "No")
+val_imd_norm = str(val_imd_raw).strip().lower()
+if val_imd_norm in ("offset", "off"):
+    val_imd = "Offset"
+elif val_imd_norm in ("digital", "dig"):
+    val_imd = "Digital"
+elif val_imd_norm in ("no", "ninguno", "none", ""):
+    val_imd = "No"
+else:
+    val_imd = "No"
+idx_imd = opts_imd.index(val_imd)
+p["im_d"] = st.selectbox("Impresión Dorso", opts_imd, index=idx_imd, key=f"im_d_{p_id}")
 
                     if p["im_d"] == "Offset":
                         p["nt_d"] = st.number_input("Tintas Dorso", 0, 6, int(p.get("nt_d", 0)), key=f"nt_d_{p_id}")
@@ -2214,8 +2233,8 @@ with tab_calculadora:
                         mp_def, _ = calcular_mermas_estandar(int(q), pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
 
                         # Defaults impresión por lado
-                        mi_def_c = _merma_impresion_offset_por_pasadas(int(p.get("nt", 4)), bool(p.get("ba", False))) if p.get("im", "No") == "Offset" else 0
-                        mi_def_d = _merma_impresion_offset_por_pasadas(int(p.get("nt_d", 4)), bool(p.get("ba_d", False))) if p.get("im_d", "No") == "Offset" else 0
+                        mi_def_c = _merma_impresion_offset_por_pasadas(int(p.get("nt", 4)), bool(p.get("ba", False))) if str(p.get("im", "No")).strip().lower() == "offset" else 0
+                        mi_def_d = _merma_impresion_offset_por_pasadas(int(p.get("nt_d", 4)), bool(p.get("ba_d", False))) if str(p.get("im_d", "No")).strip().lower() == "offset" else 0
 
                         c0, c1, c2, c3 = st.columns([1, 2, 2, 2])
                         c0.markdown(f"**{q} uds**")
