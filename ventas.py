@@ -307,6 +307,44 @@ def calcular_mermas_estandar(n_uds: int, pliegos_por_ud: float = 1.0, es_digital
     return int(merma_proc), int(merma_imp)
 
 
+
+# =========================================================
+# MERMAS (AUTO TRACKERS) - para actualizar defaults cuando cambian tintas/formato
+# =========================================================
+def _ss_autoref_init() -> None:
+    # Trackers para saber si el usuario ha sobreescrito un valor o sigue en automático
+    if "mermas_proc_auto_ref" not in st.session_state or not isinstance(st.session_state.get("mermas_proc_auto_ref"), dict):
+        st.session_state.mermas_proc_auto_ref = {}
+    if "mermas_imp_auto_ref" not in st.session_state or not isinstance(st.session_state.get("mermas_imp_auto_ref"), dict):
+        st.session_state.mermas_imp_auto_ref = {}
+
+def _ss_autoupdate_merma_proc(pid: int, qty: int, new_default: int) -> None:
+    """Si la merma de proceso actual coincide con el último default auto guardado, se actualiza al nuevo default."""
+    _ss_autoref_init()
+    pid_k = str(pid); qty_k = str(int(qty))
+    cur = _ss_get_merma_proc(pid, qty, new_default)
+    auto_pid = st.session_state.mermas_proc_auto_ref.setdefault(pid_k, {})
+    old_auto = int(auto_pid.get(qty_k, new_default))
+    # Solo actualizamos si el usuario no ha tocado (cur==old_auto) o si cur<=0 (legacy)
+    if int(cur) <= 0 or int(cur) == int(old_auto):
+        st.session_state.mermas_proc_manual.setdefault(pid_k, {})
+        st.session_state.mermas_proc_manual[pid_k][qty_k] = int(new_default)
+        auto_pid[qty_k] = int(new_default)
+
+def _ss_autoupdate_merma_imp(pid: int, qty: int, lado: str, new_default: int) -> None:
+    """Auto-update para merma de impresión por lado (cara/dorso)."""
+    _ss_autoref_init()
+    pid_k = str(pid); qty_k = str(int(qty)); lado_k = str(lado)
+    cur = _ss_get_merma_imp(pid, qty, lado_k, new_default)
+    auto_pid = st.session_state.mermas_imp_auto_ref.setdefault(pid_k, {})
+    auto_qty = auto_pid.setdefault(qty_k, {})
+    old_auto = int(auto_qty.get(lado_k, new_default))
+    if int(cur) <= 0 or int(cur) == int(old_auto):
+        st.session_state.mermas_imp_manual.setdefault(pid_k, {})
+        st.session_state.mermas_imp_manual[pid_k].setdefault(qty_k, {"cara": 0, "dorso": 0})
+        st.session_state.mermas_imp_manual[pid_k][qty_k][lado_k] = int(new_default)
+        auto_qty[lado_k] = int(new_default)
+
 # =========================================================
 # MERMAS (SESSION HELPERS - compat JSON antiguo/nuevo)
 # =========================================================
@@ -1691,15 +1729,15 @@ with tab_calculadora:
 
                 for q in lista_cants:
                     mp_off, _mi_ign = calcular_mermas_estandar(q, pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
-                    _ss_setdefault_merma_proc(int(pid), int(q), int(mp_off))
+                    _ss_autoupdate_merma_proc(int(pid), int(q), int(mp_off))
 
                     # Merma impresión por lado (solo OFFSET)
                     if im_c == "Offset":
                         mi_c = _merma_impresion_offset_por_pasadas(nt_c, ba_c)
-                        _ss_setdefault_merma_imp(int(pid), int(q), "cara", int(mi_c))
+                        _ss_autoupdate_merma_imp(int(pid), int(q), "cara", int(mi_c))
                     if im_d == "Offset":
                         mi_d = _merma_impresion_offset_por_pasadas(nt_d, ba_d)
-                        _ss_setdefault_merma_imp(int(pid), int(q), "dorso", int(mi_d))
+                        _ss_autoupdate_merma_imp(int(pid), int(q), "dorso", int(mi_d))
 
         # Digital (global por cantidad, como hasta ahora)
         for q in lista_cants:
@@ -1812,7 +1850,7 @@ with tab_calculadora:
                 p["im"] = st.selectbox("Impresión Cara", opts_im, index=idx_im, key=f"im_{p_id}")
 
                 if p["im"] == "Offset":
-                    p["nt"] = st.number_input("Tintas Cara", 0, 6, int(p.get("nt", 4)), key=f"nt_{p_id}")
+                    p["nt"] = st.number_input("Tintas Cara", 0, 12, int(p.get("nt", 4)), key=f"nt_{p_id}")
                     p["ba"] = st.checkbox("Barniz Cara", value=bool(p.get("ba", False)), key=f"ba_{p_id}")
                 elif p["im"] == "Digital":
                     p["ld"] = st.checkbox("Laminado Digital Cara", value=bool(p.get("ld", False)), key=f"ld_{p_id}")
@@ -2036,7 +2074,7 @@ with tab_calculadora:
                     p["im_d"] = st.selectbox("Impresión Dorso", opts_imd, index=idx_imd, key=f"im_d_{p_id}")
 
                     if p["im_d"] == "Offset":
-                        p["nt_d"] = st.number_input("Tintas Dorso", 0, 6, int(p.get("nt_d", 0)), key=f"nt_d_{p_id}")
+                        p["nt_d"] = st.number_input("Tintas Dorso", 0, 12, int(p.get("nt_d", 0)), key=f"nt_d_{p_id}")
                         p["ba_d"] = st.checkbox("Barniz Dorso", value=bool(p.get("ba_d", False)), key=f"ba_d_{p_id}")
                     elif p["im_d"] == "Digital":
                         p["ld_d"] = st.checkbox("Laminado Digital Dorso", value=bool(p.get("ld_d", False)), key=f"ld_d_{p_id}")
@@ -2242,6 +2280,7 @@ with tab_calculadora:
                         c0.markdown(f"**{q} uds**")
 
                         # Proceso
+                        _ss_autoupdate_merma_proc(int(pid), int(q), int(mp_def))
                         v_proc = int(_ss_get_merma_proc(int(pid), int(q), int(mp_def)))
                         # Guardamos la edición (si cambia)
                         st.session_state.mermas_proc_manual.setdefault(str(pid), {})
@@ -2262,14 +2301,21 @@ with tab_calculadora:
                         # Cara
                         mi_key_c = f"mi_c_{pid}_{q}"
                         if is_offset_c:
-                            # Si el widget viene de un proyecto antiguo con 0, lo inicializamos con el default calculado
+                            # Default auto según tintas/barniz (y se actualiza si el usuario no lo ha tocado)
+                            _ss_autoupdate_merma_imp(int(pid), int(q), "cara", int(mi_def_c))
+                            v_c_auto = int(_ss_get_merma_imp(int(pid), int(q), "cara", int(mi_def_c)))
+
+                            # Streamlit prioriza el estado del widget: si está a 0 o coincide con el último auto, lo re-sincronizamos
+                            _ss_autoref_init()
+                            old_auto = int(st.session_state.mermas_imp_auto_ref.get(str(pid), {}).get(str(int(q)), {}).get("cara", v_c_auto))
                             try:
-                                cur = int(st.session_state.get(mi_key_c, 0) or 0)
+                                cur_widget = int(st.session_state.get(mi_key_c, 0) or 0)
                             except Exception:
-                                cur = 0
-                            if cur <= 0:
-                                st.session_state[mi_key_c] = int(_ss_get_merma_imp(int(pid), int(q), "cara", int(mi_def_c)))
-                            v_c = int(st.session_state.get(mi_key_c, int(mi_def_c)))
+                                cur_widget = 0
+                            if (cur_widget <= 0) or (cur_widget == old_auto):
+                                st.session_state[mi_key_c] = int(v_c_auto)
+
+                            v_c = int(st.session_state.get(mi_key_c, int(v_c_auto)))
                             v_c_in = int(
                                 c2.number_input(
                                     "Merma impresión OFFSET (cara)",
@@ -2293,13 +2339,19 @@ with tab_calculadora:
                         # Dorso
                         mi_key_d = f"mi_d_{pid}_{q}"
                         if is_offset_d:
+                            _ss_autoupdate_merma_imp(int(pid), int(q), "dorso", int(mi_def_d))
+                            v_d_auto = int(_ss_get_merma_imp(int(pid), int(q), "dorso", int(mi_def_d)))
+
+                            _ss_autoref_init()
+                            old_auto = int(st.session_state.mermas_imp_auto_ref.get(str(pid), {}).get(str(int(q)), {}).get("dorso", v_d_auto))
                             try:
-                                cur = int(st.session_state.get(mi_key_d, 0) or 0)
+                                cur_widget = int(st.session_state.get(mi_key_d, 0) or 0)
                             except Exception:
-                                cur = 0
-                            if cur <= 0:
-                                st.session_state[mi_key_d] = int(_ss_get_merma_imp(int(pid), int(q), "dorso", int(mi_def_d)))
-                            v_d = int(st.session_state.get(mi_key_d, int(mi_def_d)))
+                                cur_widget = 0
+                            if (cur_widget <= 0) or (cur_widget == old_auto):
+                                st.session_state[mi_key_d] = int(v_d_auto)
+
+                            v_d = int(st.session_state.get(mi_key_d, int(v_d_auto)))
                             v_d_in = int(
                                 c3.number_input(
                                     "Merma impresión OFFSET (dorso)",
@@ -2386,8 +2438,9 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
 
             pl = float(p.get("pliegos", 1.0))
-            nb = q_n * pl
+            nb = int(math.ceil(q_n * pl))
             mp_def, _mi_ign = calcular_mermas_estandar(q_n, pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
+            _ss_autoupdate_merma_proc(int(pid), int(q_n), int(mp_def))
             merma_proc_hojas = _ss_get_merma_proc(int(pid), int(q_n), int(mp_def))
             hp_produccion = nb + int(merma_proc_hojas)
 
@@ -2404,6 +2457,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                     merma_cara = int(merma_imp_digital_hojas)
                 elif im_cara == "Offset":
                     mi_def_c = _merma_impresion_offset_por_pasadas(int(p.get("nt", 4)), bool(p.get("ba", False)))
+                    _ss_autoupdate_merma_imp(int(pid), int(q_n), "cara", int(mi_def_c))
                     merma_cara = int(_ss_get_merma_imp(int(pid), int(q_n), "cara", int(mi_def_c)))
                 else:
                     merma_cara = 0
@@ -2416,6 +2470,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                     merma_d = int(merma_imp_digital_hojas)
                 elif im_dorso == "Offset":
                     mi_def_d = _merma_impresion_offset_por_pasadas(int(p.get("nt_d", 4)), bool(p.get("ba_d", False)))
+                    _ss_autoupdate_merma_imp(int(pid), int(q_n), "dorso", int(mi_def_d))
                     merma_d = int(_ss_get_merma_imp(int(pid), int(q_n), "dorso", int(mi_def_d)))
                 else:
                     merma_d = 0
