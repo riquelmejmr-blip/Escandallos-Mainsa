@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import json
 import re
+import html
 import math
 from copy import deepcopy
 import hashlib
@@ -800,6 +801,7 @@ if "impresiones_by_qty_fmt_enabled" not in st.session_state: st.session_state.im
 if "brf" not in st.session_state: st.session_state.brf = ""
 if "cli" not in st.session_state: st.session_state.cli = ""
 if "desc" not in st.session_state: st.session_state.desc = ""
+if "notas" not in st.session_state: st.session_state.notas = ""
 if "cants_str_saved" not in st.session_state: st.session_state.cants_str_saved = ""
 
 if "unidad_t" not in st.session_state: st.session_state.unidad_t = "Segundos"
@@ -1115,6 +1117,7 @@ def normalizar_import(di: dict):
     st.session_state.brf = str(di.get("brf", st.session_state.brf))
     st.session_state.cli = str(di.get("cli", st.session_state.cli))
     st.session_state.desc = str(di.get("desc", st.session_state.desc))
+    st.session_state.notas = str(di.get("notas", st.session_state.get("notas","")))
     if isinstance(di.get("cants_str", None), str):
         st.session_state.cants_str_saved = di["cants_str"]
 
@@ -1429,6 +1432,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "comercial_2": c2_out,
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
+        "notas": st.session_state.get("notas",""),
         "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input), "rellenado": {"enabled": bool(st.session_state.rell_enabled), "t_input": float(st.session_state.rell_t_input)}, "armado": {"enabled": bool(st.session_state.arm_enabled), "t_input": float(st.session_state.arm_t_input)}},
@@ -1667,6 +1671,7 @@ with tab_calculadora:
         st.text_input("Nº Comercial 1", key="comercial_1")
         st.text_input("Nº Comercial 2 (opcional)", key="comercial_2")
         st.text_input("Cliente", key="cli")
+        st.text_area("Notas / Comentarios", key="notas", height=180, placeholder="Escribe aquí notas internas o comentarios para incluir en la oferta comercial...")
         _aplicar_margen_auto_si_procede()
     with cB:
         st.text_input("Descripción", key="desc")
@@ -2938,6 +2943,14 @@ if modo_comercial and res_final:
         desc_html += "<span class='tag'>Opcionales</span> "
         desc_html += " &nbsp; ".join(opt_lines)
         desc_html += "</div>"
+
+
+    # Notas / comentarios (solo si hay texto)
+    _notas_txt = (st.session_state.get("notas", "") or "").strip()
+    if _notas_txt:
+        _notas_html = html.escape(_notas_txt).replace("\n", "<br>")
+        desc_html += "<div style='margin-top:10px;'><span class='tag'>Notas</span></div>"
+        desc_html += f"<div class='small' style='margin-top:6px; line-height:1.35;'>{_notas_html}</div>"
 
     for pid, p in st.session_state.piezas_dict.items():
         base_info = ""
