@@ -3544,7 +3544,11 @@ with tab_auditoria:
                 st.json(compras_legible.get(q_sel, {}))
 
                 st.markdown("**resumen_costes (por cantidad)**")
-                st.json(resumen_costes.get(q_sel, {}))
+                resumen_costes_por_cantidad = st.session_state.get("resumen_costes", {})
+                # Compatibilidad hacia atrás: algunos JSON antiguos pueden guardarlo con otras claves
+                if not isinstance(resumen_costes_por_cantidad, dict):
+                    resumen_costes_por_cantidad = {}
+                st.json(resumen_costes_por_cantidad.get(q_sel, {}))
 
 
 # TAB DEBUG (SIEMPRE)
