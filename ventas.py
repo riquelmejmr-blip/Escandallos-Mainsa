@@ -320,75 +320,30 @@ def _ss_autoref_init() -> None:
         st.session_state.mermas_imp_auto_ref = {}
 
 def _ss_autoupdate_merma_proc(pid: int, qty: int, new_default: int) -> None:
-    """Auto-update de merma de proceso.
-
-    Importante:
-    - Respeta una edición manual previa del widget de Streamlit.
-    - Si el valor actual sigue siendo el último default automático (o <=0 legacy),
-      actualiza al nuevo default.
-    """
+    """Si la merma de proceso actual coincide con el último default auto guardado, se actualiza al nuevo default."""
     _ss_autoref_init()
-    pid_k = str(pid)
-    qty_k = str(int(qty))
-    widget_key = f"mp_{pid}_{qty}"
-
+    pid_k = str(pid); qty_k = str(int(qty))
     cur = _ss_get_merma_proc(pid, qty, new_default)
     auto_pid = st.session_state.mermas_proc_auto_ref.setdefault(pid_k, {})
     old_auto = int(auto_pid.get(qty_k, new_default))
-
-    try:
-        cur_widget = int(st.session_state.get(widget_key, 0) or 0)
-    except Exception:
-        cur_widget = 0
-
-    should_update = (
-        int(cur) <= 0
-        or int(cur) == int(old_auto)
-        or cur_widget <= 0
-        or cur_widget == int(old_auto)
-    )
-
-    if should_update:
+    # Solo actualizamos si el usuario no ha tocado (cur==old_auto) o si cur<=0 (legacy)
+    if int(cur) <= 0 or int(cur) == int(old_auto):
         st.session_state.mermas_proc_manual.setdefault(pid_k, {})
         st.session_state.mermas_proc_manual[pid_k][qty_k] = int(new_default)
-        st.session_state[widget_key] = int(new_default)
         auto_pid[qty_k] = int(new_default)
 
 def _ss_autoupdate_merma_imp(pid: int, qty: int, lado: str, new_default: int) -> None:
-    """Auto-update para merma de impresión por lado (cara/dorso).
-
-    Importante:
-    - Respeta una edición manual previa del widget.
-    - Si el valor sigue en automático (o <=0 legacy), lo actualiza al nuevo default.
-    """
+    """Auto-update para merma de impresión por lado (cara/dorso)."""
     _ss_autoref_init()
-    pid_k = str(pid)
-    qty_k = str(int(qty))
-    lado_k = str(lado)
-    widget_key = f"mi_{'c' if lado_k == 'cara' else 'd'}_{pid}_{qty}"
-
+    pid_k = str(pid); qty_k = str(int(qty)); lado_k = str(lado)
     cur = _ss_get_merma_imp(pid, qty, lado_k, new_default)
     auto_pid = st.session_state.mermas_imp_auto_ref.setdefault(pid_k, {})
     auto_qty = auto_pid.setdefault(qty_k, {})
     old_auto = int(auto_qty.get(lado_k, new_default))
-
-    try:
-        cur_widget = int(st.session_state.get(widget_key, 0) or 0)
-    except Exception:
-        cur_widget = 0
-
-    should_update = (
-        int(cur) <= 0
-        or int(cur) == int(old_auto)
-        or cur_widget <= 0
-        or cur_widget == int(old_auto)
-    )
-
-    if should_update:
+    if int(cur) <= 0 or int(cur) == int(old_auto):
         st.session_state.mermas_imp_manual.setdefault(pid_k, {})
         st.session_state.mermas_imp_manual[pid_k].setdefault(qty_k, {"cara": 0, "dorso": 0})
         st.session_state.mermas_imp_manual[pid_k][qty_k][lado_k] = int(new_default)
-        st.session_state[widget_key] = int(new_default)
         auto_qty[lado_k] = int(new_default)
 
 
@@ -430,32 +385,6 @@ def _ss_sync_merma_imp_widget(pid: int, qty: int, lado: str, widget_key: str, ne
         st.session_state.mermas_imp_manual[pid_k].setdefault(qty_k, {"cara": 0, "dorso": 0})
         st.session_state.mermas_imp_manual[pid_k][qty_k][lado_k] = int(new_default)
         auto_qty[lado_k] = int(new_default)
-
-
-def _ss_sync_merma_proc_widget(pid: int, qty: int, widget_key: str, new_default: int) -> None:
-    """Sincroniza la merma de proceso con el default calculado, respetando edición manual."""
-    _ss_autoref_init()
-    pid_k = str(pid)
-    qty_k = str(int(qty))
-
-    auto_pid = st.session_state.mermas_proc_auto_ref.setdefault(pid_k, {})
-    old_auto = int(auto_pid.get(qty_k, int(new_default)))
-
-    try:
-        cur_widget = int(st.session_state.get(widget_key, 0) or 0)
-    except Exception:
-        cur_widget = 0
-
-    try:
-        cur_stored = int(_ss_get_merma_proc(pid, int(qty), int(new_default)) or 0)
-    except Exception:
-        cur_stored = 0
-
-    if (cur_widget <= 0) or (cur_widget == old_auto) or (cur_stored <= 0) or (cur_stored == old_auto):
-        st.session_state[widget_key] = int(new_default)
-        st.session_state.mermas_proc_manual.setdefault(pid_k, {})
-        st.session_state.mermas_proc_manual[pid_k][qty_k] = int(new_default)
-        auto_pid[qty_k] = int(new_default)
 # =========================================================
 # MERMAS (SESSION HELPERS - compat JSON antiguo/nuevo)
 # =========================================================
@@ -2395,17 +2324,15 @@ with tab_calculadora:
                         c0.markdown(f"**{q} uds**")
 
                         # Proceso
-                        mp_key = f"mp_{pid}_{q}"
-                        _ss_sync_merma_proc_widget(int(pid), int(q), mp_key, int(mp_def))
+                        _ss_autoupdate_merma_proc(int(pid), int(q), int(mp_def))
                         v_proc = int(_ss_get_merma_proc(int(pid), int(q), int(mp_def)))
-                        if mp_key not in st.session_state:
-                            st.session_state[mp_key] = int(v_proc)
+                        # Guardamos la edición (si cambia)
                         st.session_state.mermas_proc_manual.setdefault(str(pid), {})
                         st.session_state.mermas_proc_manual[str(pid)][str(int(q))] = int(
                             c1.number_input(
                                 "Rodaje proceso (hojas)",
-                                value=int(st.session_state.get(mp_key, int(v_proc))),
-                                key=mp_key,
+                                value=v_proc,
+                                key=f"mp_{pid}_{q}",
                             )
                         )
 
