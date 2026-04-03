@@ -775,6 +775,7 @@ def crear_forma_vacia(index):
         "cor_by_qty": {},
         "cobrar_arreglo": True,
         "pv_troquel": 0.0,
+        "troquel_piezas": 0,
     }
 
 def es_digital_en_proyecto(piezas_dict):
@@ -859,7 +860,7 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         "n_", "p_", "std_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_",
         "pf_", "gf_", "tb_", "pl_", "pldif_", "plh_", "plw_", "ap_",
         "rigman_", "rigwman_", "righman_", "rigpman_", "mrig_",
-        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
+        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
     ]
 
     for pid in piezas_ids:
@@ -966,6 +967,7 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
 
         st.session_state[f"arr_{pid}"] = bool(p.get("cobrar_arreglo", True))
         st.session_state[f"pvt_{pid}"] = float(p.get("pv_troquel", 0.0))
+        st.session_state[f"trqp_{pid}"] = int(p.get("troquel_piezas", 0) or 0)
 
         st.session_state[f"im_d_{pid}"] = p.get("im_d", "No")
         st.session_state[f"nt_d_{pid}"] = int(p.get("nt_d", 0))
@@ -1104,6 +1106,7 @@ def _normalizar_pieza_dict(pid: int, v: dict):
         }
     base["cobrar_arreglo"] = _coerce_bool(base.get("cobrar_arreglo", True), True)
     base["pv_troquel"] = _coerce_float(base.get("pv_troquel", 0.0), 0.0)
+    base["troquel_piezas"] = max(0, _coerce_int(base.get("troquel_piezas", 0), 0))
 
     return base
 
@@ -1115,6 +1118,8 @@ def normalizar_import(di: dict):
     prev_ext_len = len(st.session_state.get("externos", [])) if isinstance(st.session_state.get("externos", None), list) else 0
 
     st.session_state.brf = str(di.get("brf", st.session_state.brf))
+    st.session_state.comercial_1 = str(di.get("comercial_1", st.session_state.get("comercial_1", "")))
+    st.session_state.comercial_2 = str(di.get("comercial_2", st.session_state.get("comercial_2", "")))
     st.session_state.cli = str(di.get("cli", st.session_state.cli))
     st.session_state.desc = str(di.get("desc", st.session_state.desc))
     st.session_state.notas = str(di.get("notas", st.session_state.get("notas","")))
@@ -1368,10 +1373,25 @@ def normalizar_import(di: dict):
             base["nombre"] = str(e.get("nombre", base["nombre"]))
             base["tipo"] = str(e.get("tipo", base["tipo"]))
             base["material"] = str(e.get("material", base["material"]))
-            if isinstance(e.get("dims", None), dict):
-                base["dims"] = e["dims"]
+            dims_in = e.get("dims", {}) if isinstance(e.get("dims", None), dict) else {}
+            base["dims"] = {
+                "L": _coerce_float(dims_in.get("L", 0.0), 0.0),
+                "W": _coerce_float(dims_in.get("W", 0.0), 0.0),
+                "H": _coerce_float(dims_in.get("H", 0.0), 0.0),
+            }
             if isinstance(e.get("costes", None), dict):
-                base["costes"] = {int(k): float(v) for k, v in e["costes"].items()}
+                costes_new = {}
+                for k, v in e["costes"].items():
+                    try:
+                        kk = int(float(k))
+                    except Exception:
+                        continue
+                    try:
+                        vv = float(v)
+                    except Exception:
+                        vv = 0.0
+                    costes_new[kk] = vv
+                base["costes"] = costes_new
             new_list.append(base)
         st.session_state.embalajes = new_list if new_list else [crear_embalaje_vacio(0)]
     else:
@@ -2102,6 +2122,16 @@ with tab_calculadora:
                 p["cobrar_arreglo"] = st.checkbox("¿Cobrar Arreglo?", value=bool(p.get("cobrar_arreglo", True)), key=f"arr_{p_id}")
                 p["pv_troquel"] = st.number_input("Precio Venta Troquel (€) (si aplica)", value=float(p.get("pv_troquel", 0.0)), key=f"pvt_{p_id}")
 
+                # ✅ Troquelado: permitir forzar manualmente cuántas piezas salen por golpe de troquel.
+                # 0 = automático (se asume 1/pliegos_por_ud cuando pliegos<1).
+                p["troquel_piezas"] = int(st.number_input(
+                    "Piezas por troquel (0 = automático)",
+                    min_value=0,
+                    step=1,
+                    value=int(p.get("troquel_piezas", 0) or 0),
+                    key=f"trqp_{p_id}",
+                ))
+
                 if p.get("pd", "Ninguno") != "Ninguno":
                     opts_imd = ["Offset", "Digital", "No"]
                     val_imd_raw = p.get("im_d", "No")
@@ -2663,9 +2693,26 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             if cor_sel == "Troquelado":
                 arr = float(db["troquelado"][cat]["arranque"]) * f_narba if bool(p.get("cobrar_arreglo", True)) else 0.0
                 tiro = float(db["troquelado"][cat]["tiro"]) * f_narba
-                c_troquel_taller = arr + (hp_produccion * tiro)
+                # Ajuste por "piezas por troquel" manual:
+                # - No afecta a impresión ni a material (siguen usando hp_produccion).
+                # - Solo afecta a corte (Troquelado/Plotter): si el troquel hace menos piezas por golpe,
+                #   se necesitan más hojas para cortar el mismo nº de uds.
+                troquel_piezas_manual = int(p.get("troquel_piezas", 0) or 0)
+                auto_piezas = 1
+                try:
+                    _pl_tmp = float(p.get("pliegos", 1.0) or 1.0)
+                    if _pl_tmp > 0 and _pl_tmp < 1.0:
+                        auto_piezas = max(1, int(round(1.0 / _pl_tmp)))
+                except Exception:
+                    auto_piezas = 1
+                if troquel_piezas_manual <= 0:
+                    troquel_piezas_manual = auto_piezas
+                troquel_factor = float(auto_piezas) / float(max(1, troquel_piezas_manual))
+                hp_corte = int(math.ceil(float(hp_produccion) * troquel_factor))
+
+                c_troquel_taller = arr + (hp_corte * tiro)
             elif cor_sel == "Plotter":
-                c_plotter = hp_produccion * float(db["plotter"]["precio_hoja"])
+                c_plotter = hp_corte * float(db["plotter"]["precio_hoja"])
             else:
                 # "Sin corte": no suma coste de troquel ni plotter
                 pass
@@ -3430,6 +3477,19 @@ with tab_auditoria:
                         mp_final = int(_ss_get_merma_proc(int(pid), int(q_sel), int(mp_def)))
                         hp_produccion = int(nb) + int(mp_final)
 
+                        # Ajuste por "piezas por troquel" manual (solo corte)
+                        troquel_piezas_manual = int(p.get("troquel_piezas", 0) or 0)
+                        auto_piezas = 1
+                        try:
+                            if pl > 0 and pl < 1.0:
+                                auto_piezas = max(1, int(round(1.0 / pl)))
+                        except Exception:
+                            auto_piezas = 1
+                        if troquel_piezas_manual <= 0:
+                            troquel_piezas_manual = auto_piezas
+                        troquel_factor = float(auto_piezas) / float(max(1, troquel_piezas_manual))
+                        hp_corte = int(math.ceil(float(hp_produccion) * troquel_factor))
+
                         partes_imp_units = obtener_partes_impresion_por_formato(int(pid), int(q_sel))
                         n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
 
@@ -3471,7 +3531,8 @@ with tab_auditoria:
                         st.code(
                             f"mp_def = tabla(nb={nb}) = {mp_def}\n"
                             f"mp_final = {mp_final}\n"
-                            f"hp_produccion = nb + mp_final = {nb} + {mp_final} = {hp_produccion}"
+                            f"hp_produccion = nb + mp_final = {nb} + {mp_final} = {hp_produccion}\n"
+                            f"hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas) = ceil({hp_produccion} * {auto_piezas}/{troquel_piezas_manual}) = {hp_corte}"
                         )
 
                         st.markdown("**Mermas de impresión y papel (por lado)**")
@@ -3540,8 +3601,8 @@ with tab_auditoria:
 
                         # Corte
                         st.write(f"Corte (Troquel/Plotter): {float(det_row.get('Corte (Troquel/Plotter)', 0.0)):.4f} €")
-                        st.markdown("""**Troquelado**: `arranque + hp_produccion * tiro`
-**Plotter**: `hp_produccion * precio_hoja_plotter`
+                        st.markdown("""**Troquelado**: `arranque + hp_corte * tiro`  (hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas)`
+**Plotter**: `hp_corte * precio_hoja_plotter`
 **Sin corte**: `0`""")
 
                         # Subtotal
