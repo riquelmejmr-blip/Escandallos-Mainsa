@@ -3544,6 +3544,15 @@ with tab_auditoria:
 
                         st.markdown("**Costes (resultado + fórmula con sustitución)**")
 
+                        # Factores de descuento (compra) por bloque
+                        try:
+                            _dd = st.session_state.get("db_descuentos", {}) if isinstance(st.session_state.get("db_descuentos", {}), dict) else {}
+                            f_cart = 1.0 - (float(_dd.get("cartoncillo", 0.0)) / 100.0)
+                            f_or = 1.0 - (float(_dd.get("ondulado_rigidos", 0.0)) / 100.0)
+                            f_narba = 1.0 - (float(_dd.get("narba", 0.0)) / 100.0)
+                        except Exception:
+                            f_cart, f_or, f_narba = 1.0, 1.0, 1.0
+
                         # Cartoncillo
                         try:
                             pf = p.get("pf", "Ninguno")
@@ -3568,42 +3577,199 @@ with tab_auditoria:
                             st.write(f"Cartoncillo Dorso: {float(det_row.get('Cartoncillo Dorso', 0.0)):.4f} €")
                             st.code(f"= {hp_papel_d} * {m2_papel:.6f} * ({gd}/1000) * {precio_pd} * {f_cart} = {calc:.4f}")
 
-                        # Contracolado (si aplica)
+                        # Plancha Ondulado
+                        st.write(f"Plancha Ondulado: {float(det_row.get('Plancha Ondulado', 0.0)):.4f} €")
                         try:
-                            capas_contracolado = int(p.get("capas", 0))
+                            if str(p.get("tipo_base","Ondulado/Cartón")) == "Ondulado/Cartón" and str(p.get("pl","Ninguna")) != "Ninguna" and m2_papel > 0:
+                                pl_name = str(p.get("pl","Ninguna"))
+                                ap = str(p.get("ap","B/C"))
+                                if bool(p.get("pl_dif", False)) and float(p.get("pl_h", 0)) > 0 and float(p.get("pl_w", 0)) > 0:
+                                    m2_plancha = (float(p.get("pl_w",0)) * float(p.get("pl_h",0))) / 1_000_000.0
+                                    st.code(f"m2_plancha = (pl_w*pl_h)/1e6 = ({float(p.get('pl_w',0))}*{float(p.get('pl_h',0))})/1e6 = {m2_plancha:.6f}")
+                                else:
+                                    m2_plancha = m2_papel
+                                    st.code(f"m2_plancha = m2_papel = {m2_plancha:.6f}")
+                                precio_m2 = float(db["planchas"][pl_name][ap])
+                                calc = hp_produccion * m2_plancha * precio_m2 * f_or
+                                st.code(f"= {hp_produccion} * {m2_plancha:.6f} * {precio_m2} * {f_or} = {calc:.4f}")
+                            else:
+                                st.caption("— (No aplica: base no es ondulado o no hay plancha seleccionada)")
                         except Exception:
-                            capas_contracolado = 0
+                            st.caption("— (No se ha podido desglosar la plancha ondulado)")
+
+                        # Material Rígido
+                        st.write(f"Material Rígido: {float(det_row.get('Material Rígido', 0.0)):.4f} €")
+                        try:
+                            if str(p.get("tipo_base","Ondulado/Cartón")) == "Material Rígido":
+                                if bool(p.get("rig_manual", False)):
+                                    mw, mh = float(p.get("rig_w", 0)), float(p.get("rig_h", 0))
+                                    precio_hoja = float(p.get("rig_precio_ud", 0.0))
+                                    st.code(f"hoja_rigida = {mw}x{mh} mm (manual) · precio_hoja = {precio_hoja}")
+                                else:
+                                    mat = str(p.get("mat_rigido","Ninguno"))
+                                    if mat != "Ninguno":
+                                        info = db["rigidos"][mat]
+                                        mw, mh = float(info.get("w",0)), float(info.get("h",0))
+                                        precio_hoja = float(info.get("precio_ud",0.0)) * f_or
+                                        st.code(f"hoja_rigida = {mw}x{mh} mm · precio_hoja = {float(info.get('precio_ud',0.0))} * {f_or} = {precio_hoja}")
+                                    else:
+                                        mw = mh = precio_hoja = 0.0
+                                by = 0
+                                if w > 0 and h > 0 and mw > 0 and mh > 0:
+                                    y1 = int(mw // w) * int(mh // h)
+                                    y2 = int(mw // h) * int(mh // w)
+                                    by = max(y1, y2)
+                                st.code(f"aprovechamiento_by = max(floor({mw}/{w})*floor({mh}/{h}), floor({mw}/{h})*floor({mh}/{w})) = {by}")
+                                if by > 0:
+                                    n_net = math.ceil(hp_produccion / by)
+                                    if capas_contracolado == 0:
+                                        merma_fija = merma_rigido_fija(int(n_net))
+                                        n_pl = int(n_net) + int(merma_fija)
+                                        st.code(f"hojas_netas = ceil({hp_produccion}/{by}) = {n_net} · merma_fija = {merma_fija} · hojas_total = {n_pl}")
+                                    else:
+                                        n_pl = int(math.ceil(float(n_net) * 1.02))
+                                        st.code(f"hojas_netas = ceil({hp_produccion}/{by}) = {n_net} · hojas_total = ceil({n_net}*1.02) = {n_pl}")
+                                    calc = float(n_pl) * float(precio_hoja)
+                                    st.code(f"= {n_pl} * {precio_hoja} = {calc:.4f}")
+                                else:
+                                    st.caption("— (No aplica: no se puede encajar la pieza en la hoja rígida)")
+                            else:
+                                st.caption("— (No aplica: la base no es material rígido)")
+                        except Exception:
+                            st.caption("— (No se ha podido desglosar el material rígido)")
+
+                        # Contracolado
+                        st.write(f"Contracolado: {float(det_row.get('Contracolado', 0.0)):.4f} €")
                         try:
                             peg_rate = float(db["planchas"]["Microcanal / Canal 3"]["peg"]) * f_narba
                         except Exception:
                             peg_rate = 0.0
                         if capas_contracolado > 0 and m2_papel > 0 and peg_rate > 0:
                             calc = hp_produccion * m2_papel * peg_rate * capas_contracolado
-                            st.write(f"Contracolado: {float(det_row.get('Contracolado', 0.0)):.4f} €")
                             st.code(f"= {hp_produccion} * {m2_papel:.6f} * {peg_rate:.6f} * {capas_contracolado} = {calc:.4f}")
+                        else:
+                            st.caption("— (No aplica: capas_contracolado=0 o faltan datos)")
 
-                        # Impresión (explicación)
-                        st.write(f"Impresión (total): {float(det_row.get('Impresión', 0.0)):.4f} €")
-                        st.markdown("- Cara y dorso se calculan **por tiradas** si hay 'varias impresiones'.")
-                        st.markdown("**Digital**: `(nb_run + merma_digital) * m2_papel * 6.5`")
-                        st.markdown("**Offset**: `coste_offset_por_tinta(nb_run) * (tintas + barniz)`")
-                        if bool(p.get("fr24", False)):
-                            try:
-                                fr24_rate = float(p.get("fr24_rate", 0.05))
-                            except Exception:
-                                fr24_rate = 0.05
-                            st.markdown(f"**FR24**: `m2_impresos_totales * {fr24_rate}`")
+                        # Impresión (incl. FR24 si aplica)
+                        st.write(f"Impresión: {float(det_row.get('Impresión', 0.0)):.4f} €")
+                        try:
+                            merma_imp_digital_hojas_local = int(globals().get("merma_imp_digital_hojas", 10) or 10)
+                        except Exception:
+                            merma_imp_digital_hojas_local = 10
+                        fr24_enabled = bool(p.get("fr24", False))
+                        try:
+                            fr24_rate = float(p.get("fr24_rate", 0.05))
+                        except Exception:
+                            fr24_rate = 0.05
+                        fr24_m2_total = 0.0
+                        imp_total_calc = 0.0
+                        det_lines = []
+                        partes = partes_imp_units if partes_imp_units else [int(q_sel)]
+                        # Cara
+                        if im_c == "Digital":
+                            for q_run in partes:
+                                nb_run = float(int(q_run)) * float(pl)
+                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
+                                c = hp_run * m2_papel * 6.5
+                                imp_total_calc += c
+                                det_lines.append(f"cara DIGITAL: (nb_run+merma) * m2 * 6.5 = ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*6.5 = {c:.4f}")
+                                if fr24_enabled and m2_papel > 0:
+                                    fr24_m2_total += hp_run * m2_papel
+                        elif im_c == "Offset":
+                            tintas = int(p.get("nt", 0)) + (1 if bool(p.get("ba", False)) else 0)
+                            for q_run in partes:
+                                nb_run = int(round(int(q_run) * float(pl)))
+                                c_t = coste_offset_por_tinta(int(nb_run))
+                                c = c_t * int(tintas)
+                                imp_total_calc += c
+                                det_lines.append(f"cara OFFSET: coste_offset_por_tinta({nb_run})*tintas = {c_t:.4f}*{tintas} = {c:.4f}")
+                                if fr24_enabled and m2_papel > 0:
+                                    fr24_m2_total += float(nb_run) * m2_papel
+                        # Dorso
+                        if im_d == "Digital":
+                            for q_run in partes:
+                                nb_run = float(int(q_run)) * float(pl)
+                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
+                                c = hp_run * m2_papel * 6.5
+                                imp_total_calc += c
+                                det_lines.append(f"dorso DIGITAL: ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*6.5 = {c:.4f}")
+                                if fr24_enabled and m2_papel > 0:
+                                    fr24_m2_total += hp_run * m2_papel
+                        elif im_d == "Offset":
+                            tintas = int(p.get("nt_d", 0)) + (1 if bool(p.get("ba_d", False)) else 0)
+                            for q_run in partes:
+                                nb_run = int(round(int(q_run) * float(pl)))
+                                c_t = coste_offset_por_tinta(int(nb_run))
+                                c = c_t * int(tintas)
+                                imp_total_calc += c
+                                det_lines.append(f"dorso OFFSET: coste_offset_por_tinta({nb_run})*tintas = {c_t:.4f}*{tintas} = {c:.4f}")
+                                if fr24_enabled and m2_papel > 0:
+                                    fr24_m2_total += float(nb_run) * m2_papel
+                        c_fr24 = 0.0
+                        if fr24_enabled and fr24_rate > 0 and fr24_m2_total > 0:
+                            c_fr24 = fr24_m2_total * fr24_rate
+                            imp_total_calc += c_fr24
+                            det_lines.append(f"FR24: m2_total*rate = {fr24_m2_total:.6f}*{fr24_rate} = {c_fr24:.4f}")
+                        if det_lines:
+                            st.code("\n".join(det_lines))
+                        else:
+                            st.caption("— (No aplica: no hay impresión)")
 
-                        # Peliculado
+                        # Peliculado (incl. Laminado digital si aplica)
                         st.write(f"Peliculado: {float(det_row.get('Peliculado', 0.0)):.4f} €")
-                        st.markdown("""**Offset**: `hp_produccion * m2_papel * precio_peliculado * f_narba`
-**Digital** (si aplica): `(nb_run + merma_digital) * m2_papel * precio_laminado_digital`""")
+                        pel_lines = []
+                        pel_total_calc = 0.0
+                        # Peliculado offset (por lado)
+                        try:
+                            if str(p.get("pel","Sin Peliculado")) != "Sin Peliculado":
+                                precio_pel = float(db["peliculado"][str(p.get("pel"))])
+                                c = hp_produccion * m2_papel * precio_pel * f_narba
+                                pel_total_calc += c
+                                pel_lines.append(f"pel_cara OFFSET: {hp_produccion}*{m2_papel:.6f}*{precio_pel}*{f_narba} = {c:.4f}")
+                        except Exception:
+                            pass
+                        try:
+                            if str(p.get("pd","Ninguno")) != "Ninguno" and str(p.get("pel_d","Sin Peliculado")) != "Sin Peliculado":
+                                precio_pel = float(db["peliculado"][str(p.get("pel_d"))])
+                                c = hp_produccion * m2_papel * precio_pel * f_narba
+                                pel_total_calc += c
+                                pel_lines.append(f"pel_dorso OFFSET: {hp_produccion}*{m2_papel:.6f}*{precio_pel}*{f_narba} = {c:.4f}")
+                        except Exception:
+                            pass
+                        # Laminado digital (por tirada y lado)
+                        try:
+                            lam_rate = float(db.get("laminado_digital", 3.5))
+                        except Exception:
+                            lam_rate = 3.5
+                        if bool(p.get("ld", False)) and im_c == "Digital":
+                            for q_run in partes:
+                                nb_run = float(int(q_run)) * float(pl)
+                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
+                                c = hp_run * m2_papel * lam_rate
+                                pel_total_calc += c
+                                pel_lines.append(f"laminado_digital CARA: ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*{lam_rate} = {c:.4f}")
+                        if bool(p.get("ld_d", False)) and im_d == "Digital":
+                            for q_run in partes:
+                                nb_run = float(int(q_run)) * float(pl)
+                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
+                                c = hp_run * m2_papel * lam_rate
+                                pel_total_calc += c
+                                pel_lines.append(f"laminado_digital DORSO: ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*{lam_rate} = {c:.4f}")
+                        if pel_lines:
+                            st.code("\n".join(pel_lines))
+                        else:
+                            st.caption("— (No aplica: sin peliculado ni laminado digital)")
 
                         # Corte
                         st.write(f"Corte (Troquel/Plotter): {float(det_row.get('Corte (Troquel/Plotter)', 0.0)):.4f} €")
+                        st.code(
+                            f"hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas) = ceil({hp_produccion} * {auto_piezas}/{troquel_piezas_manual}) = {hp_corte}\n"
+                            f"Troquelado: arranque + hp_corte*tiro · Plotter: hp_corte*precio_hoja"
+                        )
                         st.markdown("""**Troquelado**: `arranque + hp_corte * tiro`  (hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas)`
 **Plotter**: `hp_corte * precio_hoja_plotter`
 **Sin corte**: `0`""")
+
 
                         # Subtotal
                         st.write(f"Subtotal Pieza: {float(det_row.get('Subtotal Pieza', 0.0)):.4f} €")
