@@ -2690,15 +2690,14 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             cat = "Grande (> 1000x700)" if (h>1000 or w>700) else ("Pequeño (< 1000x700)" if (h<1000 and w<700) else "Mediano (Estándar)")
             c_troquel_taller = 0.0
             c_plotter = 0.0
-            if cor_sel == "Troquelado":
-                arr = float(db["troquelado"][cat]["arranque"]) * f_narba if bool(p.get("cobrar_arreglo", True)) else 0.0
-                tiro = float(db["troquelado"][cat]["tiro"]) * f_narba
-                # Ajuste por "piezas por troquel" manual:
-                # - No afecta a impresión ni a material (siguen usando hp_produccion).
-                # - Solo afecta a corte (Troquelado/Plotter): si el troquel hace menos piezas por golpe,
-                #   se necesitan más hojas para cortar el mismo nº de uds.
-                troquel_piezas_manual = int(p.get("troquel_piezas", 0) or 0)
-                auto_piezas = 1
+
+            # Pre-cálculo para corte (Troquelado/Plotter):
+            # - Evita NameError (hp_corte siempre definido).
+            # - Aplica el ajuste manual "piezas por troquel" también al Plotter.
+            hp_corte = int(math.ceil(float(hp_produccion)))
+            auto_piezas = 1
+            troquel_piezas_manual = int(p.get("troquel_piezas", 0) or 0)
+            if cor_sel in ("Troquelado", "Plotter"):
                 try:
                     _pl_tmp = float(p.get("pliegos", 1.0) or 1.0)
                     if _pl_tmp > 0 and _pl_tmp < 1.0:
@@ -2710,6 +2709,9 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 troquel_factor = float(auto_piezas) / float(max(1, troquel_piezas_manual))
                 hp_corte = int(math.ceil(float(hp_produccion) * troquel_factor))
 
+            if cor_sel == "Troquelado":
+                arr = float(db["troquelado"][cat]["arranque"]) * f_narba if bool(p.get("cobrar_arreglo", True)) else 0.0
+                tiro = float(db["troquelado"][cat]["tiro"]) * f_narba
                 c_troquel_taller = arr + (hp_corte * tiro)
             elif cor_sel == "Plotter":
                 c_plotter = hp_corte * float(db["plotter"]["precio_hoja"])
