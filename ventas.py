@@ -168,16 +168,16 @@ OPCIONES_FLEXICO = [f"{k} - {v['desc']}" for k, v in PRODUCTOS_FLEXICO.items()]
 PRECIOS_BASE = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0.0, "gramaje": 0},
-        "Reverso Gris": {"precio_kg": 0.93, "gramaje": 220},
+        "Reverso Gris": {"precio_kg": 0.96, "gramaje": 220},
         "Zenith": {"precio_kg": 1.55, "gramaje": 350},
-        "Reverso Madera": {"precio_kg": 0.95, "gramaje": 400},
+        "Reverso Madera": {"precio_kg": 0.975, "gramaje": 400},
         "Folding Kraft": {"precio_kg": 1.90, "gramaje": 340},
         "Folding Blanco": {"precio_kg": 1.82, "gramaje": 350},
     },
     "planchas": {
         "Ninguna": {"C/C": 0.0, "peg": 0.0},
-        "Microcanal / Canal 3": {"C/C": 0.659, "B/C": 0.672, "B/B": 0.758, "peg": 0.217},
-        "Doble Micro / Doble Doble": {"C/C": 1.046, "B/C": 1.1, "B/B": 1.276, "peg": 0.263},
+        "Microcanal / Canal 3": {"C/C": 0.702, "B/C": 0.725, "B/B": 0.805, "peg": 0.217},
+        "Doble Micro / Doble Doble": {"C/C": 1.128, "B/C": 1.187, "B/B": 1.378, "peg": 0.263},
         "AC (Cuero/Cuero)": {"C/C": 2.505, "peg": 0.217},
     },
     "rigidos": {
@@ -788,6 +788,57 @@ def es_digital_en_proyecto(piezas_dict):
 # SESSION STATE INIT
 # =========================================================
 if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
+
+# =========================================================
+# TARIFA MATERIA PRIMA (comparación vs proyectos importados)
+# =========================================================
+_TARIFA_MATERIA_PRIMA_CATS = ("cartoncillo", "planchas", "rigidos", "peliculado")
+
+def _subset_materia_prima(db: dict) -> dict:
+    """Devuelve un subconjunto estable de db_precios para comparar tarifas de materia prima.
+    Solo incluye categorías de materia prima (no procesos).
+    """
+    out: dict = {}
+    if not isinstance(db, dict):
+        return out
+    for cat in _TARIFA_MATERIA_PRIMA_CATS:
+        v = db.get(cat, None)
+        if isinstance(v, dict):
+            out[cat] = v
+    return out
+
+def _hash_materia_prima(db: dict) -> str:
+    """Hash estable (ordenado) del subconjunto de materia prima."""
+    try:
+        blob = json.dumps(_subset_materia_prima(db), sort_keys=True, ensure_ascii=False)
+    except Exception:
+        blob = str(_subset_materia_prima(db))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+def _aplicar_tarifa_actual_materia_prima() -> None:
+    """Sobrescribe SOLO materia prima (cartoncillo/planchas/rigidos/peliculado) con la tarifa actual (PRECIOS_BASE).
+    Mantiene el resto de db_precios intacto.
+    """
+    db = st.session_state.get("db_precios", {})
+    if not isinstance(db, dict):
+        db = {}
+    base = deepcopy(PRECIOS_BASE)
+    for cat in _TARIFA_MATERIA_PRIMA_CATS:
+        if cat not in base or not isinstance(base.get(cat), dict):
+            continue
+        # Merge "por clave", manteniendo posibles materiales custom del proyecto
+        cur_cat = db.get(cat, {})
+        if not isinstance(cur_cat, dict):
+            cur_cat = {}
+        for k, v in base[cat].items():
+            # cartoncillo/rigidos/planchas son dicts; peliculado tiene floats.
+            cur_cat[k] = deepcopy(v)
+        db[cat] = cur_cat
+    st.session_state.db_precios = db
+
+    # Al aplicar, dejamos constancia de que ya está actualizado respecto a la tarifa actual
+    st.session_state._tarifa_mp_import_hash = None
+    st.session_state._tarifa_mp_mismatch = False
 if "piezas_dict" not in st.session_state: st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
 if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extras_grabados = []
 if "embalajes" not in st.session_state: st.session_state.embalajes = [crear_embalaje_vacio(0)]
@@ -836,6 +887,8 @@ if "db_descuentos" not in st.session_state:
 
 
 if "_last_import_hash" not in st.session_state: st.session_state._last_import_hash = None
+if "_tarifa_mp_import_hash" not in st.session_state: st.session_state._tarifa_mp_import_hash = None
+if "_tarifa_mp_mismatch" not in st.session_state: st.session_state._tarifa_mp_mismatch = False
 if "_export_blob" not in st.session_state: st.session_state._export_blob = None
 if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
 if "_imported_compras_legible" not in st.session_state: st.session_state._imported_compras_legible = None
@@ -1159,6 +1212,13 @@ def normalizar_import(di: dict):
 
     if isinstance(di.get("db_precios", None), dict):
         st.session_state.db_precios = di["db_precios"]
+        # ✅ Aviso de tarifa: si el proyecto importado trae materia prima distinta a la tarifa actual
+        try:
+            st.session_state._tarifa_mp_import_hash = _hash_materia_prima(st.session_state.db_precios)
+            st.session_state._tarifa_mp_mismatch = (st.session_state._tarifa_mp_import_hash != _hash_materia_prima(PRECIOS_BASE))
+        except Exception:
+            st.session_state._tarifa_mp_import_hash = None
+            st.session_state._tarifa_mp_mismatch = False
 
     # ✅ Descuentos por bloque (si vienen en el JSON)
     if isinstance(di.get("db_descuentos", None), dict):
@@ -1564,6 +1624,24 @@ tab_calculadora, tab_costes, tab_auditoria, tab_debug = st.tabs(["🧮 Calculado
 with tab_costes:
     col_c1, col_c2 = st.columns(2)
     db = st.session_state.db_precios
+
+    # =========================================================
+    # Aviso: proyecto importado con materia prima distinta a la tarifa actual
+    # =========================================================
+    if bool(st.session_state.get("_tarifa_mp_mismatch", False)):
+        st.warning(
+            "⚠️ Este proyecto está usando **costes de materia prima importados** que **no coinciden** con la tarifa actual. "
+            "Puedes mantenerlos (recomendado si es una oferta ya enviada) o actualizarlos a tarifa vigente."
+        )
+        c_u1, c_u2 = st.columns([1, 2])
+        with c_u1:
+            if st.button("🔁 Actualizar materia prima a tarifa actual", use_container_width=True, key="btn_update_mp"):
+                _aplicar_tarifa_actual_materia_prima()
+                st.success("Materia prima actualizada a tarifa actual.")
+                st.rerun()
+        with c_u2:
+            st.caption("Actualiza SOLO: Cartoncillo, Planchas, Rígidos y Peliculado. No toca procesos, extras, troqueles, etc.")
+        st.markdown("---")
 
     # defaults descuentos (por si vienen viejos)
     if "db_descuentos" not in st.session_state or not isinstance(st.session_state.db_descuentos, dict):
