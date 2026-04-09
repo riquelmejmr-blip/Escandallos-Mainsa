@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import json
 import re
+import html
 import math
 from copy import deepcopy
 import hashlib
@@ -167,16 +168,16 @@ OPCIONES_FLEXICO = [f"{k} - {v['desc']}" for k, v in PRODUCTOS_FLEXICO.items()]
 PRECIOS_BASE = {
     "cartoncillo": {
         "Ninguno": {"precio_kg": 0.0, "gramaje": 0},
-        "Reverso Gris": {"precio_kg": 0.93, "gramaje": 220},
+        "Reverso Gris": {"precio_kg": 0.96, "gramaje": 220},
         "Zenith": {"precio_kg": 1.55, "gramaje": 350},
-        "Reverso Madera": {"precio_kg": 0.95, "gramaje": 400},
+        "Reverso Madera": {"precio_kg": 0.975, "gramaje": 400},
         "Folding Kraft": {"precio_kg": 1.90, "gramaje": 340},
         "Folding Blanco": {"precio_kg": 1.82, "gramaje": 350},
     },
     "planchas": {
         "Ninguna": {"C/C": 0.0, "peg": 0.0},
-        "Microcanal / Canal 3": {"C/C": 0.659, "B/C": 0.672, "B/B": 0.758, "peg": 0.217},
-        "Doble Micro / Doble Doble": {"C/C": 1.046, "B/C": 1.1, "B/B": 1.276, "peg": 0.263},
+        "Microcanal / Canal 3": {"C/C": 0.702, "B/C": 0.725, "B/B": 0.805, "peg": 0.217},
+        "Doble Micro / Doble Doble": {"C/C": 1.128, "B/C": 1.187, "B/B": 1.378, "peg": 0.263},
         "AC (Cuero/Cuero)": {"C/C": 2.505, "peg": 0.217},
     },
     "rigidos": {
@@ -230,32 +231,304 @@ FORMATOS_STD = {
 # =========================================================
 # MERMAS (AUTO)
 # =========================================================
-def calcular_mermas_estandar(n, es_digital=False):
-    """Devuelve (merma_rodaje_proceso_hojas, merma_arranque_impresion_hojas).
+def _tabla_merma_procesos_offset(hojas_netas: float) -> int:
+    """Merma de procesos en OFFSET según tabla del cliente.
 
-    Regla: merma de rodaje/proceso proporcional con tope máximo de 150 hojas.
+    IMPORTANTE:
+    - La tabla se aplica sobre *hojas/pliegos netos* (ya ajustados por formato: Pliegos/Ud).
+    - Redondea hacia arriba a hoja entera.
     """
-    # Rodaje proceso: proporcional pero capado
+    n = int(math.ceil(max(0.0, float(hojas_netas))))
+    # Tabla (Desde incl., Hasta incl., Merma)
+    tramos = [
+        (0, 99, 20),
+        (100, 149, 30),
+        (150, 200, 40),
+        (201, 600, 40),
+        (601, 1000, 60),
+        (1001, 1500, 60),
+        (1501, 2000, 80),
+        (2001, 3000, 80),
+        (3001, 3500, 100),
+        (3501, 5000, 100),
+        (5001, 8000, 120),
+        (8001, 10000, 120),
+        (10001, 13000, 140),
+        (13001, 15000, 140),
+    ]
+    for a, b, merma in tramos:
+        if a <= n <= b:
+            return int(merma)
+    # A partir de 15001
+    return 150
+
+
+def _merma_impresion_offset_por_pasadas(n_tintas: int, barniz: bool) -> int:
+    """Merma de impresión OFFSET por pasadas.
+
+    Regla:
+    - Base: 100 hojas (arranque mínimo).
+    - Máquina 4 cuerpos: nº pasadas = ceil((tintas + (barniz?1:0)) / 4).
+    - Merma = 100 + 50*(pasadas-1)
+
+    Nota importante:
+    - Si por UI/JSON llega n_tintas vacío/0, igualmente aplicamos el mínimo de 100 hojas.
+    """
+    # Robustez ante valores vacíos/None/strings
+    try:
+        tintas = int(n_tintas)
+    except Exception:
+        tintas = 0
+
+    tintas = max(0, tintas)
+    apps = max(1, tintas) + (1 if bool(barniz) else 0)  # mínimo 1 aplicación para garantizar arranque
+    pasadas = int(math.ceil(apps / 4.0))
+    return int(100 + 50 * max(0, pasadas - 1))
+
+
+def calcular_mermas_estandar(n_uds: int, pliegos_por_ud: float = 1.0, es_digital: bool = False,
+                            n_tintas: int = 4, barniz: bool = False) -> tuple[int, int]:
+    """Devuelve (merma_proceso_hojas, merma_impresion_hojas).
+
+    - Proceso (OFFSET): según tabla del cliente, aplicada a hojas netas = uds * pliegos_por_ud.
+    - Impresión:
+        * Offset: 100 + 50*(pasadas-1), con pasadas por (tintas + barniz) en grupos de 4.
+        * Digital: mantiene comportamiento anterior (10 hojas) salvo que se fuerce manualmente.
+    """
+    uds = max(0, int(n_uds))
+    pl = float(pliegos_por_ud) if pliegos_por_ud is not None else 1.0
+    hojas_netas = uds * pl
+
     if es_digital:
-        merma_proc = min(int(n * 0.02), 150)
-        return merma_proc, 10
+        merma_proc = min(int(math.ceil(hojas_netas * 0.02)), 150)
+        return int(merma_proc), 10
 
-    if n < 100:
-        merma_proc, merma_imp = 10, 150
-    elif n < 200:
-        merma_proc, merma_imp = 20, 175
-    elif n < 600:
-        merma_proc, merma_imp = 30, 200
-    elif n < 1000:
-        merma_proc, merma_imp = 40, 220
-    elif n < 2000:
-        merma_proc, merma_imp = 50, 250
-    else:
-        merma_proc, merma_imp = int(n * 0.03), 300
-
-    return min(int(merma_proc), 150), int(merma_imp)
+    merma_proc = _tabla_merma_procesos_offset(hojas_netas)
+    merma_imp = _merma_impresion_offset_por_pasadas(n_tintas=n_tintas, barniz=barniz)
+    return int(merma_proc), int(merma_imp)
 
 
+
+# =========================================================
+# MERMAS (AUTO TRACKERS) - para actualizar defaults cuando cambian tintas/formato
+# =========================================================
+def _ss_autoref_init() -> None:
+    # Trackers para saber si el usuario ha sobreescrito un valor o sigue en automático
+    if "mermas_proc_auto_ref" not in st.session_state or not isinstance(st.session_state.get("mermas_proc_auto_ref"), dict):
+        st.session_state.mermas_proc_auto_ref = {}
+    if "mermas_imp_auto_ref" not in st.session_state or not isinstance(st.session_state.get("mermas_imp_auto_ref"), dict):
+        st.session_state.mermas_imp_auto_ref = {}
+
+def _ss_autoupdate_merma_proc(pid: int, qty: int, new_default: int) -> None:
+    """Si la merma de proceso actual coincide con el último default auto guardado, se actualiza al nuevo default."""
+    _ss_autoref_init()
+    pid_k = str(pid); qty_k = str(int(qty))
+    cur = _ss_get_merma_proc(pid, qty, new_default)
+    auto_pid = st.session_state.mermas_proc_auto_ref.setdefault(pid_k, {})
+    old_auto = int(auto_pid.get(qty_k, new_default))
+    # Solo actualizamos si el usuario no ha tocado (cur==old_auto) o si cur<=0 (legacy)
+    if int(cur) <= 0 or int(cur) == int(old_auto):
+        st.session_state.mermas_proc_manual.setdefault(pid_k, {})
+        st.session_state.mermas_proc_manual[pid_k][qty_k] = int(new_default)
+        auto_pid[qty_k] = int(new_default)
+
+def _ss_autoupdate_merma_imp(pid: int, qty: int, lado: str, new_default: int) -> None:
+    """Auto-update para merma de impresión por lado (cara/dorso)."""
+    _ss_autoref_init()
+    pid_k = str(pid); qty_k = str(int(qty)); lado_k = str(lado)
+    cur = _ss_get_merma_imp(pid, qty, lado_k, new_default)
+    auto_pid = st.session_state.mermas_imp_auto_ref.setdefault(pid_k, {})
+    auto_qty = auto_pid.setdefault(qty_k, {})
+    old_auto = int(auto_qty.get(lado_k, new_default))
+    if int(cur) <= 0 or int(cur) == int(old_auto):
+        st.session_state.mermas_imp_manual.setdefault(pid_k, {})
+        st.session_state.mermas_imp_manual[pid_k].setdefault(qty_k, {"cara": 0, "dorso": 0})
+        st.session_state.mermas_imp_manual[pid_k][qty_k][lado_k] = int(new_default)
+        auto_qty[lado_k] = int(new_default)
+
+
+def _ss_sync_merma_imp_widget(pid: int, qty: int, lado: str, widget_key: str, new_default: int) -> None:
+    """Sincroniza la merma de impresión (cara/dorso) con el default calculado,
+    respetando si el usuario la ha editado manualmente.
+
+    Problema que resuelve:
+    - Streamlit mantiene el valor del widget en session_state. Si el usuario cambia tintas/barniz,
+      queremos recalcular el default (100+50*(pasadas-1)) y reflejarlo automáticamente *solo*
+      si el usuario no había sobreescrito ese campo.
+
+    Criterio de 'no sobreescrito':
+    - El valor actual del widget o el valor almacenado coincide con el último default auto, o es <=0 (legacy).
+    """
+    _ss_autoref_init()
+    pid_k = str(pid)
+    qty_k = str(int(qty))
+    lado_k = str(lado)
+
+    auto_pid = st.session_state.mermas_imp_auto_ref.setdefault(pid_k, {})
+    auto_qty = auto_pid.setdefault(qty_k, {})
+    old_auto = int(auto_qty.get(lado_k, int(new_default)))
+
+    try:
+        cur_widget = int(st.session_state.get(widget_key, 0) or 0)
+    except Exception:
+        cur_widget = 0
+
+    try:
+        cur_stored = int(_ss_get_merma_imp(pid, int(qty), lado_k, int(new_default)) or 0)
+    except Exception:
+        cur_stored = 0
+
+    # Si el usuario no ha tocado, actualizamos a new_default y guardamos la referencia auto
+    if (cur_widget <= 0) or (cur_widget == old_auto) or (cur_stored <= 0) or (cur_stored == old_auto):
+        st.session_state[widget_key] = int(new_default)
+        st.session_state.mermas_imp_manual.setdefault(pid_k, {})
+        st.session_state.mermas_imp_manual[pid_k].setdefault(qty_k, {"cara": 0, "dorso": 0})
+        st.session_state.mermas_imp_manual[pid_k][qty_k][lado_k] = int(new_default)
+        auto_qty[lado_k] = int(new_default)
+# =========================================================
+# MERMAS (SESSION HELPERS - compat JSON antiguo/nuevo)
+# =========================================================
+def _ss_get_merma_proc(pid: int, qty: int, default: int = 0) -> int:
+    """Obtiene merma de procesos por forma+cantidad.
+    Compatibilidad:
+    - Nuevo: mermas_proc_manual = {pid: {qty: val}}
+    - Antiguo: mermas_proc_manual = {qty: val}
+    """
+    d = st.session_state.get("mermas_proc_manual", {})
+    try:
+        pid_k = str(pid)
+        qty_k = str(int(qty))
+        if isinstance(d, dict):
+            if pid_k in d and isinstance(d.get(pid_k), dict):
+                sub = d[pid_k]
+                return int(sub.get(qty_k, sub.get(int(qty), default)))
+            if pid in d and isinstance(d.get(pid), dict):
+                sub = d[pid]
+                return int(sub.get(qty_k, sub.get(int(qty), default)))
+            # legacy
+            return int(d.get(qty_k, d.get(int(qty), default)))
+    except Exception:
+        pass
+    return int(default)
+
+
+def _ss_setdefault_merma_proc(pid: int, qty: int, value: int) -> None:
+    d = st.session_state.get("mermas_proc_manual", {})
+    if not isinstance(d, dict):
+        d = {}
+        st.session_state.mermas_proc_manual = d
+    pid_k = str(pid)
+    qty_k = str(int(qty))
+    if pid_k not in d or not isinstance(d.get(pid_k), dict):
+        d[pid_k] = {}
+    sub = d[pid_k]
+    if qty_k not in sub and int(qty) not in sub:
+        sub[qty_k] = int(value)
+
+
+def _ss_get_merma_imp(pid: int, qty: int, lado: str, default: int = 0) -> int:
+    """Merma de impresión OFFSET por forma+cantidad+lado ('cara'/'dorso').
+
+    Compatibilidad:
+    - Nuevo: mermas_imp_manual = {pid: {qty: {'cara': x, 'dorso': y}}}
+    - Intermedio: {pid: {qty: x}} -> aplica a ambos lados
+    - Antiguo: {qty: x} -> aplica a ambos lados
+
+    Nota:
+    - Para evitar arrastres de proyectos antiguos, si hay un valor guardado <= 0 y el
+      default calculado es > 0, se considera "no inicializado" y se devuelve el default.
+      Además se actualiza en session_state para que el usuario lo vea/editable.
+    """
+    d = st.session_state.get("mermas_imp_manual", {})
+
+    def _sanitize(v: object) -> int | None:
+        try:
+            iv = int(v)  # type: ignore[arg-type]
+        except Exception:
+            return None
+        # Si está a 0/negativo y tenemos default > 0, lo tratamos como no inicializado
+        if iv <= 0 and int(default) > 0:
+            return None
+        return iv
+
+    try:
+        pid_k = str(pid)
+        qty_i = int(qty)
+        qty_k = str(qty_i)
+
+        # Intentamos leer en orden: nuevo -> intermedio -> legacy
+        if isinstance(d, dict):
+            # NUEVO / INTERMEDIO por pid
+            for pk in (pid_k, pid):
+                if pk in d and isinstance(d.get(pk), dict):
+                    sub = d[pk]
+                    v = sub.get(qty_k, sub.get(qty_i, None))
+                    if isinstance(v, dict):
+                        vv = _sanitize(v.get(lado, None))
+                        if vv is not None:
+                            return vv
+                    else:
+                        vv = _sanitize(v)
+                        if vv is not None:
+                            return vv
+
+            # LEGACY global por cantidad
+            v = d.get(qty_k, d.get(qty_i, None))
+            if isinstance(v, dict):
+                vv = _sanitize(v.get(lado, None))
+                if vv is not None:
+                    return vv
+            else:
+                vv = _sanitize(v)
+                if vv is not None:
+                    return vv
+    except Exception:
+        pass
+
+    # Si llegamos aquí, devolvemos default y, si aplica, lo persistimos para que no quede a 0.
+    try:
+        if int(default) > 0:
+            _ss_setdefault_merma_imp(int(pid), int(qty), str(lado), int(default))
+    except Exception:
+        pass
+    return int(default)
+
+
+def _ss_setdefault_merma_imp(pid: int, qty: int, lado: str, value: int) -> None:
+    """Inicializa merma de impresión si no existe o si está a 0 en proyectos antiguos."""
+    d = st.session_state.get("mermas_imp_manual", {})
+    if not isinstance(d, dict):
+        d = {}
+        st.session_state.mermas_imp_manual = d
+    pid_k = str(pid)
+    qty_i = int(qty)
+    qty_k = str(qty_i)
+    if pid_k not in d or not isinstance(d.get(pid_k), dict):
+        d[pid_k] = {}
+    sub = d[pid_k]
+
+    # Normalizamos a dict por lado ('cara'/'dorso')
+    v = sub.get(qty_k, sub.get(qty_i, None))
+    if not isinstance(v, dict):
+        # Si no existe o venía como entero legacy, lo convertimos.
+        if v is None:
+            v = {"cara": 0, "dorso": 0}
+        else:
+            try:
+                iv = int(v)
+            except Exception:
+                iv = 0
+            v = {"cara": iv, "dorso": iv}
+        sub[qty_k] = v
+
+    # Si el valor actual está vacío/0/negativo, escribimos el default calculado
+    try:
+        current = v.get(lado, 0)
+        current_i = int(current) if current not in (None, "") else 0
+    except Exception:
+        current_i = 0
+    if current_i <= 0:
+        v[lado] = int(value)
 def parse_cantidades(s: str):
     if not s:
         return []
@@ -496,10 +769,13 @@ def crear_forma_vacia(index):
         "pel": "Sin Peliculado",
         "pel_d": "Sin Peliculado",
         "ld": False, "ld_d": False,
+        "fr24": False,
+        "fr24_rate": 0.05,
         "cor_default": "Troquelado",
         "cor_by_qty": {},
         "cobrar_arreglo": True,
         "pv_troquel": 0.0,
+        "troquel_piezas": 0,
     }
 
 def es_digital_en_proyecto(piezas_dict):
@@ -512,6 +788,57 @@ def es_digital_en_proyecto(piezas_dict):
 # SESSION STATE INIT
 # =========================================================
 if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
+
+# =========================================================
+# TARIFA MATERIA PRIMA (comparación vs proyectos importados)
+# =========================================================
+_TARIFA_MATERIA_PRIMA_CATS = ("cartoncillo", "planchas", "rigidos", "peliculado")
+
+def _subset_materia_prima(db: dict) -> dict:
+    """Devuelve un subconjunto estable de db_precios para comparar tarifas de materia prima.
+    Solo incluye categorías de materia prima (no procesos).
+    """
+    out: dict = {}
+    if not isinstance(db, dict):
+        return out
+    for cat in _TARIFA_MATERIA_PRIMA_CATS:
+        v = db.get(cat, None)
+        if isinstance(v, dict):
+            out[cat] = v
+    return out
+
+def _hash_materia_prima(db: dict) -> str:
+    """Hash estable (ordenado) del subconjunto de materia prima."""
+    try:
+        blob = json.dumps(_subset_materia_prima(db), sort_keys=True, ensure_ascii=False)
+    except Exception:
+        blob = str(_subset_materia_prima(db))
+    return hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+def _aplicar_tarifa_actual_materia_prima() -> None:
+    """Sobrescribe SOLO materia prima (cartoncillo/planchas/rigidos/peliculado) con la tarifa actual (PRECIOS_BASE).
+    Mantiene el resto de db_precios intacto.
+    """
+    db = st.session_state.get("db_precios", {})
+    if not isinstance(db, dict):
+        db = {}
+    base = deepcopy(PRECIOS_BASE)
+    for cat in _TARIFA_MATERIA_PRIMA_CATS:
+        if cat not in base or not isinstance(base.get(cat), dict):
+            continue
+        # Merge "por clave", manteniendo posibles materiales custom del proyecto
+        cur_cat = db.get(cat, {})
+        if not isinstance(cur_cat, dict):
+            cur_cat = {}
+        for k, v in base[cat].items():
+            # cartoncillo/rigidos/planchas son dicts; peliculado tiene floats.
+            cur_cat[k] = deepcopy(v)
+        db[cat] = cur_cat
+    st.session_state.db_precios = db
+
+    # Al aplicar, dejamos constancia de que ya está actualizado respecto a la tarifa actual
+    st.session_state._tarifa_mp_import_hash = None
+    st.session_state._tarifa_mp_mismatch = False
 if "piezas_dict" not in st.session_state: st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
 if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extras_grabados = []
 if "embalajes" not in st.session_state: st.session_state.embalajes = [crear_embalaje_vacio(0)]
@@ -526,6 +853,7 @@ if "impresiones_by_qty_fmt_enabled" not in st.session_state: st.session_state.im
 if "brf" not in st.session_state: st.session_state.brf = ""
 if "cli" not in st.session_state: st.session_state.cli = ""
 if "desc" not in st.session_state: st.session_state.desc = ""
+if "notas" not in st.session_state: st.session_state.notas = ""
 if "cants_str_saved" not in st.session_state: st.session_state.cants_str_saved = ""
 
 if "unidad_t" not in st.session_state: st.session_state.unidad_t = "Segundos"
@@ -559,8 +887,12 @@ if "db_descuentos" not in st.session_state:
 
 
 if "_last_import_hash" not in st.session_state: st.session_state._last_import_hash = None
+if "_tarifa_mp_import_hash" not in st.session_state: st.session_state._tarifa_mp_import_hash = None
+if "_tarifa_mp_mismatch" not in st.session_state: st.session_state._tarifa_mp_mismatch = False
 if "_export_blob" not in st.session_state: st.session_state._export_blob = None
 if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
+if "_imported_compras_legible" not in st.session_state: st.session_state._imported_compras_legible = None
+if "_imported_resumen_costes" not in st.session_state: st.session_state._imported_resumen_costes = None
 if "_json_downloaded" not in st.session_state: st.session_state._json_downloaded = False
 if "_json_downloaded_filename" not in st.session_state: st.session_state._json_downloaded_filename = ""
 
@@ -581,7 +913,7 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         "n_", "p_", "std_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_",
         "pf_", "gf_", "tb_", "pl_", "pldif_", "plh_", "plw_", "ap_",
         "rigman_", "rigwman_", "righman_", "rigpman_", "mrig_",
-        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
+        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
     ]
 
     for pid in piezas_ids:
@@ -688,6 +1020,7 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
 
         st.session_state[f"arr_{pid}"] = bool(p.get("cobrar_arreglo", True))
         st.session_state[f"pvt_{pid}"] = float(p.get("pv_troquel", 0.0))
+        st.session_state[f"trqp_{pid}"] = int(p.get("troquel_piezas", 0) or 0)
 
         st.session_state[f"im_d_{pid}"] = p.get("im_d", "No")
         st.session_state[f"nt_d_{pid}"] = int(p.get("nt_d", 0))
@@ -826,6 +1159,7 @@ def _normalizar_pieza_dict(pid: int, v: dict):
         }
     base["cobrar_arreglo"] = _coerce_bool(base.get("cobrar_arreglo", True), True)
     base["pv_troquel"] = _coerce_float(base.get("pv_troquel", 0.0), 0.0)
+    base["troquel_piezas"] = max(0, _coerce_int(base.get("troquel_piezas", 0), 0))
 
     return base
 
@@ -837,8 +1171,11 @@ def normalizar_import(di: dict):
     prev_ext_len = len(st.session_state.get("externos", [])) if isinstance(st.session_state.get("externos", None), list) else 0
 
     st.session_state.brf = str(di.get("brf", st.session_state.brf))
+    st.session_state.comercial_1 = str(di.get("comercial_1", st.session_state.get("comercial_1", "")))
+    st.session_state.comercial_2 = str(di.get("comercial_2", st.session_state.get("comercial_2", "")))
     st.session_state.cli = str(di.get("cli", st.session_state.cli))
     st.session_state.desc = str(di.get("desc", st.session_state.desc))
+    st.session_state.notas = str(di.get("notas", st.session_state.get("notas","")))
     if isinstance(di.get("cants_str", None), str):
         st.session_state.cants_str_saved = di["cants_str"]
 
@@ -875,6 +1212,13 @@ def normalizar_import(di: dict):
 
     if isinstance(di.get("db_precios", None), dict):
         st.session_state.db_precios = di["db_precios"]
+        # ✅ Aviso de tarifa: si el proyecto importado trae materia prima distinta a la tarifa actual
+        try:
+            st.session_state._tarifa_mp_import_hash = _hash_materia_prima(st.session_state.db_precios)
+            st.session_state._tarifa_mp_mismatch = (st.session_state._tarifa_mp_import_hash != _hash_materia_prima(PRECIOS_BASE))
+        except Exception:
+            st.session_state._tarifa_mp_import_hash = None
+            st.session_state._tarifa_mp_mismatch = False
 
     # ✅ Descuentos por bloque (si vienen en el JSON)
     if isinstance(di.get("db_descuentos", None), dict):
@@ -924,6 +1268,14 @@ def normalizar_import(di: dict):
             new_ids.append(pid)
 
     piezas_all = sorted(set(prev_piezas_ids + new_ids))
+
+    # ✅ Snapshots de costes (para preservar proyectos antiguos con precios vendidos)
+    if isinstance(di.get("compras_legible", None), dict):
+        st.session_state._imported_compras_legible = di["compras_legible"]
+    if isinstance(di.get("resumen_costes", None), dict):
+        st.session_state._imported_resumen_costes = di["resumen_costes"]
+
+
     purge_widget_keys_for_import(
         lista_cants=cants_all,
         piezas_ids=piezas_all,
@@ -938,13 +1290,48 @@ def normalizar_import(di: dict):
         st.session_state.lista_extras_grabados = di["extras"]
 
     if isinstance(di.get("mermas_imp", None), dict):
-        st.session_state.mermas_imp_manual = {int(k): int(v) for k, v in di["mermas_imp"].items()}
+        # Compatibilidad:
+        # - Nuevo: {pid: {qty: {'cara':x,'dorso':y}}}
+        # - Antiguo: {qty: x}
+        mi = di.get("mermas_imp", {})
+        if mi and all(isinstance(v, dict) for v in mi.values()):
+            # asumimos nuevo por forma
+            out = {}
+            for pid_k, sub in mi.items():
+                if not isinstance(sub, dict):
+                    continue
+                out[str(pid_k)] = {}
+                for qk, vv in sub.items():
+                    if isinstance(vv, dict):
+                        out[str(pid_k)][str(qk)] = {
+                            "cara": int(vv.get("cara", 0)),
+                            "dorso": int(vv.get("dorso", 0)),
+                        }
+                    else:
+                        # valor único -> ambos lados
+                        out[str(pid_k)][str(qk)] = {"cara": int(vv), "dorso": int(vv)}
+            st.session_state.mermas_imp_manual = out
+        else:
+            # legacy por cantidad
+            st.session_state.mermas_imp_manual = {int(k): int(v) for k, v in mi.items() if str(k).isdigit()}
+
     if isinstance(di.get("mermas_imp_digital", None), dict):
         st.session_state.mermas_imp_digital_manual = {int(k): int(v) for k, v in di["mermas_imp_digital"].items()}
     if isinstance(di.get("mermas_proc", None), dict):
-        st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in di["mermas_proc"].items()}
-
-    # Impresiones por cantidad (multi-tirada) - opcional en JSON
+        # Compatibilidad:
+        # - Nuevo: {pid: {qty: val}}
+        # - Antiguo: {qty: val}
+        mp = di.get("mermas_proc", {})
+        if mp and all(isinstance(v, dict) for v in mp.values()):
+            out = {}
+            for pid_k, sub in mp.items():
+                if not isinstance(sub, dict):
+                    continue
+                out[str(pid_k)] = {str(qk): int(vv) for qk, vv in sub.items()}
+            st.session_state.mermas_proc_manual = out
+        else:
+            st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in mp.items() if str(k).isdigit()}
+# Impresiones por cantidad (multi-tirada) - opcional en JSON
     if isinstance(di.get("impresiones_by_qty", None), dict):
         cfg_new = {}
         for k, v in di["impresiones_by_qty"].items():
@@ -1046,10 +1433,25 @@ def normalizar_import(di: dict):
             base["nombre"] = str(e.get("nombre", base["nombre"]))
             base["tipo"] = str(e.get("tipo", base["tipo"]))
             base["material"] = str(e.get("material", base["material"]))
-            if isinstance(e.get("dims", None), dict):
-                base["dims"] = e["dims"]
+            dims_in = e.get("dims", {}) if isinstance(e.get("dims", None), dict) else {}
+            base["dims"] = {
+                "L": _coerce_float(dims_in.get("L", 0.0), 0.0),
+                "W": _coerce_float(dims_in.get("W", 0.0), 0.0),
+                "H": _coerce_float(dims_in.get("H", 0.0), 0.0),
+            }
             if isinstance(e.get("costes", None), dict):
-                base["costes"] = {int(k): float(v) for k, v in e["costes"].items()}
+                costes_new = {}
+                for k, v in e["costes"].items():
+                    try:
+                        kk = int(float(k))
+                    except Exception:
+                        continue
+                    try:
+                        vv = float(v)
+                    except Exception:
+                        vv = 0.0
+                    costes_new[kk] = vv
+                base["costes"] = costes_new
             new_list.append(base)
         st.session_state.embalajes = new_list if new_list else [crear_embalaje_vacio(0)]
     else:
@@ -1110,6 +1512,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "comercial_2": c2_out,
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
+        "notas": st.session_state.get("notas",""),
         "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input), "rellenado": {"enabled": bool(st.session_state.rell_enabled), "t_input": float(st.session_state.rell_t_input)}, "armado": {"enabled": bool(st.session_state.arm_enabled), "t_input": float(st.session_state.arm_t_input)}},
@@ -1213,7 +1616,7 @@ with st.sidebar:
 # =========================================================
 # PESTAÑAS (SIEMPRE ADMIN)
 # =========================================================
-tab_calculadora, tab_costes, tab_debug = st.tabs(["🧮 Calculadora", "💰 Base de Datos", "🔍 Desglose"])
+tab_calculadora, tab_costes, tab_auditoria, tab_debug = st.tabs(["🧮 Calculadora", "💰 Base de Datos", "🧾 Auditoría cálculos", "🔍 Desglose"])
 
 # =========================================================
 # TAB COSTES (siempre visible)
@@ -1221,6 +1624,24 @@ tab_calculadora, tab_costes, tab_debug = st.tabs(["🧮 Calculadora", "💰 Base
 with tab_costes:
     col_c1, col_c2 = st.columns(2)
     db = st.session_state.db_precios
+
+    # =========================================================
+    # Aviso: proyecto importado con materia prima distinta a la tarifa actual
+    # =========================================================
+    if bool(st.session_state.get("_tarifa_mp_mismatch", False)):
+        st.warning(
+            "⚠️ Este proyecto está usando **costes de materia prima importados** que **no coinciden** con la tarifa actual. "
+            "Puedes mantenerlos (recomendado si es una oferta ya enviada) o actualizarlos a tarifa vigente."
+        )
+        c_u1, c_u2 = st.columns([1, 2])
+        with c_u1:
+            if st.button("🔁 Actualizar materia prima a tarifa actual", use_container_width=True, key="btn_update_mp"):
+                _aplicar_tarifa_actual_materia_prima()
+                st.success("Materia prima actualizada a tarifa actual.")
+                st.rerun()
+        with c_u2:
+            st.caption("Actualiza SOLO: Cartoncillo, Planchas, Rígidos y Peliculado. No toca procesos, extras, troqueles, etc.")
+        st.markdown("---")
 
     # defaults descuentos (por si vienen viejos)
     if "db_descuentos" not in st.session_state or not isinstance(st.session_state.db_descuentos, dict):
@@ -1348,6 +1769,7 @@ with tab_calculadora:
         st.text_input("Nº Comercial 1", key="comercial_1")
         st.text_input("Nº Comercial 2 (opcional)", key="comercial_2")
         st.text_input("Cliente", key="cli")
+        st.text_area("Notas / Comentarios", key="notas", height=180, placeholder="Escribe aquí notas internas o comentarios para incluir en la oferta comercial...")
         _aplicar_margen_auto_si_procede()
     with cB:
         st.text_input("Descripción", key="desc")
@@ -1430,24 +1852,41 @@ with tab_calculadora:
     st.divider()
 
     if lista_cants:
-        # Mermas por defecto:
-        # - 'mermas_proc_manual' y 'mermas_imp_manual' se consideran la referencia "normal" (offset / general)
-        # - 'mermas_imp_digital_manual' es específica para impresión digital
+        # Mermas por defecto (por FORMA + cantidad):
+        # - Procesos: tabla aplicada a hojas netas = uds * (pliegos/ud)
+        # - Impresión offset: 100 + 50*(pasadas-1) con pasadas = ceil((tintas + barniz)/4)
+        # Nota: siempre es editable en 'Gestión de Mermas'.
+        piezas = st.session_state.get("piezas_dict", {})
+        if isinstance(piezas, dict):
+            for pid, p in piezas.items():
+                pl = float(p.get("pliegos", 1.0))
+                # Defaults impresión (por lado) según configuración de la forma
+                im_c = p.get("im", "No")
+                nt_c = int(p.get("nt", 4))
+                ba_c = bool(p.get("ba", False))
+
+                im_d = p.get("im_d", "No")
+                nt_d = int(p.get("nt_d", 4))
+                ba_d = bool(p.get("ba_d", False))
+
+                for q in lista_cants:
+                    mp_off, _mi_ign = calcular_mermas_estandar(q, pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
+                    _ss_autoupdate_merma_proc(int(pid), int(q), int(mp_off))
+
+                    # Merma impresión por lado (solo OFFSET)
+                    if im_c == "Offset":
+                        mi_c = _merma_impresion_offset_por_pasadas(nt_c, ba_c)
+                        _ss_autoupdate_merma_imp(int(pid), int(q), "cara", int(mi_c))
+                    if im_d == "Offset":
+                        mi_d = _merma_impresion_offset_por_pasadas(nt_d, ba_d)
+                        _ss_autoupdate_merma_imp(int(pid), int(q), "dorso", int(mi_d))
+
+        # Digital (global por cantidad, como hasta ahora)
         for q in lista_cants:
-            mp_off, mi_off = calcular_mermas_estandar(q, es_digital=False)
-            _mp_dig, mi_dig = calcular_mermas_estandar(q, es_digital=True)
-
-            if q not in st.session_state.mermas_proc_manual:
-                st.session_state.mermas_proc_manual[q] = mp_off
-
-            if q not in st.session_state.mermas_imp_manual:
-                st.session_state.mermas_imp_manual[q] = mi_off
-
-            if q not in st.session_state.mermas_imp_digital_manual:
-                st.session_state.mermas_imp_digital_manual[q] = mi_dig
-
-
-    # -----------------------------------------------------
+            _mp_dig, mi_dig = calcular_mermas_estandar(q, pliegos_por_ud=1.0, es_digital=True)
+            if q not in st.session_state.mermas_imp_digital_manual and str(q) not in st.session_state.mermas_imp_digital_manual:
+                st.session_state.mermas_imp_digital_manual[q] = int(mi_dig)
+# -----------------------------------------------------
     # PASO 2: TÉCNICO
     # -----------------------------------------------------
     st.header("Paso 2 · Datos técnicos")
@@ -1538,12 +1977,22 @@ with tab_calculadora:
                 p["w"] = c_w.number_input("Ancho Papel (mm)", 0, 5000, value=int(p.get("w", 0)), key=f"w_{p_id}")
 
                 opts_im = ["Offset", "Digital", "No"]
-                val_im = p.get("im", "No")
-                idx_im = opts_im.index(val_im) if val_im in opts_im else 2
+                val_im_raw = p.get("im", "No")
+                val_im_norm = str(val_im_raw).strip().lower()
+                if val_im_norm in ("offset", "off"):
+                    val_im = "Offset"
+                elif val_im_norm in ("digital", "dig"):
+                    val_im = "Digital"
+                elif val_im_norm in ("no", "ninguno", "none", ""):
+                    val_im = "No"
+                else:
+                    # Compatibilidad: si viene algo raro de JSON antiguo, mantenemos "No"
+                    val_im = "No"
+                idx_im = opts_im.index(val_im)
                 p["im"] = st.selectbox("Impresión Cara", opts_im, index=idx_im, key=f"im_{p_id}")
 
                 if p["im"] == "Offset":
-                    p["nt"] = st.number_input("Tintas Cara", 0, 6, int(p.get("nt", 4)), key=f"nt_{p_id}")
+                    p["nt"] = st.number_input("Tintas Cara", 0, 12, int(p.get("nt", 4)), key=f"nt_{p_id}")
                     p["ba"] = st.checkbox("Barniz Cara", value=bool(p.get("ba", False)), key=f"ba_{p_id}")
                 elif p["im"] == "Digital":
                     p["ld"] = st.checkbox("Laminado Digital Cara", value=bool(p.get("ld", False)), key=f"ld_{p_id}")
@@ -1552,6 +2001,23 @@ with tab_calculadora:
                 val_pel = p.get("pel", "Sin Peliculado")
                 idx_pel = opts_pel.index(val_pel) if val_pel in opts_pel else 0
                 p["pel"] = st.selectbox("Peliculado Cara", opts_pel, index=idx_pel, key=f"pel_{p_id}")
+
+                # -----------------------------------------------------
+                # TINTA ESPECIAL FR24 (extra por m²)
+                # -----------------------------------------------------
+                p["fr24"] = st.checkbox("🧪 Tinta especial FR24 (extra €/m²)", value=bool(p.get("fr24", False)), key=f"fr24_{p_id}")
+                if bool(p["fr24"]):
+                    p["fr24_rate"] = float(st.number_input(
+                        "Coste extra FR24 (€/m²)",
+                        min_value=0.0,
+                        max_value=999.0,
+                        value=float(p.get("fr24_rate", 0.05)),
+                        step=0.01,
+                        key=f"fr24r_{p_id}",
+                    ))
+                else:
+                    # Mantener el último valor configurado (si existe) para no perderlo al desactivar.
+                    p["fr24_rate"] = float(p.get("fr24_rate", 0.05))
 
                 # -----------------------------------------------------
                 # IMPRESIONES POR CANTIDAD (multi-tirada) - POR FORMATO (TIC)
@@ -1734,14 +2200,33 @@ with tab_calculadora:
                 p["cobrar_arreglo"] = st.checkbox("¿Cobrar Arreglo?", value=bool(p.get("cobrar_arreglo", True)), key=f"arr_{p_id}")
                 p["pv_troquel"] = st.number_input("Precio Venta Troquel (€) (si aplica)", value=float(p.get("pv_troquel", 0.0)), key=f"pvt_{p_id}")
 
+                # ✅ Troquelado: permitir forzar manualmente cuántas piezas salen por golpe de troquel.
+                # 0 = automático (se asume 1/pliegos_por_ud cuando pliegos<1).
+                p["troquel_piezas"] = int(st.number_input(
+                    "Piezas por troquel (0 = automático)",
+                    min_value=0,
+                    step=1,
+                    value=int(p.get("troquel_piezas", 0) or 0),
+                    key=f"trqp_{p_id}",
+                ))
+
                 if p.get("pd", "Ninguno") != "Ninguno":
                     opts_imd = ["Offset", "Digital", "No"]
-                    val_imd = p.get("im_d", "No")
-                    idx_imd = opts_imd.index(val_imd) if val_imd in opts_imd else 2
+                    val_imd_raw = p.get("im_d", "No")
+                    val_imd_norm = str(val_imd_raw).strip().lower()
+                    if val_imd_norm in ("offset", "off"):
+                        val_imd = "Offset"
+                    elif val_imd_norm in ("digital", "dig"):
+                        val_imd = "Digital"
+                    elif val_imd_norm in ("no", "ninguno", "none", ""):
+                        val_imd = "No"
+                    else:
+                        val_imd = "No"
+                    idx_imd = opts_imd.index(val_imd)
                     p["im_d"] = st.selectbox("Impresión Dorso", opts_imd, index=idx_imd, key=f"im_d_{p_id}")
 
                     if p["im_d"] == "Offset":
-                        p["nt_d"] = st.number_input("Tintas Dorso", 0, 6, int(p.get("nt_d", 0)), key=f"nt_d_{p_id}")
+                        p["nt_d"] = st.number_input("Tintas Dorso", 0, 12, int(p.get("nt_d", 0)), key=f"nt_d_{p_id}")
                         p["ba_d"] = st.checkbox("Barniz Dorso", value=bool(p.get("ba_d", False)), key=f"ba_d_{p_id}")
                     elif p["im_d"] == "Digital":
                         p["ld_d"] = st.checkbox("Laminado Digital Dorso", value=bool(p.get("ld_d", False)), key=f"ld_d_{p_id}")
@@ -1908,34 +2393,123 @@ with tab_calculadora:
 
     st.divider()
     st.subheader("⚙️ 5. Gestión de Mermas (auto-relleno)")
-    if lista_cants:
+    if not lista_cants:
+        st.warning("Define cantidades en Paso 1.")
+    else:
+        # Digital se mantiene global por cantidad (como estaba)
+        st.markdown("**Impresión DIGITAL (global por cantidad)**")
         for q in lista_cants:
-            c1, c2, c3, c4 = st.columns([1, 2, 2, 2])
+            c1, c2 = st.columns([1, 3])
             c1.markdown(f"**{q} uds**")
-            st.session_state.mermas_imp_manual[q] = int(
-                c2.number_input(
-                    "Arranque impresión OFFSET (hojas)",
-                    value=int(st.session_state.mermas_imp_manual.get(q, 0)),
-                    key=f"mi_{q}",
-                )
-            )
             st.session_state.mermas_imp_digital_manual[q] = int(
-                c3.number_input(
+                c2.number_input(
                     "Arranque impresión DIGITAL (hojas)",
                     value=int(st.session_state.mermas_imp_digital_manual.get(q, 0)),
                     key=f"mid_{q}",
                 )
             )
-            st.session_state.mermas_proc_manual[q] = int(
-                c4.number_input(
-                    "Rodaje proceso (hojas)",
-                    value=int(st.session_state.mermas_proc_manual.get(q, 0)),
-                    key=f"mp_{q}",
-                )
-            )
-    else:
-        st.warning("Define cantidades en Paso 1.")
 
+        st.markdown("**OFFSET / Procesos (por Forma y cantidad)**")
+        piezas = st.session_state.get("piezas_dict", {})
+        if not isinstance(piezas, dict) or not piezas:
+            st.info("No hay formas definidas.")
+        else:
+            for pid, p in piezas.items():
+                nombre = p.get("nombre", f"Forma {pid}")
+                with st.expander(f"🧾 Mermas - {nombre}", expanded=False):
+                    # Cabecera
+                    for q in lista_cants:
+                        pl = float(p.get("pliegos", 1.0))
+                        mp_def, _ = calcular_mermas_estandar(int(q), pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
+
+                        # Defaults impresión por lado
+                        is_offset_c = str(p.get("im", "No")).strip().lower() == "offset"
+                        is_offset_d = str(p.get("im_d", "No")).strip().lower() == "offset"
+                        mi_def_c = _merma_impresion_offset_por_pasadas(int(p.get("nt", 4)), bool(p.get("ba", False))) if is_offset_c else 0
+                        mi_def_d = _merma_impresion_offset_por_pasadas(int(p.get("nt_d", 4)), bool(p.get("ba_d", False))) if is_offset_d else 0
+
+                        c0, c1, c2, c3 = st.columns([1, 2, 2, 2])
+                        c0.markdown(f"**{q} uds**")
+
+                        # Proceso
+                        _ss_autoupdate_merma_proc(int(pid), int(q), int(mp_def))
+                        v_proc = int(_ss_get_merma_proc(int(pid), int(q), int(mp_def)))
+                        # Guardamos la edición (si cambia)
+                        st.session_state.mermas_proc_manual.setdefault(str(pid), {})
+                        st.session_state.mermas_proc_manual[str(pid)][str(int(q))] = int(
+                            c1.number_input(
+                                "Rodaje proceso (hojas)",
+                                value=v_proc,
+                                key=f"mp_{pid}_{q}",
+                            )
+                        )
+
+                        # Impresión cara/dorso (OFFSET)
+                        st.session_state.mermas_imp_manual.setdefault(str(pid), {})
+                        qk = str(int(q))
+                        if qk not in st.session_state.mermas_imp_manual[str(pid)] or not isinstance(st.session_state.mermas_imp_manual[str(pid)][qk], dict):
+                            st.session_state.mermas_imp_manual[str(pid)][qk] = {"cara": 0, "dorso": 0}
+
+                        # Cara
+                        mi_key_c = f"mi_c_{pid}_{q}"
+                        if is_offset_c:
+                            # Default auto según tintas/barniz (se recalcula si cambian y el usuario no lo ha tocado)
+                            _ss_sync_merma_imp_widget(int(pid), int(q), "cara", mi_key_c, int(mi_def_c))
+                            v_c_auto = int(_ss_get_merma_imp(int(pid), int(q), "cara", int(mi_def_c)))
+                            if mi_key_c not in st.session_state:
+                                st.session_state[mi_key_c] = int(v_c_auto)
+
+                            v_c = int(st.session_state.get(mi_key_c, int(v_c_auto)))
+                            v_c = int(st.session_state.get(mi_key_c, int(v_c_auto)))
+                            v_c_in = int(
+                                c2.number_input(
+                                    "Merma impresión OFFSET (cara)",
+                                    value=v_c,
+                                    key=mi_key_c,
+                                )
+                            )
+                            st.session_state.mermas_imp_manual[str(pid)][qk]["cara"] = v_c_in
+                        else:
+                            # Si no es Offset, no aplicamos merma de impresión
+                            if mi_key_c not in st.session_state:
+                                st.session_state[mi_key_c] = 0
+                            c2.number_input(
+                                "Merma impresión OFFSET (cara)",
+                                value=0,
+                                key=mi_key_c,
+                                disabled=True,
+                            )
+                            st.session_state.mermas_imp_manual[str(pid)][qk]["cara"] = 0
+
+                        # Dorso
+                        mi_key_d = f"mi_d_{pid}_{q}"
+                        if is_offset_d:
+                            # Default auto según tintas/barniz (se recalcula si cambian y el usuario no lo ha tocado)
+                            _ss_sync_merma_imp_widget(int(pid), int(q), "dorso", mi_key_d, int(mi_def_d))
+                            v_d_auto = int(_ss_get_merma_imp(int(pid), int(q), "dorso", int(mi_def_d)))
+                            if mi_key_d not in st.session_state:
+                                st.session_state[mi_key_d] = int(v_d_auto)
+
+                            v_d = int(st.session_state.get(mi_key_d, int(v_d_auto)))
+                            v_d = int(st.session_state.get(mi_key_d, int(v_d_auto)))
+                            v_d_in = int(
+                                c3.number_input(
+                                    "Merma impresión OFFSET (dorso)",
+                                    value=v_d,
+                                    key=mi_key_d,
+                                )
+                            )
+                            st.session_state.mermas_imp_manual[str(pid)][qk]["dorso"] = v_d_in
+                        else:
+                            if mi_key_d not in st.session_state:
+                                st.session_state[mi_key_d] = 0
+                            c3.number_input(
+                                "Merma impresión OFFSET (dorso)",
+                                value=0,
+                                key=mi_key_d,
+                                disabled=True,
+                            )
+                            st.session_state.mermas_imp_manual[str(pid)][qk]["dorso"] = 0
 # =========================================================
 # MOTOR DE CÁLCULO + DESGLOSE + COMPRAS
 # =========================================================
@@ -1949,15 +2523,13 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
 
     for q_n in lista_cants:
         # Mermas:
-        # - Offset/general: mermas_imp_manual
         # - Digital: mermas_imp_digital_manual (fallback a regla digital si no existe)
-        merma_imp_offset_hojas = int(st.session_state.mermas_imp_manual.get(q_n, 0))
+        # - Procesos e impresión OFFSET: por forma+cantidad (ver _ss_get_* en helpers)
         merma_imp_digital_hojas = int(
             st.session_state.mermas_imp_digital_manual.get(
                 q_n, calcular_mermas_estandar(q_n, es_digital=True)[1]
             )
         )
-        merma_proc_hojas = int(st.session_state.mermas_proc_manual.get(q_n, 0))
 
         coste_f = 0.0
         det_f = []
@@ -2005,8 +2577,12 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             partes_imp_units = obtener_partes_impresion_por_formato(int(pid), int(q_n))
             n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
 
-            nb = q_n * float(p.get("pliegos", 1.0))
-            hp_produccion = nb + merma_proc_hojas
+            pl = float(p.get("pliegos", 1.0))
+            nb = int(math.ceil(q_n * pl))
+            mp_def, _mi_ign = calcular_mermas_estandar(q_n, pliegos_por_ud=pl, es_digital=False, n_tintas=4, barniz=False)
+            _ss_autoupdate_merma_proc(int(pid), int(q_n), int(mp_def))
+            merma_proc_hojas = _ss_get_merma_proc(int(pid), int(q_n), int(mp_def))
+            hp_produccion = nb + int(merma_proc_hojas)
 
             im_cara = p.get("im", "No")
             im_dorso = p.get("im_d", "No")
@@ -2017,13 +2593,27 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             # 👇 Merma de impresión depende del tipo (Offset vs Digital)
             # Multi-tirada: la merma extra de cartoncillo se cuenta 1 vez por impresión.
             if imprime_cara:
-                merma_cara = merma_imp_digital_hojas if im_cara == "Digital" else merma_imp_offset_hojas
+                if im_cara == "Digital":
+                    merma_cara = int(merma_imp_digital_hojas)
+                elif im_cara == "Offset":
+                    mi_def_c = _merma_impresion_offset_por_pasadas(int(p.get("nt", 4)), bool(p.get("ba", False)))
+                    _ss_autoupdate_merma_imp(int(pid), int(q_n), "cara", int(mi_def_c))
+                    merma_cara = int(_ss_get_merma_imp(int(pid), int(q_n), "cara", int(mi_def_c)))
+                else:
+                    merma_cara = 0
                 hp_papel_f = hp_produccion + (merma_cara * int(n_impresiones_qty))
             else:
                 hp_papel_f = hp_produccion
 
             if imprime_dorso:
-                merma_d = merma_imp_digital_hojas if im_dorso == "Digital" else merma_imp_offset_hojas
+                if im_dorso == "Digital":
+                    merma_d = int(merma_imp_digital_hojas)
+                elif im_dorso == "Offset":
+                    mi_def_d = _merma_impresion_offset_por_pasadas(int(p.get("nt_d", 4)), bool(p.get("ba_d", False)))
+                    _ss_autoupdate_merma_imp(int(pid), int(q_n), "dorso", int(mi_def_d))
+                    merma_d = int(_ss_get_merma_imp(int(pid), int(q_n), "dorso", int(mi_def_d)))
+                else:
+                    merma_d = 0
                 hp_papel_d = hp_produccion + (merma_d * int(n_impresiones_qty))
             else:
                 hp_papel_d = hp_produccion
@@ -2112,6 +2702,14 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_imp_cara = 0.0
             c_imp_dorso = 0.0
 
+            # FR24: tinta especial con coste extra por m² impreso.
+            fr24_enabled = bool(p.get("fr24", False))
+            try:
+                fr24_rate = float(p.get("fr24_rate", 0.05))
+            except Exception:
+                fr24_rate = 0.05
+            fr24_m2_total = 0.0
+
             # Impresión (multi-tirada): el coste se calcula por cada impresión (tirada).
             # La merma de impresión se aplica por tirada según la cantidad seleccionada.
             if p.get("im","No") == "Digital":
@@ -2119,6 +2717,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                     nb_run = int(q_run) * float(p.get("pliegos", 1.0))
                     hp_imp_run = nb_run + merma_imp_digital_hojas
                     c_imp_cara += hp_imp_run * m2_papel * 6.5
+                    if fr24_enabled and m2_papel > 0:
+                        fr24_m2_total += hp_imp_run * m2_papel
                     if bool(p.get("ld", False)):
                         c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im","No") == "Offset":
@@ -2126,12 +2726,16 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                     nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
                     c_imp_cara += coste_offset_por_tinta(int(nb_run)) * tintas_cara
+                    if fr24_enabled and m2_papel > 0:
+                        fr24_m2_total += nb_run * m2_papel
 
             if p.get("im_d","No") == "Digital":
                 for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                     nb_run = int(q_run) * float(p.get("pliegos", 1.0))
                     hp_imp_run = nb_run + merma_imp_digital_hojas
                     c_imp_dorso += hp_imp_run * m2_papel * 6.5
+                    if fr24_enabled and m2_papel > 0:
+                        fr24_m2_total += hp_imp_run * m2_papel
                     if bool(p.get("ld_d", False)):
                         c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
             elif p.get("im_d","No") == "Offset":
@@ -2139,8 +2743,15 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                     nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
                     c_imp_dorso += coste_offset_por_tinta(int(nb_run)) * tintas_dorso
+                    if fr24_enabled and m2_papel > 0:
+                        fr24_m2_total += nb_run * m2_papel
 
             c_imp_total = c_imp_cara + c_imp_dorso
+
+            c_fr24 = 0.0
+            if fr24_enabled and fr24_rate > 0 and fr24_m2_total > 0:
+                c_fr24 = fr24_m2_total * fr24_rate
+                c_imp_total += c_fr24
 
             c_pel_cara = 0.0
             c_pel_dorso = 0.0
@@ -2157,12 +2768,31 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             cat = "Grande (> 1000x700)" if (h>1000 or w>700) else ("Pequeño (< 1000x700)" if (h<1000 and w<700) else "Mediano (Estándar)")
             c_troquel_taller = 0.0
             c_plotter = 0.0
+
+            # Pre-cálculo para corte (Troquelado/Plotter):
+            # - Evita NameError (hp_corte siempre definido).
+            # - Aplica el ajuste manual "piezas por troquel" también al Plotter.
+            hp_corte = int(math.ceil(float(hp_produccion)))
+            auto_piezas = 1
+            troquel_piezas_manual = int(p.get("troquel_piezas", 0) or 0)
+            if cor_sel in ("Troquelado", "Plotter"):
+                try:
+                    _pl_tmp = float(p.get("pliegos", 1.0) or 1.0)
+                    if _pl_tmp > 0 and _pl_tmp < 1.0:
+                        auto_piezas = max(1, int(round(1.0 / _pl_tmp)))
+                except Exception:
+                    auto_piezas = 1
+                if troquel_piezas_manual <= 0:
+                    troquel_piezas_manual = auto_piezas
+                troquel_factor = float(auto_piezas) / float(max(1, troquel_piezas_manual))
+                hp_corte = int(math.ceil(float(hp_produccion) * troquel_factor))
+
             if cor_sel == "Troquelado":
                 arr = float(db["troquelado"][cat]["arranque"]) * f_narba if bool(p.get("cobrar_arreglo", True)) else 0.0
                 tiro = float(db["troquelado"][cat]["tiro"]) * f_narba
-                c_troquel_taller = arr + (hp_produccion * tiro)
+                c_troquel_taller = arr + (hp_corte * tiro)
             elif cor_sel == "Plotter":
-                c_plotter = hp_produccion * float(db["plotter"]["precio_hoja"])
+                c_plotter = hp_corte * float(db["plotter"]["precio_hoja"])
             else:
                 # "Sin corte": no suma coste de troquel ni plotter
                 pass
@@ -2314,7 +2944,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             "det_piezas": det_f,
             "embalajes": emb_det,
             "externos": ext_det,
-            "mermas": {"impresion_offset_hojas": merma_imp_offset_hojas, "impresion_digital_hojas": merma_imp_digital_hojas, "proceso_hojas": merma_proc_hojas},
+            "mermas": {"impresion_digital_hojas": merma_imp_digital_hojas, "procesos_por_forma": deepcopy(st.session_state.get("mermas_proc_manual", {})), "impresion_offset_por_forma": deepcopy(st.session_state.get("mermas_imp_manual", {}))},
             "debug": debug_log
         }
 
@@ -2361,14 +2991,29 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             ]
         }
 
-safe_brf = re.sub(r'[\\/*?:"<>|]', "", st.session_state.brf or "Ref").replace(" ", "_")
-safe_cli = re.sub(r'[\\/*?:"<>|]', "", st.session_state.cli or "Cli").replace(" ", "_")
-safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
-st.session_state._export_filename = f"{safe_brf}_{safe_cli}_{safe_desc}.json"
+safe_brf = re.sub(r'[\/*?:"<>|]', "", st.session_state.brf or "Ref").replace(" ", "_")
+safe_cli = re.sub(r'[\/*?:"<>|]', "", st.session_state.cli or "Cli").replace(" ", "_")
+safe_desc = re.sub(r'[\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
+# Incluir nº(s) de comercial en el nombre de archivo (si están informados)
+c1_num = _parse_comercial_num(st.session_state.get('comercial_1', ''))
+c2_num = _parse_comercial_num(st.session_state.get('comercial_2', ''))
+com_parts = []
+if c1_num is not None:
+    com_parts.append(f"C{c1_num}")
+if c2_num is not None:
+    com_parts.append(f"C{c2_num}")
+com_tag = "_".join(com_parts)
+if com_tag:
+    st.session_state._export_filename = f"{safe_brf}_{com_tag}_{safe_cli}_{safe_desc}.json"
+else:
+    st.session_state._export_filename = f"{safe_brf}_{safe_cli}_{safe_desc}.json"
+
+resumen_compra_to_export = compras_legible if isinstance(compras_legible, dict) and len(compras_legible) > 0 else st.session_state.get("_imported_compras_legible")
+resumen_costes_to_export = resumen_costes_export if isinstance(resumen_costes_export, dict) and len(resumen_costes_export) > 0 else st.session_state.get("_imported_resumen_costes")
 
 export_data = construir_export(
-    resumen_compra=compras_legible if compras_legible else None,
-    resumen_costes=resumen_costes_export if resumen_costes_export else None
+    resumen_compra=resumen_compra_to_export,
+    resumen_costes=resumen_costes_to_export
 )
 st.session_state._export_blob = json.dumps(export_data, indent=4, ensure_ascii=False)
 st.session_state._json_downloaded = False
@@ -2425,6 +3070,14 @@ if modo_comercial and res_final:
         desc_html += "<span class='tag'>Opcionales</span> "
         desc_html += " &nbsp; ".join(opt_lines)
         desc_html += "</div>"
+
+
+    # Notas / comentarios (solo si hay texto)
+    _notas_txt = (st.session_state.get("notas", "") or "").strip()
+    if _notas_txt:
+        _notas_html = html.escape(_notas_txt).replace("\n", "<br>")
+        desc_html += "<div style='margin-top:10px;'><span class='tag'>Notas</span></div>"
+        desc_html += f"<div class='small' style='margin-top:6px; line-height:1.35;'>{_notas_html}</div>"
 
     for pid, p in st.session_state.piezas_dict.items():
         base_info = ""
@@ -2589,8 +3242,20 @@ if modo_comercial and res_final:
         opc_html += "</table></div>"
 
     oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, (ext_html + emb_opts_html + opc_html), tabla)
-    safe_desc = re.sub(r'[\\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
-    fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
+    safe_desc = re.sub(r'[\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
+    # Incluir nº(s) de comercial en el nombre de archivo (si están informados)
+    c1_num = _parse_comercial_num(st.session_state.get('comercial_1', ''))
+    c2_num = _parse_comercial_num(st.session_state.get('comercial_2', ''))
+    com_parts = []
+    if c1_num is not None:
+        com_parts.append(f"C{c1_num}")
+    if c2_num is not None:
+        com_parts.append(f"C{c2_num}")
+    com_tag = "_".join(com_parts)
+    if com_tag:
+        fname_html = f"OFERTA_{safe_brf}_{com_tag}_{safe_cli}_{safe_desc}.html"
+    else:
+        fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
 
     # Acceso rápido también en el panel lateral (sin quitar el botón de arriba)
     with st.sidebar:
@@ -2638,6 +3303,574 @@ else:
         st.dataframe(df, use_container_width=True)
 
 # =========================================================
+
+# =========================================================
+# TAB AUDITORÍA (SIEMPRE)
+# =========================================================
+with tab_auditoria:
+    st.subheader("🧾 Auditoría de cálculos (trazabilidad)")
+
+    lista_cants_aud = parse_cantidades(st.session_state.cants_str_saved)
+
+    if not lista_cants_aud:
+        st.info("No hay cantidades definidas para auditar.")
+    else:
+        q_sel = st.selectbox("Cantidad a auditar:", lista_cants_aud, key="aud_sel_qty")
+
+        # Resumen inputs principales
+        with st.expander("🔎 Entradas principales del proyecto", expanded=False):
+            st.write(
+                {
+                    "briefing": st.session_state.get("brief", ""),
+                    "comercial_1": st.session_state.get("comercial_1", ""),
+                    "comercial_2": st.session_state.get("comercial_2", ""),
+                    "cliente": st.session_state.get("cli", ""),
+                    "descripcion": st.session_state.get("desc", ""),
+                    "margen": st.session_state.get("margen", None),
+                }
+            )
+
+        piezas = st.session_state.get("piezas_dict", {}) or {}
+        if not isinstance(piezas, dict) or not piezas:
+            st.info("No hay formas definidas.")
+        else:
+            # Tabla: por forma, mostrar matemáticamente hojas netas, mermas y pasadas
+            rows = []
+            for pid, p in piezas.items():
+                try:
+                    pid_i = int(pid)
+                except Exception:
+                    pid_i = int(str(pid)) if str(pid).isdigit() else 0
+
+                nombre = p.get("nombre", f"Forma {pid}")
+
+                # Formato (pliegos por unidad)
+                try:
+                    pliegos_por_ud = float(p.get("pliegos", 1.0))
+                except Exception:
+                    pliegos_por_ud = 1.0
+
+                # Hojas netas reales (ajustadas por formato)
+                try:
+                    hojas_netas = int(math.ceil(float(q_sel) * float(pliegos_por_ud)))
+                except Exception:
+                    hojas_netas = int(q_sel)
+
+                # Merma procesos (tabla) y valor final (editable)
+                mp_tabla = int(_tabla_merma_procesos_offset(hojas_netas))
+                mp_final = int(_ss_get_merma_proc(int(pid_i), int(q_sel), int(mp_tabla)))
+
+                mp_manual = False
+                try:
+                    mp_manual = str(pid) in st.session_state.get("mermas_proc_manual", {}) and str(int(q_sel)) in st.session_state.mermas_proc_manual.get(str(pid), {})
+                except Exception:
+                    mp_manual = False
+
+                # Impresión (cara)
+                im_c = str(p.get("im", "No")).strip()
+                is_offset_c = im_c.lower() == "offset"
+                try:
+                    nt_c = int(p.get("nt", 4))
+                except Exception:
+                    nt_c = 0
+                ba_c = bool(p.get("ba", False))
+                apps_c = (max(1, max(0, nt_c)) + (1 if ba_c else 0)) if is_offset_c else 0
+                pasadas_c = int(math.ceil(apps_c / 4.0)) if is_offset_c else 0
+                mi_def_c = int(_merma_impresion_offset_por_pasadas(nt_c, ba_c)) if is_offset_c else 0
+                mi_final_c = int(_ss_get_merma_imp(int(pid_i), int(q_sel), "cara", int(mi_def_c))) if is_offset_c else 0
+
+                mi_manual_c = False
+                try:
+                    mi_manual_c = (
+                        str(pid) in st.session_state.get("mermas_imp_manual", {})
+                        and str(int(q_sel)) in st.session_state.mermas_imp_manual.get(str(pid), {})
+                        and isinstance(st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))], dict)
+                        and "cara" in st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))]
+                    )
+                except Exception:
+                    mi_manual_c = False
+
+                # Impresión (dorso)
+                im_d = str(p.get("im_d", "No")).strip()
+                is_offset_d = im_d.lower() == "offset"
+                try:
+                    nt_d = int(p.get("nt_d", 4))
+                except Exception:
+                    nt_d = 0
+                ba_d = bool(p.get("ba_d", False))
+                apps_d = (max(1, max(0, nt_d)) + (1 if ba_d else 0)) if is_offset_d else 0
+                pasadas_d = int(math.ceil(apps_d / 4.0)) if is_offset_d else 0
+                mi_def_d = int(_merma_impresion_offset_por_pasadas(nt_d, ba_d)) if is_offset_d else 0
+                mi_final_d = int(_ss_get_merma_imp(int(pid_i), int(q_sel), "dorso", int(mi_def_d))) if is_offset_d else 0
+
+                mi_manual_d = False
+                try:
+                    mi_manual_d = (
+                        str(pid) in st.session_state.get("mermas_imp_manual", {})
+                        and str(int(q_sel)) in st.session_state.mermas_imp_manual.get(str(pid), {})
+                        and isinstance(st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))], dict)
+                        and "dorso" in st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))]
+                    )
+                except Exception:
+                    mi_manual_d = False
+
+                # FR24 (si aplica)
+                fr24_on = bool(p.get("fr24_on", False))
+                try:
+                    fr24_eur_m2 = float(p.get("fr24_eur_m2", 0.05))
+                except Exception:
+                    fr24_eur_m2 = 0.05
+
+                rows.append(
+                    {
+                        "Forma": nombre,
+                        "Pliegos/Ud": pliegos_por_ud,
+                        "Uds": int(q_sel),
+                        "Hojas netas": hojas_netas,
+                        "Merma proceso (tabla)": mp_tabla,
+                        "Merma proceso (final)": mp_final,
+                        "Merma proc editada": "Sí" if mp_manual else "No",
+                        "Impr. cara": im_c,
+                        "Tintas cara": nt_c if is_offset_c else "",
+                        "Barniz cara": "Sí" if (is_offset_c and ba_c) else ("No" if is_offset_c else ""),
+                        "Apps cara": apps_c if is_offset_c else "",
+                        "Pasadas cara": pasadas_c if is_offset_c else "",
+                        "Merma imp cara (def)": mi_def_c if is_offset_c else "",
+                        "Merma imp cara (final)": mi_final_c if is_offset_c else "",
+                        "Merma imp cara editada": "Sí" if mi_manual_c else ("No" if is_offset_c else ""),
+                        "Impr. dorso": im_d,
+                        "Tintas dorso": nt_d if is_offset_d else "",
+                        "Barniz dorso": "Sí" if (is_offset_d and ba_d) else ("No" if is_offset_d else ""),
+                        "Apps dorso": apps_d if is_offset_d else "",
+                        "Pasadas dorso": pasadas_d if is_offset_d else "",
+                        "Merma imp dorso (def)": mi_def_d if is_offset_d else "",
+                        "Merma imp dorso (final)": mi_final_d if is_offset_d else "",
+                        "Merma imp dorso editada": "Sí" if mi_manual_d else ("No" if is_offset_d else ""),
+                        "FR24": "Sí" if fr24_on else "No",
+                        "FR24 €/m²": fr24_eur_m2 if fr24_on else "",
+                    }
+                )
+
+            df_aud = pd.DataFrame(rows)
+            st.dataframe(df_aud, use_container_width=True)
+
+            # Fórmulas (explicación matemática) para el usuario
+            with st.expander("📐 Fórmulas aplicadas (esta cantidad)", expanded=False):
+                st.markdown(
+                    "- **Hojas netas reales (por forma y cantidad)**  \n"
+                    "  `hojas_netas = ceil(uds * pliegos_por_ud)`\n\n"
+                    "- **Merma procesos (OFFSET)** (según tabla)  \n"
+                    "  Se evalúa la tabla con `hojas_netas` y devuelve la merma correspondiente (editable).\n\n"
+                    "- **Merma impresión OFFSET (por lado)**  \n"
+                    "  `apps = max(1, tintas) + (1 si barniz else 0)`  \n"
+                    "  `pasadas = ceil(apps / 4)`  \n"
+                    "  `merma_imp = 100 + 50 * (pasadas - 1)`  (editable)\n\n"
+                    "> Nota: si has editado manualmente una merma, la app ya no la sobreescribe automáticamente."
+                )
+
+        # =========================================================
+        # Costes de materiales y procesos (con fórmulas matemáticas)
+        # =========================================================
+        comp_aud = compras_legible.get(q_sel, {}) if isinstance(compras_legible, dict) else {}
+        if comp_aud:
+            with st.expander("💶 Costes de materiales y procesos (con fórmulas)", expanded=False):
+                # 1) Totales por categoría (lo que realmente se está usando en el cálculo)
+                st.markdown("### Totales por categoría (esta cantidad)")
+                materiales_tot = (resumen_costes_export.get(q_sel, {}).get("materiales", {}) if isinstance(resumen_costes_export, dict) else {}) or {}
+                procesos_tot = (resumen_costes_export.get(q_sel, {}).get("procesos", {}) if isinstance(resumen_costes_export, dict) else {}) or {}
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.markdown("**Materiales**")
+                    if materiales_tot:
+                        st.dataframe(pd.DataFrame([materiales_tot]), use_container_width=True)
+                    else:
+                        st.caption("Sin materiales.")
+                with c2:
+                    st.markdown("**Procesos**")
+                    if procesos_tot:
+                        st.dataframe(pd.DataFrame([procesos_tot]), use_container_width=True)
+                    else:
+                        st.caption("Sin procesos.")
+
+                st.markdown("### Fórmulas aplicadas por proceso/material")
+                st.markdown("""- **Cartoncillo (cara/dorso)**:  
+  `coste = hp_papel * m2_papel * (gramaje_g_m2/1000) * precio_kg * f_cart`  
+  donde `hp_papel = hp_produccion + (merma_impresión * nº_impresiones)`
+
+- **Contracolado**:  
+  `coste = hp_produccion * m2_papel * peg_rate * capas_contracolado`
+
+- **Impresión DIGITAL** (por tirada):  
+  `coste = (nb_run + merma_digital) * m2_papel * 6.5`  
+  y si hay laminado digital: `+ (nb_run + merma_digital) * m2_papel * precio_laminado_digital`
+
+- **Impresión OFFSET** (por tirada):  
+  `coste = coste_offset_por_tinta(nb_run) * (tintas + barniz)`
+
+- **FR24** (si está activado):  
+  `extra_FR24 = (m2_impresos_totales) * eur_m2`
+
+- **Peliculado (OFFSET)**:  
+  `coste = hp_produccion * m2_papel * precio_peliculado * f_narba`
+
+- **Corte / Troquelado**:  
+  `coste = arranque + (hp_produccion * tiro)`  (si se cobra arreglo)
+
+- **Corte / Plotter**:  
+  `coste = hp_produccion * precio_hoja_plotter`
+
+> En Auditoría se muestran también las **sustituciones numéricas** para cada forma.
+""")
+                # 2) Detalle por forma con sustitución numérica (lo que ayuda a validar matemáticamente)
+                piezas_aud = st.session_state.get("piezas_dict", {}) or {}
+                lista_det = comp_aud.get("Detalle piezas", []) or []
+
+                # Mapear costes ya calculados por nombre de pieza (para comparar)
+                map_det = {}
+                for d in lista_det:
+                    try:
+                        map_det[str(d.get("Pieza",""))] = d
+                    except Exception:
+                        pass
+
+                def _ceil_int(x: float) -> int:
+                    try:
+                        return int(math.ceil(float(x)))
+                    except Exception:
+                        return int(x) if str(x).isdigit() else 0
+
+                for pid, p in piezas_aud.items():
+                    nombre = p.get("nombre", f"Forma {pid}")
+                    det_row = map_det.get(str(nombre), {})
+
+                    with st.expander(f"🧩 {nombre} · detalle matemático", expanded=False):
+                        # Datos base
+                        try:
+                            pl = float(p.get("pliegos", 1.0))
+                        except Exception:
+                            pl = 1.0
+                        uds = int(q_sel)
+                        nb = _ceil_int(uds * pl)  # pliegos netos reales
+
+                        # Mermas (proceso + impresión por lado) usando los mismos helpers que el motor
+                        mp_def = int(_tabla_merma_procesos_offset(int(nb)))
+                        mp_final = int(_ss_get_merma_proc(int(pid), int(q_sel), int(mp_def)))
+                        hp_produccion = int(nb) + int(mp_final)
+
+                        # Ajuste por "piezas por troquel" manual (solo corte)
+                        troquel_piezas_manual = int(p.get("troquel_piezas", 0) or 0)
+                        auto_piezas = 1
+                        try:
+                            if pl > 0 and pl < 1.0:
+                                auto_piezas = max(1, int(round(1.0 / pl)))
+                        except Exception:
+                            auto_piezas = 1
+                        if troquel_piezas_manual <= 0:
+                            troquel_piezas_manual = auto_piezas
+                        troquel_factor = float(auto_piezas) / float(max(1, troquel_piezas_manual))
+                        hp_corte = int(math.ceil(float(hp_produccion) * troquel_factor))
+
+                        partes_imp_units = obtener_partes_impresion_por_formato(int(pid), int(q_sel))
+                        n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
+
+                        im_c = str(p.get("im", "No"))
+                        im_d = str(p.get("im_d", "No"))
+
+                        # Merma impresión (cara)
+                        merma_cara = 0
+                        if im_c == "Digital":
+                            merma_cara = int(merma_imp_digital_hojas)
+                        elif im_c == "Offset":
+                            mi_def_c = int(_merma_impresion_offset_por_pasadas(int(p.get("nt", 0)), bool(p.get("ba", False))))
+                            mi_final_c = int(_ss_get_merma_imp(int(pid), int(q_sel), "cara", int(mi_def_c)))
+                            merma_cara = mi_final_c
+                        # Merma impresión (dorso)
+                        merma_dorso = 0
+                        if im_d == "Digital":
+                            merma_dorso = int(merma_imp_digital_hojas)
+                        elif im_d == "Offset":
+                            mi_def_d = int(_merma_impresion_offset_por_pasadas(int(p.get("nt_d", 0)), bool(p.get("ba_d", False))))
+                            mi_final_d = int(_ss_get_merma_imp(int(pid), int(q_sel), "dorso", int(mi_def_d)))
+                            merma_dorso = mi_final_d
+
+                        hp_papel_f = hp_produccion + int(merma_cara) * int(n_impresiones_qty)
+                        hp_papel_d = hp_produccion + int(merma_dorso) * int(n_impresiones_qty)
+
+                        # Superficie (m2) del papel
+                        try:
+                            w = float(p.get("w", 0.0))
+                            h = float(p.get("h", 0.0))
+                            m2_papel = (w * h) / 1_000_000.0 if (w > 0 and h > 0) else 0.0
+                        except Exception:
+                            m2_papel = 0.0
+
+                        st.markdown("**Pliegos netos reales**")
+                        st.code(f"nb = ceil(uds * pliegos_por_ud) = ceil({uds} * {pl}) = {nb}")
+
+                        st.markdown("**Merma de procesos (tabla + final editable)**")
+                        st.code(
+                            f"mp_def = tabla(nb={nb}) = {mp_def}\n"
+                            f"mp_final = {mp_final}\n"
+                            f"hp_produccion = nb + mp_final = {nb} + {mp_final} = {hp_produccion}\n"
+                            f"hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas) = ceil({hp_produccion} * {auto_piezas}/{troquel_piezas_manual}) = {hp_corte}"
+                        )
+
+                        st.markdown("**Mermas de impresión y papel (por lado)**")
+                        st.code(
+                            f"n_impresiones = {n_impresiones_qty}\n"
+                            f"hp_papel_cara = hp_produccion + merma_cara*n_impresiones = {hp_produccion} + {merma_cara}*{n_impresiones_qty} = {hp_papel_f}\n"
+                            f"hp_papel_dorso = hp_produccion + merma_dorso*n_impresiones = {hp_produccion} + {merma_dorso}*{n_impresiones_qty} = {hp_papel_d}"
+                        )
+
+                        st.markdown("**Costes (resultado + fórmula con sustitución)**")
+
+                        # Factores de descuento (compra) por bloque
+                        try:
+                            _dd = st.session_state.get("db_descuentos", {}) if isinstance(st.session_state.get("db_descuentos", {}), dict) else {}
+                            f_cart = 1.0 - (float(_dd.get("cartoncillo", 0.0)) / 100.0)
+                            f_or = 1.0 - (float(_dd.get("ondulado_rigidos", 0.0)) / 100.0)
+                            f_narba = 1.0 - (float(_dd.get("narba", 0.0)) / 100.0)
+                        except Exception:
+                            f_cart, f_or, f_narba = 1.0, 1.0, 1.0
+
+                        # Cartoncillo
+                        try:
+                            pf = p.get("pf", "Ninguno")
+                            gf = float(p.get("gf", 0.0))
+                            precio_pf = float(db["cartoncillo"][pf]["precio_kg"]) if (pf != "Ninguno") else 0.0
+                        except Exception:
+                            pf, gf, precio_pf = "Ninguno", 0.0, 0.0
+
+                        try:
+                            pd_ = p.get("pd", "Ninguno")
+                            gd = float(p.get("gd", 0.0))
+                            precio_pd = float(db["cartoncillo"][pd_]["precio_kg"]) if (pd_ != "Ninguno") else 0.0
+                        except Exception:
+                            pd_, gd, precio_pd = "Ninguno", 0.0, 0.0
+
+                        if pf != "Ninguno" and m2_papel > 0 and gf > 0 and precio_pf > 0:
+                            calc = hp_papel_f * m2_papel * (gf/1000.0) * precio_pf * f_cart
+                            st.write(f"Cartoncillo Cara: {float(det_row.get('Cartoncillo Cara', 0.0)):.4f} €")
+                            st.code(f"= {hp_papel_f} * {m2_papel:.6f} * ({gf}/1000) * {precio_pf} * {f_cart} = {calc:.4f}")
+                        if pd_ != "Ninguno" and m2_papel > 0 and gd > 0 and precio_pd > 0:
+                            calc = hp_papel_d * m2_papel * (gd/1000.0) * precio_pd * f_cart
+                            st.write(f"Cartoncillo Dorso: {float(det_row.get('Cartoncillo Dorso', 0.0)):.4f} €")
+                            st.code(f"= {hp_papel_d} * {m2_papel:.6f} * ({gd}/1000) * {precio_pd} * {f_cart} = {calc:.4f}")
+
+                        # Plancha Ondulado
+                        st.write(f"Plancha Ondulado: {float(det_row.get('Plancha Ondulado', 0.0)):.4f} €")
+                        try:
+                            if str(p.get("tipo_base","Ondulado/Cartón")) == "Ondulado/Cartón" and str(p.get("pl","Ninguna")) != "Ninguna" and m2_papel > 0:
+                                pl_name = str(p.get("pl","Ninguna"))
+                                ap = str(p.get("ap","B/C"))
+                                if bool(p.get("pl_dif", False)) and float(p.get("pl_h", 0)) > 0 and float(p.get("pl_w", 0)) > 0:
+                                    m2_plancha = (float(p.get("pl_w",0)) * float(p.get("pl_h",0))) / 1_000_000.0
+                                    st.code(f"m2_plancha = (pl_w*pl_h)/1e6 = ({float(p.get('pl_w',0))}*{float(p.get('pl_h',0))})/1e6 = {m2_plancha:.6f}")
+                                else:
+                                    m2_plancha = m2_papel
+                                    st.code(f"m2_plancha = m2_papel = {m2_plancha:.6f}")
+                                precio_m2 = float(db["planchas"][pl_name][ap])
+                                calc = hp_produccion * m2_plancha * precio_m2 * f_or
+                                st.code(f"= {hp_produccion} * {m2_plancha:.6f} * {precio_m2} * {f_or} = {calc:.4f}")
+                            else:
+                                st.caption("— (No aplica: base no es ondulado o no hay plancha seleccionada)")
+                        except Exception:
+                            st.caption("— (No se ha podido desglosar la plancha ondulado)")
+
+                        # Material Rígido
+                        st.write(f"Material Rígido: {float(det_row.get('Material Rígido', 0.0)):.4f} €")
+                        try:
+                            if str(p.get("tipo_base","Ondulado/Cartón")) == "Material Rígido":
+                                if bool(p.get("rig_manual", False)):
+                                    mw, mh = float(p.get("rig_w", 0)), float(p.get("rig_h", 0))
+                                    precio_hoja = float(p.get("rig_precio_ud", 0.0))
+                                    st.code(f"hoja_rigida = {mw}x{mh} mm (manual) · precio_hoja = {precio_hoja}")
+                                else:
+                                    mat = str(p.get("mat_rigido","Ninguno"))
+                                    if mat != "Ninguno":
+                                        info = db["rigidos"][mat]
+                                        mw, mh = float(info.get("w",0)), float(info.get("h",0))
+                                        precio_hoja = float(info.get("precio_ud",0.0)) * f_or
+                                        st.code(f"hoja_rigida = {mw}x{mh} mm · precio_hoja = {float(info.get('precio_ud',0.0))} * {f_or} = {precio_hoja}")
+                                    else:
+                                        mw = mh = precio_hoja = 0.0
+                                by = 0
+                                if w > 0 and h > 0 and mw > 0 and mh > 0:
+                                    y1 = int(mw // w) * int(mh // h)
+                                    y2 = int(mw // h) * int(mh // w)
+                                    by = max(y1, y2)
+                                st.code(f"aprovechamiento_by = max(floor({mw}/{w})*floor({mh}/{h}), floor({mw}/{h})*floor({mh}/{w})) = {by}")
+                                if by > 0:
+                                    n_net = math.ceil(hp_produccion / by)
+                                    if capas_contracolado == 0:
+                                        merma_fija = merma_rigido_fija(int(n_net))
+                                        n_pl = int(n_net) + int(merma_fija)
+                                        st.code(f"hojas_netas = ceil({hp_produccion}/{by}) = {n_net} · merma_fija = {merma_fija} · hojas_total = {n_pl}")
+                                    else:
+                                        n_pl = int(math.ceil(float(n_net) * 1.02))
+                                        st.code(f"hojas_netas = ceil({hp_produccion}/{by}) = {n_net} · hojas_total = ceil({n_net}*1.02) = {n_pl}")
+                                    calc = float(n_pl) * float(precio_hoja)
+                                    st.code(f"= {n_pl} * {precio_hoja} = {calc:.4f}")
+                                else:
+                                    st.caption("— (No aplica: no se puede encajar la pieza en la hoja rígida)")
+                            else:
+                                st.caption("— (No aplica: la base no es material rígido)")
+                        except Exception:
+                            st.caption("— (No se ha podido desglosar el material rígido)")
+
+                        # Contracolado
+                        st.write(f"Contracolado: {float(det_row.get('Contracolado', 0.0)):.4f} €")
+                        try:
+                            peg_rate = float(db["planchas"]["Microcanal / Canal 3"]["peg"]) * f_narba
+                        except Exception:
+                            peg_rate = 0.0
+                        if capas_contracolado > 0 and m2_papel > 0 and peg_rate > 0:
+                            calc = hp_produccion * m2_papel * peg_rate * capas_contracolado
+                            st.code(f"= {hp_produccion} * {m2_papel:.6f} * {peg_rate:.6f} * {capas_contracolado} = {calc:.4f}")
+                        else:
+                            st.caption("— (No aplica: capas_contracolado=0 o faltan datos)")
+
+                        # Impresión (incl. FR24 si aplica)
+                        st.write(f"Impresión: {float(det_row.get('Impresión', 0.0)):.4f} €")
+                        try:
+                            merma_imp_digital_hojas_local = int(globals().get("merma_imp_digital_hojas", 10) or 10)
+                        except Exception:
+                            merma_imp_digital_hojas_local = 10
+                        fr24_enabled = bool(p.get("fr24", False))
+                        try:
+                            fr24_rate = float(p.get("fr24_rate", 0.05))
+                        except Exception:
+                            fr24_rate = 0.05
+                        fr24_m2_total = 0.0
+                        imp_total_calc = 0.0
+                        det_lines = []
+                        partes = partes_imp_units if partes_imp_units else [int(q_sel)]
+                        # Cara
+                        if im_c == "Digital":
+                            for q_run in partes:
+                                nb_run = float(int(q_run)) * float(pl)
+                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
+                                c = hp_run * m2_papel * 6.5
+                                imp_total_calc += c
+                                det_lines.append(f"cara DIGITAL: (nb_run+merma) * m2 * 6.5 = ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*6.5 = {c:.4f}")
+                                if fr24_enabled and m2_papel > 0:
+                                    fr24_m2_total += hp_run * m2_papel
+                        elif im_c == "Offset":
+                            tintas = int(p.get("nt", 0)) + (1 if bool(p.get("ba", False)) else 0)
+                            for q_run in partes:
+                                nb_run = int(round(int(q_run) * float(pl)))
+                                c_t = coste_offset_por_tinta(int(nb_run))
+                                c = c_t * int(tintas)
+                                imp_total_calc += c
+                                det_lines.append(f"cara OFFSET: coste_offset_por_tinta({nb_run})*tintas = {c_t:.4f}*{tintas} = {c:.4f}")
+                                if fr24_enabled and m2_papel > 0:
+                                    fr24_m2_total += float(nb_run) * m2_papel
+                        # Dorso
+                        if im_d == "Digital":
+                            for q_run in partes:
+                                nb_run = float(int(q_run)) * float(pl)
+                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
+                                c = hp_run * m2_papel * 6.5
+                                imp_total_calc += c
+                                det_lines.append(f"dorso DIGITAL: ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*6.5 = {c:.4f}")
+                                if fr24_enabled and m2_papel > 0:
+                                    fr24_m2_total += hp_run * m2_papel
+                        elif im_d == "Offset":
+                            tintas = int(p.get("nt_d", 0)) + (1 if bool(p.get("ba_d", False)) else 0)
+                            for q_run in partes:
+                                nb_run = int(round(int(q_run) * float(pl)))
+                                c_t = coste_offset_por_tinta(int(nb_run))
+                                c = c_t * int(tintas)
+                                imp_total_calc += c
+                                det_lines.append(f"dorso OFFSET: coste_offset_por_tinta({nb_run})*tintas = {c_t:.4f}*{tintas} = {c:.4f}")
+                                if fr24_enabled and m2_papel > 0:
+                                    fr24_m2_total += float(nb_run) * m2_papel
+                        c_fr24 = 0.0
+                        if fr24_enabled and fr24_rate > 0 and fr24_m2_total > 0:
+                            c_fr24 = fr24_m2_total * fr24_rate
+                            imp_total_calc += c_fr24
+                            det_lines.append(f"FR24: m2_total*rate = {fr24_m2_total:.6f}*{fr24_rate} = {c_fr24:.4f}")
+                        if det_lines:
+                            st.code("\n".join(det_lines))
+                        else:
+                            st.caption("— (No aplica: no hay impresión)")
+
+                        # Peliculado (incl. Laminado digital si aplica)
+                        st.write(f"Peliculado: {float(det_row.get('Peliculado', 0.0)):.4f} €")
+                        pel_lines = []
+                        pel_total_calc = 0.0
+                        # Peliculado offset (por lado)
+                        try:
+                            if str(p.get("pel","Sin Peliculado")) != "Sin Peliculado":
+                                precio_pel = float(db["peliculado"][str(p.get("pel"))])
+                                c = hp_produccion * m2_papel * precio_pel * f_narba
+                                pel_total_calc += c
+                                pel_lines.append(f"pel_cara OFFSET: {hp_produccion}*{m2_papel:.6f}*{precio_pel}*{f_narba} = {c:.4f}")
+                        except Exception:
+                            pass
+                        try:
+                            if str(p.get("pd","Ninguno")) != "Ninguno" and str(p.get("pel_d","Sin Peliculado")) != "Sin Peliculado":
+                                precio_pel = float(db["peliculado"][str(p.get("pel_d"))])
+                                c = hp_produccion * m2_papel * precio_pel * f_narba
+                                pel_total_calc += c
+                                pel_lines.append(f"pel_dorso OFFSET: {hp_produccion}*{m2_papel:.6f}*{precio_pel}*{f_narba} = {c:.4f}")
+                        except Exception:
+                            pass
+                        # Laminado digital (por tirada y lado)
+                        try:
+                            lam_rate = float(db.get("laminado_digital", 3.5))
+                        except Exception:
+                            lam_rate = 3.5
+                        if bool(p.get("ld", False)) and im_c == "Digital":
+                            for q_run in partes:
+                                nb_run = float(int(q_run)) * float(pl)
+                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
+                                c = hp_run * m2_papel * lam_rate
+                                pel_total_calc += c
+                                pel_lines.append(f"laminado_digital CARA: ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*{lam_rate} = {c:.4f}")
+                        if bool(p.get("ld_d", False)) and im_d == "Digital":
+                            for q_run in partes:
+                                nb_run = float(int(q_run)) * float(pl)
+                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
+                                c = hp_run * m2_papel * lam_rate
+                                pel_total_calc += c
+                                pel_lines.append(f"laminado_digital DORSO: ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*{lam_rate} = {c:.4f}")
+                        if pel_lines:
+                            st.code("\n".join(pel_lines))
+                        else:
+                            st.caption("— (No aplica: sin peliculado ni laminado digital)")
+
+                        # Corte
+                        st.write(f"Corte (Troquel/Plotter): {float(det_row.get('Corte (Troquel/Plotter)', 0.0)):.4f} €")
+                        st.code(
+                            f"hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas) = ceil({hp_produccion} * {auto_piezas}/{troquel_piezas_manual}) = {hp_corte}\n"
+                            f"Troquelado: arranque + hp_corte*tiro · Plotter: hp_corte*precio_hoja"
+                        )
+                        st.markdown("""**Troquelado**: `arranque + hp_corte * tiro`  (hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas)`
+**Plotter**: `hp_corte * precio_hoja_plotter`
+**Sin corte**: `0`""")
+
+
+                        # Subtotal
+                        st.write(f"Subtotal Pieza: {float(det_row.get('Subtotal Pieza', 0.0)):.4f} €")
+
+        # Mostrar (si existe) el desglose interno ya calculado para esta cantidad
+        if lista_cants_aud and desc_full:
+            with st.expander("🧩 Datos internos: desc_full / compras_legible / resumen_costes", expanded=False):
+                st.markdown("**desc_full (por cantidad)**")
+                st.json(desc_full.get(q_sel, {}))
+
+                st.markdown("**compras_legible (por cantidad)**")
+                st.json(compras_legible.get(q_sel, {}))
+
+                st.markdown("**resumen_costes (por cantidad)**")
+                resumen_costes_por_cantidad = st.session_state.get("resumen_costes", {})
+                # Compatibilidad hacia atrás: algunos JSON antiguos pueden guardarlo con otras claves
+                if not isinstance(resumen_costes_por_cantidad, dict):
+                    resumen_costes_por_cantidad = {}
+                st.json(resumen_costes_por_cantidad.get(q_sel, {}))
+
+
 # TAB DEBUG (SIEMPRE)
 # =========================================================
 with tab_debug:
