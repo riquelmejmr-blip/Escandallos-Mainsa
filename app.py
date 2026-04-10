@@ -1613,6 +1613,19 @@ with st.sidebar:
 
     st.divider()
 
+    # =========================================================
+    # Aviso + botón (sidebar) sobre materia prima importada vs tarifa actual
+    # =========================================================
+    if bool(st.session_state.get("_tarifa_mp_mismatch", False)):
+        st.warning(
+            "⚠️ Materia prima del proyecto ≠ tarifa actual. "
+            "Puedes mantenerla (si ya enviaste oferta) o actualizar a tarifa vigente."
+        )
+        if st.button("🔁 Actualizar materia prima a tarifa actual", use_container_width=True, key="btn_update_mp_sidebar"):
+            _aplicar_tarifa_actual_materia_prima()
+            st.success("Materia prima actualizada a tarifa actual.")
+        st.caption("Actualiza SOLO: Cartoncillo, Planchas, Rígidos y Peliculado.")
+
     with st.expander("📥 Importar JSON", expanded=False):
         uploaded = st.file_uploader("Subir JSON", type=["json"], key="uploader_json")
         if uploaded is not None:
