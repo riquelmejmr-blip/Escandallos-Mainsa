@@ -1671,39 +1671,9 @@ tab_calculadora, tab_costes, tab_auditoria, tab_debug = st.tabs(["🧮 Calculado
 # TAB COSTES (siempre visible)
 # =========================================================
 with tab_costes:
-    # =========================================================
-    # Aviso + botón en SIDEBAR (siempre visible) sobre materia prima importada vs tarifa actual
-    # =========================================================
-    if bool(st.session_state.get("_tarifa_mp_mismatch", False)):
-        st.warning(
-            "⚠️ Materia prima del proyecto ≠ tarifa actual. "
-            "Puedes mantenerla (si ya enviaste oferta) o actualizar a tarifa vigente."
-        )
-        if st.button("🔁 Actualizar materia prima a tarifa actual", use_container_width=True, key="btn_update_mp_sidebar"):
-            _aplicar_tarifa_actual_materia_prima()
-            st.success("Materia prima actualizada a tarifa actual.")
-        st.caption("Actualiza SOLO: Cartoncillo, Planchas, Rígidos y Peliculado.")
-
     col_c1, col_c2 = st.columns(2)
     db = st.session_state.db_precios
 
-    # =========================================================
-    # Aviso: proyecto importado con materia prima distinta a la tarifa actual
-    # =========================================================
-    if bool(st.session_state.get("_tarifa_mp_mismatch", False)):
-        st.warning(
-            "⚠️ Este proyecto está usando **costes de materia prima importados** que **no coinciden** con la tarifa actual. "
-            "Puedes mantenerlos (recomendado si es una oferta ya enviada) o actualizarlos a tarifa vigente."
-        )
-        c_u1, c_u2 = st.columns([1, 2])
-        with c_u1:
-            if st.button("🔁 Actualizar materia prima a tarifa actual", use_container_width=True, key="btn_update_mp"):
-                _aplicar_tarifa_actual_materia_prima()
-                st.success("Materia prima actualizada a tarifa actual.")
-                st.rerun()
-        with c_u2:
-            st.caption("Actualiza SOLO: Cartoncillo, Planchas, Rígidos y Peliculado. No toca procesos, extras, troqueles, etc.")
-        st.markdown("---")
 
     # defaults descuentos (por si vienen viejos)
     if "db_descuentos" not in st.session_state or not isinstance(st.session_state.db_descuentos, dict):
