@@ -836,29 +836,39 @@ def _hash_materia_prima(db: dict) -> str:
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 def _aplicar_tarifa_actual_materia_prima() -> None:
-    """Sobrescribe SOLO materia prima (cartoncillo/planchas/rigidos/peliculado) con la tarifa actual (PRECIOS_BASE).
-    Mantiene el resto de db_precios intacto.
+    """Actualiza SOLO materia prima (cartoncillo/planchas/rigidos/peliculado) a la tarifa actual (PRECIOS_BASE).
+
+    Importante:
+    - NO reinicia el proyecto ni toca piezas/cantidades/extras/embalajes/externos.
+    - Actualiza EN SITIO (in-place) para minimizar efectos colaterales en widgets que lean de db_precios.
+    - Mantiene cualquier material "custom" que ya existiese en el proyecto.
     """
-    db = st.session_state.get("db_precios", {})
+    db = st.session_state.get("db_precios")
     if not isinstance(db, dict):
-        db = {}
-    base = deepcopy(PRECIOS_BASE)
+        # Si por algún motivo viene corrupto, creamos un dict basado en lo actual para no perder claves.
+        db = deepcopy(PRECIOS_BASE)
+        st.session_state.db_precios = db
+
+    base = PRECIOS_BASE  # referencia (no mutar)
+
     for cat in _TARIFA_MATERIA_PRIMA_CATS:
-        if cat not in base or not isinstance(base.get(cat), dict):
+        base_cat = base.get(cat)
+        if not isinstance(base_cat, dict):
             continue
-        # Merge "por clave", manteniendo posibles materiales custom del proyecto
-        cur_cat = db.get(cat, {})
+
+        cur_cat = db.get(cat)
         if not isinstance(cur_cat, dict):
             cur_cat = {}
-        for k, v in base[cat].items():
-            # cartoncillo/rigidos/planchas son dicts; peliculado tiene floats.
-            cur_cat[k] = deepcopy(v)
-        db[cat] = cur_cat
-    st.session_state.db_precios = db
+            db[cat] = cur_cat
 
-    # Al aplicar, dejamos constancia de que ya está actualizado respecto a la tarifa actual
-    st.session_state._tarifa_mp_import_hash = None
+        # Reemplazamos/actualizamos solo las entradas de la tarifa actual (manteniendo posibles claves extra del proyecto)
+        for k, v in base_cat.items():
+            cur_cat[k] = deepcopy(v)
+
+    # Dejamos constancia de que ya está actualizado respecto a la tarifa actual
+    st.session_state._tarifa_mp_import_hash = _hash_materia_prima(st.session_state.db_precios)
     st.session_state._tarifa_mp_mismatch = False
+
 if "piezas_dict" not in st.session_state: st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
 if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extras_grabados = []
 if "embalajes" not in st.session_state: st.session_state.embalajes = [crear_embalaje_vacio(0)]
@@ -1659,7 +1669,6 @@ with tab_costes:
         if st.button("🔁 Actualizar materia prima a tarifa actual", use_container_width=True, key="btn_update_mp_sidebar"):
             _aplicar_tarifa_actual_materia_prima()
             st.success("Materia prima actualizada a tarifa actual.")
-            st.rerun()
         st.caption("Actualiza SOLO: Cartoncillo, Planchas, Rígidos y Peliculado.")
 
     col_c1, col_c2 = st.columns(2)
