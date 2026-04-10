@@ -804,15 +804,35 @@ def _subset_materia_prima(db: dict) -> dict:
     for cat in _TARIFA_MATERIA_PRIMA_CATS:
         v = db.get(cat, None)
         if isinstance(v, dict):
-            out[cat] = v
+            out[cat] = deepcopy(v)
     return out
+
+
+def _normalizar_mp_para_hash(v: object) -> object:
+    """Normaliza valores para comparar tarifas con tolerancia a floats."""
+    if isinstance(v, float):
+        return round(v, 6)
+    if isinstance(v, (int, bool)) or v is None:
+        return v
+    if isinstance(v, str):
+        return v
+    if isinstance(v, list):
+        return [_normalizar_mp_para_hash(x) for x in v]
+    if isinstance(v, dict):
+        return {str(k): _normalizar_mp_para_hash(val) for k, val in v.items()}
+    try:
+        return round(float(v), 6)
+    except Exception:
+        return str(v)
+
 
 def _hash_materia_prima(db: dict) -> str:
     """Hash estable (ordenado) del subconjunto de materia prima."""
+    subset_norm = _normalizar_mp_para_hash(_subset_materia_prima(db))
     try:
-        blob = json.dumps(_subset_materia_prima(db), sort_keys=True, ensure_ascii=False)
+        blob = json.dumps(subset_norm, sort_keys=True, ensure_ascii=False)
     except Exception:
-        blob = str(_subset_materia_prima(db))
+        blob = str(subset_norm)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 def _aplicar_tarifa_actual_materia_prima() -> None:
@@ -1211,7 +1231,9 @@ def normalizar_import(di: dict):
         if "margen_embalajes" in params: st.session_state.margen_embalajes = float(params["margen_embalajes"])
 
     if isinstance(di.get("db_precios", None), dict):
+        # Importamos SIEMPRE la base de precios del proyecto (compatibilidad hacia atrás)
         st.session_state.db_precios = di["db_precios"]
+
         # ✅ Aviso de tarifa: si el proyecto importado trae materia prima distinta a la tarifa actual
         try:
             st.session_state._tarifa_mp_import_hash = _hash_materia_prima(st.session_state.db_precios)
@@ -1219,6 +1241,10 @@ def normalizar_import(di: dict):
         except Exception:
             st.session_state._tarifa_mp_import_hash = None
             st.session_state._tarifa_mp_mismatch = False
+    else:
+        # JSON antiguo sin db_precios: usamos la tarifa actual, pero dejamos flags coherentes
+        st.session_state._tarifa_mp_import_hash = None
+        st.session_state._tarifa_mp_mismatch = False
 
     # ✅ Descuentos por bloque (si vienen en el JSON)
     if isinstance(di.get("db_descuentos", None), dict):
@@ -1622,6 +1648,20 @@ tab_calculadora, tab_costes, tab_auditoria, tab_debug = st.tabs(["🧮 Calculado
 # TAB COSTES (siempre visible)
 # =========================================================
 with tab_costes:
+    # =========================================================
+    # Aviso + botón en SIDEBAR (siempre visible) sobre materia prima importada vs tarifa actual
+    # =========================================================
+    if bool(st.session_state.get("_tarifa_mp_mismatch", False)):
+        st.warning(
+            "⚠️ Materia prima del proyecto ≠ tarifa actual. "
+            "Puedes mantenerla (si ya enviaste oferta) o actualizar a tarifa vigente."
+        )
+        if st.button("🔁 Actualizar materia prima a tarifa actual", use_container_width=True, key="btn_update_mp_sidebar"):
+            _aplicar_tarifa_actual_materia_prima()
+            st.success("Materia prima actualizada a tarifa actual.")
+            st.rerun()
+        st.caption("Actualiza SOLO: Cartoncillo, Planchas, Rígidos y Peliculado.")
+
     col_c1, col_c2 = st.columns(2)
     db = st.session_state.db_precios
 
