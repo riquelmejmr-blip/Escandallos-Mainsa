@@ -1924,11 +1924,48 @@ with tab_calculadora:
     st.header("Paso 2 · Datos técnicos")
 
     c_btns = st.columns([1, 4])
-    if c_btns[0].button("➕ Forma"):
-        nid = max(st.session_state.piezas_dict.keys()) + 1
-        st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
-        st.rerun()
+    with c_btns[0]:
+        dup_prev = st.checkbox("Repetir datos de la anterior", key="dup_prev_forma", value=False)
+        if st.button("➕ Forma", key="btn_add_forma"):
+            last_id = max(st.session_state.piezas_dict.keys())
+            nid = int(last_id) + 1
+
+            if dup_prev and last_id in st.session_state.piezas_dict:
+                # Copiamos la forma anterior (inputs técnicos) y ajustamos el nombre
+                st.session_state.piezas_dict[nid] = deepcopy(st.session_state.piezas_dict[last_id])
+                st.session_state.piezas_dict[nid]["nombre"] = f"Forma {nid}"
+
+                # Duplicamos también configuraciones asociadas al formato (si existen)
+                for kdict in ["mermas_proc_manual", "mermas_imp_manual", "mermas_imp_digital_manual"]:
+                    d = st.session_state.get(kdict, {})
+                    if isinstance(d, dict):
+                        # Aceptamos claves int o str (compatibilidad)
+                        if str(last_id) in d:
+                            d[str(nid)] = deepcopy(d[str(last_id)])
+                        elif last_id in d:
+                            d[str(nid)] = deepcopy(d[last_id])
+
+                # Impresiones por cantidad por formato
+                en = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
+                if isinstance(en, dict):
+                    if str(last_id) in en:
+                        en[str(nid)] = bool(en.get(str(last_id), False))
+                    elif last_id in en:
+                        en[str(nid)] = bool(en.get(last_id, False))
+
+                cfg_fmt = st.session_state.get("impresiones_by_qty_fmt", {})
+                if isinstance(cfg_fmt, dict):
+                    if str(last_id) in cfg_fmt:
+                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[str(last_id)])
+                    elif last_id in cfg_fmt:
+                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[last_id])
+
+            else:
+                st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
+
+            st.rerun()
     if c_btns[1].button("🗑 Reiniciar"):
+
         st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
         st.session_state.lista_extras_grabados = []
         st.session_state.embalajes = [crear_embalaje_vacio(0)]
