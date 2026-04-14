@@ -218,6 +218,8 @@ PRECIOS_BASE = {
         "Mediano (Estándar)": {"arranque": 80.77, "tiro": 0.09},
         "Grande (> 1000x700)": {"arranque": 107.80, "tiro": 0.135}
     },
+    # Stamping (película + calor). Similar a troquelado pero con consumible de película por superficie.
+    "stamping": {"arreglo": 168.0, "pisada": 0.21, "pelicula_m2": 0.39},
     "plotter": {"precio_hoja": 2.03}
 }
 
@@ -776,6 +778,10 @@ def crear_forma_vacia(index):
         "cobrar_arreglo": True,
         "pv_troquel": 0.0,
         "troquel_piezas": 0,
+        "stamping": False,
+        "stamping_w": 0,
+        "stamping_h": 0,
+        "stamping_cobrar_arreglo": True,
     }
 
 def es_digital_en_proyecto(piezas_dict):
@@ -943,7 +949,7 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         "n_", "p_", "std_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_",
         "pf_", "gf_", "tb_", "pl_", "pldif_", "plh_", "plw_", "ap_",
         "rigman_", "rigwman_", "righman_", "rigpman_", "mrig_",
-        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
+        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "stamp_", "stampw_", "stamph_", "stamparr_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
     ]
 
     for pid in piezas_ids:
@@ -1050,6 +1056,10 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
 
         st.session_state[f"arr_{pid}"] = bool(p.get("cobrar_arreglo", True))
         st.session_state[f"pvt_{pid}"] = float(p.get("pv_troquel", 0.0))
+        st.session_state[f"stamp_{pid}"] = bool(p.get("stamping", False))
+        st.session_state[f"stampw_{pid}"] = int(p.get("stamping_w", 0))
+        st.session_state[f"stamph_{pid}"] = int(p.get("stamping_h", 0))
+        st.session_state[f"stamparr_{pid}"] = bool(p.get("stamping_cobrar_arreglo", True))
         st.session_state[f"trqp_{pid}"] = int(p.get("troquel_piezas", 0) or 0)
 
         st.session_state[f"im_d_{pid}"] = p.get("im_d", "No")
@@ -1189,6 +1199,11 @@ def _normalizar_pieza_dict(pid: int, v: dict):
         }
     base["cobrar_arreglo"] = _coerce_bool(base.get("cobrar_arreglo", True), True)
     base["pv_troquel"] = _coerce_float(base.get("pv_troquel", 0.0), 0.0)
+    base["stamping"] = _coerce_bool(base.get("stamping", False), False)
+    base["stamping_w"] = _coerce_int(base.get("stamping_w", 0), 0)
+    base["stamping_h"] = _coerce_int(base.get("stamping_h", 0), 0)
+    base["stamping_cobrar_arreglo"] = _coerce_bool(base.get("stamping_cobrar_arreglo", True), True)
+
     base["troquel_piezas"] = max(0, _coerce_int(base.get("troquel_piezas", 0), 0))
 
     return base
@@ -2089,6 +2104,24 @@ with tab_calculadora:
                     p["fr24_rate"] = float(p.get("fr24_rate", 0.05))
 
                 # -----------------------------------------------------
+                # STAMPING (película + calor) - proceso poco habitual
+                # -----------------------------------------------------
+                p["stamping"] = st.checkbox("✨ Stamping (película + pisada)", value=bool(p.get("stamping", False)), key=f"stamp_{p_id}")
+                if bool(p["stamping"]):
+                    col_s1, col_s2, col_s3 = st.columns([1, 1, 1])
+                    with col_s1:
+                        p["stamping_w"] = int(st.number_input("Ancho stamping (mm)", min_value=0, max_value=5000, value=int(p.get("stamping_w", 0)), step=1, key=f"stampw_{p_id}"))
+                    with col_s2:
+                        p["stamping_h"] = int(st.number_input("Alto stamping (mm)", min_value=0, max_value=5000, value=int(p.get("stamping_h", 0)), step=1, key=f"stamph_{p_id}"))
+                    with col_s3:
+                        p["stamping_cobrar_arreglo"] = bool(st.checkbox("Cobrar arreglo stamping", value=bool(p.get("stamping_cobrar_arreglo", True)), key=f"stamparr_{p_id}"))
+                    st.caption("Tarifa: arreglo 168€ · pisada 0,21€/hoja · película 0,39€/m² (rectángulo) · hojas = hp_corte (ajustado por piezas por troquel).")
+                else:
+                    p["stamping_w"] = int(p.get("stamping_w", 0))
+                    p["stamping_h"] = int(p.get("stamping_h", 0))
+                    p["stamping_cobrar_arreglo"] = bool(p.get("stamping_cobrar_arreglo", True))
+
+                # -----------------------------------------------------
                 # IMPRESIONES POR CANTIDAD (multi-tirada) - POR FORMATO (TIC)
                 # -----------------------------------------------------
                 # Si una misma cantidad se imprime en varias tiradas (p.ej. 100+400+500) para ESTA forma,
@@ -2618,6 +2651,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "impresion": 0.0,
                 "peliculado": 0.0,
                 "corte": 0.0,
+                "stamping": 0.0,
                 "manipulacion": 0.0,
                 "dificultad": 0.0,
                 "externos": 0.0,
@@ -2640,6 +2674,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             c_pel_total = 0.0
             c_troquel_taller = 0.0
             c_plotter = 0.0
+            c_stamping = 0.0
 
             # Impresiones por cantidad (multi-tirada) - POR FORMATO:
             # Solo afecta a coste de impresión y a la merma extra de cartoncillo por impresión.
@@ -2844,7 +2879,8 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             hp_corte = int(math.ceil(float(hp_produccion)))
             auto_piezas = 1
             troquel_piezas_manual = int(p.get("troquel_piezas", 0) or 0)
-            if cor_sel in ("Troquelado", "Plotter"):
+            stamping_enabled = bool(p.get("stamping", False))
+            if cor_sel in ("Troquelado", "Plotter") or stamping_enabled:
                 try:
                     _pl_tmp = float(p.get("pliegos", 1.0) or 1.0)
                     if _pl_tmp > 0 and _pl_tmp < 1.0:
@@ -2866,7 +2902,20 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 # "Sin corte": no suma coste de troquel ni plotter
                 pass
 
-            sub = c_cart_cara + c_cart_dorso + c_ondulado + c_rigido + c_contracolado + c_imp_total + c_pel_total + c_troquel_taller + c_plotter
+            # Stamping (si aplica): arreglo + pisadas + película (m²)
+            if bool(p.get("stamping", False)):
+                try:
+                    sw = float(p.get("stamping_w", 0) or 0)
+                    sh = float(p.get("stamping_h", 0) or 0)
+                except Exception:
+                    sw, sh = 0.0, 0.0
+                area_m2 = max(0.0, (sw/1000.0) * (sh/1000.0))
+                arr_s = float(db.get("stamping", {}).get("arreglo", 168.0)) if bool(p.get("stamping_cobrar_arreglo", True)) else 0.0
+                pisada = float(db.get("stamping", {}).get("pisada", 0.21))
+                peli = float(db.get("stamping", {}).get("pelicula_m2", 0.39))
+                c_stamping = arr_s + (hp_corte * pisada) + (hp_corte * area_m2 * peli)
+
+            sub = c_cart_cara + c_cart_dorso + c_ondulado + c_rigido + c_contracolado + c_imp_total + c_pel_total + c_troquel_taller + c_plotter + c_stamping
             coste_f += sub
 
             det_f.append({
@@ -2879,6 +2928,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                 "Impresión": c_imp_total,
                 "Peliculado": c_pel_total,
                 "Corte (Troquel/Plotter)": c_troquel_taller + c_plotter,
+                "Stamping": c_stamping,
                 "Subtotal Pieza": sub,
                 "Corte Seleccionado": cor_sel
             })
@@ -2890,6 +2940,7 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
             tot_cat["procesos"]["impresion"] += c_imp_total
             tot_cat["procesos"]["peliculado"] += c_pel_total
             tot_cat["procesos"]["corte"] += (c_troquel_taller + c_plotter)
+            tot_cat["procesos"]["stamping"] += c_stamping
 
         c_ext = sum(float(e.get("coste",0.0)) * float(e.get("cantidad",1.0)) * q_n for e in st.session_state.lista_extras_grabados)
         tot_cat["materiales"]["extras"] += c_ext
@@ -3920,7 +3971,27 @@ with tab_auditoria:
 **Sin corte**: `0`""")
 
 
-                        # Subtotal
+                                                # Stamping
+                        st.write(f"Stamping: {float(det_row.get('Stamping', 0.0)):.4f} €")
+                        if bool(p.get("stamping", False)):
+                            try:
+                                sw = float(p.get("stamping_w", 0) or 0)
+                                sh = float(p.get("stamping_h", 0) or 0)
+                            except Exception:
+                                sw, sh = 0.0, 0.0
+                            area_m2 = max(0.0, (sw/1000.0) * (sh/1000.0))
+                            arr_s = float(db.get("stamping", {}).get("arreglo", 168.0)) if bool(p.get("stamping_cobrar_arreglo", True)) else 0.0
+                            pisada = float(db.get("stamping", {}).get("pisada", 0.21))
+                            peli = float(db.get("stamping", {}).get("pelicula_m2", 0.39))
+                            st.code(
+                                f"area_m2 = (w/1000)*(h/1000) = ({sw}/1000)*({sh}/1000) = {area_m2:.6f}\n"
+                                f"coste = arreglo + hp_corte*pisada + hp_corte*area_m2*pelicula\n"
+                                f"= {arr_s} + {hp_corte}*{pisada} + {hp_corte}*{area_m2:.6f}*{peli} = {(arr_s + hp_corte*pisada + hp_corte*area_m2*peli):.4f}"
+                            )
+                        else:
+                            st.caption("— (No aplica)")
+
+# Subtotal
                         st.write(f"Subtotal Pieza: {float(det_row.get('Subtotal Pieza', 0.0)):.4f} €")
 
         # Mostrar (si existe) el desglose interno ya calculado para esta cantidad
