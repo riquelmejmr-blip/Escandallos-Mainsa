@@ -903,6 +903,8 @@ if "arm_t_input" not in st.session_state: st.session_state.arm_t_input = 0.0
 if "dif_ud" not in st.session_state: st.session_state.dif_ud = 0.091
 if "dif_preset_sel" not in st.session_state: st.session_state.dif_preset_sel = "0,091 (standard)"
 if "imp_fijo_pvp" not in st.session_state: st.session_state.imp_fijo_pvp = 500.0
+if "repeticion_proyecto" not in st.session_state: st.session_state.repeticion_proyecto = False
+if "imp_fijo_pvp_prev" not in st.session_state: st.session_state.imp_fijo_pvp_prev = None
 if "margen" not in st.session_state: st.session_state.margen = 2.2
 if "comercial_1" not in st.session_state: st.session_state.comercial_1 = ""
 if "comercial_2" not in st.session_state: st.session_state.comercial_2 = ""
@@ -1247,7 +1249,7 @@ def normalizar_import(di: dict):
 
     # ✅ FIX: al importar, limpiamos keys de widgets globales para que Streamlit no
     # fuerce valores antiguos (p.ej. preset dificultad "standard").
-    for _k in ("dif_preset_sel", "dif_ud"):
+    for _k in ("dif_preset_sel", "dif_ud", "repeticion_proyecto", "imp_fijo_pvp"):
         if _k in st.session_state:
             del st.session_state[_k]
 
@@ -1271,7 +1273,12 @@ def normalizar_import(di: dict):
                     break
             st.session_state.dif_preset_sel = _label
 
+        if "repeticion_proyecto" in params:
+            st.session_state.repeticion_proyecto = bool(params.get("repeticion_proyecto", False))
         if "imp_fijo_pvp" in params: st.session_state.imp_fijo_pvp = float(params["imp_fijo_pvp"])
+        # Si es repetición de proyecto, el desarrollo se anula.
+        if bool(st.session_state.get("repeticion_proyecto", False)):
+            st.session_state.imp_fijo_pvp = 0.0
         if "margen" in params: st.session_state.margen = float(params["margen"])
         # ✅ Nuevos (compatibles hacia atrás)
         if "descuento_procesos" in params: st.session_state.descuento_procesos = float(params["descuento_procesos"])
@@ -1591,7 +1598,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input), "rellenado": {"enabled": bool(st.session_state.rell_enabled), "t_input": float(st.session_state.rell_t_input)}, "armado": {"enabled": bool(st.session_state.arm_enabled), "t_input": float(st.session_state.arm_t_input)}},
-        "params": {"dif_ud": float(st.session_state.dif_ud), "dif_preset_sel": str(st.session_state.get("dif_preset_sel","")), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
+        "params": {"dif_ud": float(st.session_state.dif_ud), "dif_preset_sel": str(st.session_state.get("dif_preset_sel","")), "repeticion_proyecto": bool(st.session_state.get("repeticion_proyecto", False)), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
         "db_precios": deepcopy(st.session_state.db_precios),
         "db_descuentos": deepcopy(st.session_state.db_descuentos),
         "piezas": piezas_out,
@@ -1891,6 +1898,9 @@ with tab_calculadora:
         # Editable siempre (si está en preset, puedes ajustarlo manualmente igualmente)
         st.number_input("Dificultad (€/ud)", min_value=0.0, step=0.001, value=float(st.session_state.dif_ud), key="dif_ud")
 
+        # Repetición de proyecto (fuera de Finanzas)
+        st.checkbox("🔁 Repetición de proyecto", value=bool(st.session_state.get("repeticion_proyecto", False)), key="repeticion_proyecto")
+
     lista_cants = parse_cantidades(st.session_state.cants_str_saved)
 
     unidad_t = st.session_state.unidad_t
@@ -1905,7 +1915,29 @@ with tab_calculadora:
     seg_arm_total = (arm_t_input * 60) if unidad_t == "Minutos" else arm_t_input
 
     with st.expander("💰 Finanzas", expanded=False):
-        st.number_input("Fijo PVP (€)", value=float(st.session_state.imp_fijo_pvp), key="imp_fijo_pvp")
+        # Si es repetición de proyecto, el importe de desarrollo debe ser 0€.
+        if bool(st.session_state.get("repeticion_proyecto", False)):
+            # Guardamos el último valor no-cero para poder recuperarlo si se desactiva.
+            if st.session_state.get("imp_fijo_pvp_prev") in (None, ""):
+                try:
+                    st.session_state.imp_fijo_pvp_prev = float(st.session_state.get("imp_fijo_pvp", 0.0) or 0.0)
+                except Exception:
+                    st.session_state.imp_fijo_pvp_prev = 0.0
+            st.session_state.imp_fijo_pvp = 0.0
+            st.number_input("Importe de desarrollo de proyecto (€)", value=0.0, key="imp_fijo_pvp", disabled=True)
+        else:
+            # Si venimos de repetición y estaba a 0, restauramos el último valor guardado.
+            try:
+                cur = float(st.session_state.get("imp_fijo_pvp", 0.0) or 0.0)
+            except Exception:
+                cur = 0.0
+            if cur == 0.0 and st.session_state.get("imp_fijo_pvp_prev") not in (None, ""):
+                try:
+                    st.session_state.imp_fijo_pvp = float(st.session_state.get("imp_fijo_pvp_prev") or 0.0)
+                except Exception:
+                    pass
+            st.number_input("Importe de desarrollo de proyecto (€)", value=float(st.session_state.imp_fijo_pvp), key="imp_fijo_pvp")
+
         st.number_input("Multiplicador", step=0.1, value=float(st.session_state.margen), key="margen")
 
         st.markdown("---")
@@ -1915,6 +1947,8 @@ with tab_calculadora:
 
     dif_ud = float(st.session_state.dif_ud)
     imp_fijo_pvp = float(st.session_state.imp_fijo_pvp)
+    if bool(st.session_state.get("repeticion_proyecto", False)):
+        imp_fijo_pvp = 0.0
     margen = float(st.session_state.margen)
     descuento_procesos = float(st.session_state.descuento_procesos)
     margen_extras = float(st.session_state.margen_extras)
