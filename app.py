@@ -1245,15 +1245,39 @@ def normalizar_import(di: dict):
             if "t_input" in arm:
                 st.session_state.arm_t_input = float(arm.get("t_input", 0.0))
 
+    # ✅ FIX: al importar, limpiamos keys de widgets globales para que Streamlit no
+    # fuerce valores antiguos (p.ej. preset dificultad "standard").
+    for _k in ("dif_preset_sel", "dif_ud"):
+        if _k in st.session_state:
+            del st.session_state[_k]
+
     params = di.get("params", {})
     if isinstance(params, dict):
         if "dif_ud" in params: st.session_state.dif_ud = float(params["dif_ud"])
+        # ✅ Importar también el preset visible (para que no vuelva a "standard" por culpa del widget)
+        if "dif_preset_sel" in params:
+            st.session_state.dif_preset_sel = str(params.get("dif_preset_sel", ""))
+        else:
+            # Compat: si no viene, intentamos inferirlo a partir de dif_ud
+            try:
+                _v = float(st.session_state.dif_ud)
+            except Exception:
+                _v = 0.091
+            _presets = [("0,000", 0.0), ("0,020", 0.02), ("0,050", 0.05), ("0,091 (standard)", 0.091), ("0,120", 0.12), ("0,150", 0.15)]
+            _label = "Personalizado"
+            for _l, _vv in _presets:
+                if abs(float(_vv) - float(_v)) < 1e-9:
+                    _label = _l
+                    break
+            st.session_state.dif_preset_sel = _label
+
         if "imp_fijo_pvp" in params: st.session_state.imp_fijo_pvp = float(params["imp_fijo_pvp"])
         if "margen" in params: st.session_state.margen = float(params["margen"])
         # ✅ Nuevos (compatibles hacia atrás)
         if "descuento_procesos" in params: st.session_state.descuento_procesos = float(params["descuento_procesos"])
         if "margen_extras" in params: st.session_state.margen_extras = float(params["margen_extras"])
         if "margen_embalajes" in params: st.session_state.margen_embalajes = float(params["margen_embalajes"])
+
 
     if isinstance(di.get("db_precios", None), dict):
         # Importamos SIEMPRE la base de precios del proyecto (compatibilidad hacia atrás)
@@ -1567,7 +1591,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input), "rellenado": {"enabled": bool(st.session_state.rell_enabled), "t_input": float(st.session_state.rell_t_input)}, "armado": {"enabled": bool(st.session_state.arm_enabled), "t_input": float(st.session_state.arm_t_input)}},
-        "params": {"dif_ud": float(st.session_state.dif_ud), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
+        "params": {"dif_ud": float(st.session_state.dif_ud), "dif_preset_sel": str(st.session_state.get("dif_preset_sel","")), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
         "db_precios": deepcopy(st.session_state.db_precios),
         "db_descuentos": deepcopy(st.session_state.db_descuentos),
         "piezas": piezas_out,
