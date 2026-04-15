@@ -1771,6 +1771,11 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         # Mermas:
         margen_embalajes = float(st.session_state.get("margen_embalajes", 1.4) or 1.4)
         margen_extras = float(st.session_state.get("margen_extras", 1.4) or 1.4)
+        margen = float(st.session_state.get("margen", 2.2) or 2.2)
+        descuento_procesos = float(st.session_state.get("descuento_procesos", 0.0) or 0.0)
+        repeticion_proyecto = bool(st.session_state.get("repeticion_proyecto", False))
+        imp_fijo_pvp = 0.0 if repeticion_proyecto else float(st.session_state.get("imp_fijo_pvp", 0.0) or 0.0)
+
         # - Digital: mermas_imp_digital_manual (fallback a regla digital si no existe)
         # - Procesos e impresión OFFSET: por forma+cantidad (ver _ss_get_* en helpers)
         merma_imp_digital_hojas = int(
