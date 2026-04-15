@@ -3110,7 +3110,18 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         pv_extras_total = ((c_ext + ext_total) * margen_extras)
         pv_extras_unit = pv_extras_total / q_n if q_n > 0 else 0.0
 
-        tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
+        # ✅ PV troquel (venta): solo debe imputarse a las cantidades que realmente van a TROQUELADO.
+        # Si una cantidad va a Plotter (o Sin corte), NO debe cargar el coste del troquel en el sumatorio.
+        tot_pv_trq = 0.0
+        for _pid, _pz in st.session_state.piezas_dict.items():
+            _cor_sel = _pz.get("cor_default", "Troquelado")
+            if isinstance(_pz.get("cor_by_qty", {}), dict):
+                _cor_sel = _pz["cor_by_qty"].get(str(q_n), _cor_sel)
+            if str(_cor_sel) == "Troquelado":
+                try:
+                    tot_pv_trq += float(_pz.get("pv_troquel", 0.0) or 0.0)
+                except Exception:
+                    pass
 
         pvp_total_todo = pv_producido_total + pv_extras_total + pv_emb_total + tot_pv_trq
         unit_todo = pvp_total_todo / q_n
