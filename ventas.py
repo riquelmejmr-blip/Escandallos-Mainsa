@@ -221,6 +221,8 @@ PRECIOS_BASE = {
     },
     # Stamping (película + calor). Similar a troquelado pero con consumible de película por superficie.
     "stamping": {"arreglo": 168.0, "pisada": 0.21, "pelicula_m2": 0.39},
+    # Flexografía (coste fijo por plancha)
+    "flexografia": {"arreglo": 180.0},
     "plotter": {"precio_hoja": 2.03}
 }
 
@@ -783,6 +785,7 @@ def crear_forma_vacia(index):
         "stamping_w": 0,
         "stamping_h": 0,
         "stamping_cobrar_arreglo": True,
+        "flexografia": False,
     }
 
 def es_digital_en_proyecto(piezas_dict):
@@ -952,7 +955,7 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         "n_", "p_", "std_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_",
         "pf_", "gf_", "tb_", "pl_", "pldif_", "plh_", "plw_", "ap_",
         "rigman_", "rigwman_", "righman_", "rigpman_", "mrig_",
-        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "stamp_", "stampw_", "stamph_", "stamparr_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
+        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "stamp_", "stampw_", "stamph_", "stamparr_", "flexo_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
     ]
 
     for pid in piezas_ids:
@@ -1063,6 +1066,7 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
         st.session_state[f"stampw_{pid}"] = int(p.get("stamping_w", 0))
         st.session_state[f"stamph_{pid}"] = int(p.get("stamping_h", 0))
         st.session_state[f"stamparr_{pid}"] = bool(p.get("stamping_cobrar_arreglo", True))
+        st.session_state[f"flexo_{pid}"] = bool(p.get("flexografia", False))
         st.session_state[f"trqp_{pid}"] = int(p.get("troquel_piezas", 0) or 0)
 
         st.session_state[f"im_d_{pid}"] = p.get("im_d", "No")
@@ -1206,6 +1210,8 @@ def _normalizar_pieza_dict(pid: int, v: dict):
     base["stamping_w"] = _coerce_int(base.get("stamping_w", 0), 0)
     base["stamping_h"] = _coerce_int(base.get("stamping_h", 0), 0)
     base["stamping_cobrar_arreglo"] = _coerce_bool(base.get("stamping_cobrar_arreglo", True), True)
+
+    base["flexografia"] = _coerce_bool(base.get("flexografia", False), False)
 
     base["troquel_piezas"] = max(0, _coerce_int(base.get("troquel_piezas", 0), 0))
 
@@ -2302,6 +2308,8 @@ with tab_calculadora:
                     idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 1
                     p["ap"] = st.selectbox("Calidad Ondulado", opts_ap, index=idx_ap, key=f"ap_{p_id}")
 
+                    p["flexografia"] = st.checkbox("🟪 Flexografía (coste fijo por plancha)", value=bool(p.get("flexografia", False)), key=f"flexo_{p_id}")
+
                 else:
                     p["rig_manual"] = st.checkbox("🧩 Rígido Manual (tamaño + precio)", value=bool(p.get("rig_manual", False)), key=f"rigman_{p_id}")
 
@@ -2852,6 +2860,9 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
                     else:
                         m2_plancha = m2_papel
                     c_ondulado = hp_produccion * m2_plancha * float(db["planchas"][p["pl"]][p.get("ap","B/C")]) * f_or
+                    # Flexografía: coste fijo por plancha (no depende de cantidad)
+                    if bool(p.get("flexografia", False)):
+                        c_ondulado += float(db.get("flexografia", {}).get("arreglo", 180.0))
 
             if p.get("pf", "Ninguno") != "Ninguno" and m2_papel > 0:
                 c_cart_cara = hp_papel_f * m2_papel * (float(p.get("gf", 0))/1000.0) * float(db["cartoncillo"][p["pf"]]["precio_kg"]) * f_cart
@@ -3099,7 +3110,18 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         pv_extras_total = ((c_ext + ext_total) * margen_extras)
         pv_extras_unit = pv_extras_total / q_n if q_n > 0 else 0.0
 
-        tot_pv_trq = sum(float(pz.get("pv_troquel", 0.0)) for pz in st.session_state.piezas_dict.values())
+        # ✅ PV troquel (venta): solo debe imputarse a las cantidades que realmente van a TROQUELADO.
+        # Si una cantidad va a Plotter (o Sin corte), NO debe cargar el coste del troquel en el sumatorio.
+        tot_pv_trq = 0.0
+        for _pid, _pz in st.session_state.piezas_dict.items():
+            _cor_sel = _pz.get("cor_default", "Troquelado")
+            if isinstance(_pz.get("cor_by_qty", {}), dict):
+                _cor_sel = _pz["cor_by_qty"].get(str(q_n), _cor_sel)
+            if str(_cor_sel) == "Troquelado":
+                try:
+                    tot_pv_trq += float(_pz.get("pv_troquel", 0.0) or 0.0)
+                except Exception:
+                    pass
 
         pvp_total_todo = pv_producido_total + pv_extras_total + pv_emb_total + tot_pv_trq
         unit_todo = pvp_total_todo / q_n
@@ -3851,6 +3873,10 @@ with tab_auditoria:
                                 precio_m2 = float(db["planchas"][pl_name][ap])
                                 calc = hp_produccion * m2_plancha * precio_m2 * f_or
                                 st.code(f"= {hp_produccion} * {m2_plancha:.6f} * {precio_m2} * {f_or} = {calc:.4f}")
+                                if bool(p.get("flexografia", False)):
+                                    flexo = float(db.get("flexografia", {}).get("arreglo", 180.0))
+                                    st.code(f"Flexografía (fijo) = {flexo}")
+                                    st.code(f"Total plancha = {calc:.4f} + {flexo} = {(calc+flexo):.4f}")
                             else:
                                 st.caption("— (No aplica: base no es ondulado o no hay plancha seleccionada)")
                         except Exception:
