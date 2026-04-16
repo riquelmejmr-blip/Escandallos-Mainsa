@@ -929,6 +929,7 @@ if "db_descuentos" not in st.session_state:
 
 
 if "_last_import_hash" not in st.session_state: st.session_state._last_import_hash = None
+if "_last_import_hash_extract" not in st.session_state: st.session_state._last_import_hash_extract = None
 if "_tarifa_mp_import_hash" not in st.session_state: st.session_state._tarifa_mp_import_hash = None
 if "_tarifa_mp_mismatch" not in st.session_state: st.session_state._tarifa_mp_mismatch = False
 if "_export_blob" not in st.session_state: st.session_state._export_blob = None
@@ -1657,6 +1658,256 @@ def _mark_json_download():
     st.session_state._json_downloaded = True
     st.session_state._json_downloaded_filename = st.session_state.get("_export_filename", "")
 
+
+# =========================================================
+# IMPORT "EXTRACTO PDF" (RÁPIDO)
+# - Pensado para un GPT que SOLO extrae los campos clave.
+# - Convierte ese extracto en un JSON completo compatible con normalizar_import().
+# =========================================================
+def _norm_w_h(lado1: object, lado2: object) -> tuple[int, int]:
+    """Regla negocio: LARGO = medida grande (w), ANCHO = medida pequeña (h)."""
+    try:
+        a = int(float(lado1))
+    except Exception:
+        a = 0
+    try:
+        b = int(float(lado2))
+    except Exception:
+        b = 0
+    return (max(a, b), min(a, b))
+
+def _map_cartoncillo(material_texto: str) -> tuple[str, int]:
+    """Mapea texto libre del PDF a (pf, gf) del cartoncillo."""
+    s = (material_texto or "").upper().replace(" ", "")
+    # Defaults
+    pf = "Ninguno"
+    gf = 0
+
+    # Reglas típicas
+    if "RG" in s or "REVERSOGRIS" in s or "RG220" in s or "RG2" in s:
+        pf = "Reverso Gris"
+        gf = int(PRECIOS_BASE.get("cartoncillo", {}).get("Reverso Gris", {}).get("gramaje", 220))
+    if "ZENITH" in s or "Z350" in s:
+        pf = "Zenith"
+        gf = int(PRECIOS_BASE.get("cartoncillo", {}).get("Zenith", {}).get("gramaje", 350))
+    if "RM" in s or "REVERSOMADERA" in s or "RM400" in s:
+        pf = "Reverso Madera"
+        gf = int(PRECIOS_BASE.get("cartoncillo", {}).get("Reverso Madera", {}).get("gramaje", 400))
+    if "FOLDINGKRAFT" in s:
+        pf = "Folding Kraft"
+        gf = int(PRECIOS_BASE.get("cartoncillo", {}).get("Folding Kraft", {}).get("gramaje", 340))
+    if "FOLDINGBLANCO" in s:
+        pf = "Folding Blanco"
+        gf = int(PRECIOS_BASE.get("cartoncillo", {}).get("Folding Blanco", {}).get("gramaje", 350))
+
+    return pf, int(gf or 0)
+
+def _map_plancha(material_texto: str) -> tuple[str, str]:
+    """Mapea texto libre del PDF a (pl, ap) de planchas onduladas."""
+    s = (material_texto or "").upper().replace(" ", "")
+    pl = "Ninguna"
+    ap = "B/C"
+
+    # Calidades
+    if "B/B" in s:
+        ap = "B/B"
+    elif "C/C" in s:
+        ap = "C/C"
+    elif "B/C" in s:
+        ap = "B/C"
+
+    # Tipo plancha
+    if "D/MICRO" in s or "DOBLEMICRO" in s or "D/DBLE" in s or "DOBLEDOBLE" in s:
+        pl = "Doble Micro / Doble Doble"
+    elif "MICRO" in s or "C/3" in s or "CANAL3" in s or "CANAL 3" in s:
+        pl = "Microcanal / Canal 3"
+    elif "AC" in s or "CUERO" in s:
+        pl = "AC (Cuero/Cuero)"
+    return pl, ap
+
+def _map_peliculado(acabado_texto: str) -> str:
+    """Mapea texto libre (PP/laminado) a opción del desplegable peliculado."""
+    s = (acabado_texto or "").upper()
+    if not s.strip():
+        return "Sin Peliculado"
+
+    # Si habla de PP, normalmente es polipropileno (en tu tarifa no distinguimos mate/brillo por PP).
+    if "PP" in s or "POLIPROP" in s:
+        return "Polipropileno"
+
+    if "MATE" in s:
+        return "Poliéster mate"
+    if "BRILL" in s:
+        return "Poliéster brillo"
+    return "Sin Peliculado"
+
+def _map_corte(troquel_tipo: str, troquel_stock: object) -> tuple[str, bool, float]:
+    """Devuelve (cor_default, cobrar_arreglo, pv_troquel).
+    - troquel_stock => se cobra arreglo pero pv_troquel=0
+    - troquel nuevo => se cobra arreglo y pv_troquel se deja 0 (pendiente si no viene)
+    - plotter => cor_default=Plotter
+    """
+    s = (troquel_tipo or "").strip().lower()
+    is_stock = False
+    try:
+        is_stock = bool(troquel_stock)
+    except Exception:
+        is_stock = False
+    if "plotter" in s:
+        return "Plotter", False, 0.0
+    if "stock" in s or is_stock:
+        return "Troquelado", True, 0.0
+    if "nuevo" in s:
+        return "Troquelado", True, 0.0
+    if "troquel" in s:
+        return "Troquelado", True, 0.0
+    if "sin" in s:
+        return "Sin corte", False, 0.0
+    # Default de la app
+    return "Troquelado", True, 0.0
+
+def _build_import_dict_from_extract(ex: dict) -> dict:
+    """Convierte un JSON MINIMO ('extracto') en un JSON compatible con normalizar_import().
+    El extracto debe traer SOLO lo necesario: brf, cli, comerciales, cants_str, formas[].
+    """
+    if not isinstance(ex, dict):
+        raise ValueError("Extracto inválido: no es un dict.")
+
+    di: dict = {}
+    # Cabecera
+    if "brf" in ex:
+        di["brf"] = str(ex.get("brf") or "")
+    if "cli" in ex:
+        di["cli"] = str(ex.get("cli") or "")
+    # Descripción: si no viene, usamos cliente + (si viene) elemento
+    desc = ex.get("desc", None)
+    if not desc:
+        _cli = str(ex.get("cli") or "").strip()
+        _elem = str(ex.get("elemento") or "").strip()
+        desc = " - ".join([x for x in [_cli, _elem] if x]) or ""
+    di["desc"] = str(desc or "")
+
+    if "notas" in ex:
+        di["notas"] = str(ex.get("notas") or "")
+    # Comerciales no editables pero sí importables
+    if "comercial_1" in ex:
+        di["comercial_1"] = str(ex.get("comercial_1") or "")
+    if "comercial_2" in ex:
+        di["comercial_2"] = str(ex.get("comercial_2") or "")
+
+    # Cantidades (aceptamos lista o string)
+    cants_str = ex.get("cants_str", ex.get("cantidades", ""))
+    if isinstance(cants_str, list):
+        cants_str = ",".join(str(int(x)) for x in cants_str if str(x).strip().isdigit())
+    di["cants_str"] = str(cants_str or "")
+
+    # Piezas
+    formas = ex.get("formas", [])
+    if not isinstance(formas, list):
+        formas = []
+
+    piezas_out: dict = {}
+    for idx, f in enumerate(formas, start=1):
+        if not isinstance(f, dict):
+            continue
+        p = crear_forma_vacia(idx)
+
+        # Medidas: aceptamos (w,h) ya dadas o lado1/lado2
+        if "w" in f and "h" in f:
+            w, h = _norm_w_h(f.get("w"), f.get("h"))
+        else:
+            w, h = _norm_w_h(f.get("lado1"), f.get("lado2"))
+        p["w"] = int(w)
+        p["h"] = int(h)
+
+        # Pliegos (si viene)
+        if "pliegos" in f and f.get("pliegos") not in (None, ""):
+            try:
+                p["pliegos"] = float(f.get("pliegos"))
+            except Exception:
+                pass
+
+        # Impresión
+        imp_tipo = str(f.get("impresion_tipo", f.get("impresion", "")) or "")
+        if imp_tipo:
+            # Normalizamos valores típicos
+            it = imp_tipo.strip().lower()
+            if "off" in it:
+                p["im"] = "Offset"
+            elif "dig" in it:
+                p["im"] = "Digital"
+            elif it in ("no", "ninguna"):
+                p["im"] = "No"
+        if "nt" in f:
+            try:
+                p["nt"] = int(float(f.get("nt") or 0))
+            except Exception:
+                pass
+
+        # Materiales (texto libre)
+        mat_txt = str(f.get("material_texto", f.get("materiales_texto", "")) or "")
+        if mat_txt:
+            pf, gf = _map_cartoncillo(mat_txt)
+            pl, ap = _map_plancha(mat_txt)
+            # Si detectamos cartoncillo, lo ponemos como base y guardamos cartoncillo
+            if pf != "Ninguno":
+                p["pf"] = pf
+                p["gf"] = int(gf)
+                p["tipo_base"] = "Ondulado/Cartón"
+            # Si detectamos plancha, la fijamos
+            if pl != "Ninguna":
+                p["pl"] = pl
+                p["ap"] = ap
+                p["tipo_base"] = "Ondulado/Cartón"
+
+        # Acabado / peliculado
+        acabado_txt = str(f.get("acabado_texto", f.get("acabado", "")) or "")
+        if acabado_txt:
+            p["pel"] = _map_peliculado(acabado_txt)
+
+        # Corte
+        troq_tipo = str(f.get("troquel_tipo", f.get("troquel", "")) or "")
+        troq_stock = f.get("troquel_stock", False)
+        cor_default, cobrar_arr, pv_trq = _map_corte(troq_tipo, troq_stock)
+        p["cor_default"] = cor_default
+        p["cobrar_arreglo"] = bool(cobrar_arr)
+        p["pv_troquel"] = float(pv_trq)
+
+        # Flexografía (coste fijo por plancha)
+        if "flexografia" in f:
+            p["flexografia"] = bool(f.get("flexografia"))
+
+        # Stamping
+        if "stamping" in f:
+            p["stamping"] = bool(f.get("stamping"))
+        if "stamping_w" in f:
+            try:
+                p["stamping_w"] = int(float(f.get("stamping_w") or 0))
+            except Exception:
+                pass
+        if "stamping_h" in f:
+            try:
+                p["stamping_h"] = int(float(f.get("stamping_h") or 0))
+            except Exception:
+                pass
+        if "stamping_cobrar_arreglo" in f:
+            p["stamping_cobrar_arreglo"] = bool(f.get("stamping_cobrar_arreglo"))
+
+        # Nombre
+        if "nombre" in f and f.get("nombre"):
+            p["nombre"] = str(f.get("nombre"))
+
+        piezas_out[str(idx)] = p
+
+    if not piezas_out:
+        piezas_out = {"1": crear_forma_vacia(1)}
+
+    di["piezas"] = piezas_out
+
+    # Nota: dejamos params/manip sin tocar (defaults del proyecto actual)
+    return di
+
+
 with st.sidebar:
     st.header("📦 JSON / Visualización")
     # 🌟 VISTA OFERTA siempre activa (sin toggle)
@@ -1698,6 +1949,29 @@ with st.sidebar:
 
         if st.button("🧹 Permitir re-importar el mismo JSON", key="reset_import"):
             st.session_state._last_import_hash = None
+            st.success("Listo.")
+
+    with st.expander("⚡ Importar EXTRACTO PDF (rápido)", expanded=False):
+        st.caption("Sube el JSON mínimo generado por el GPT (solo campos clave). La app lo convertirá al formato completo.")
+        uploaded_ex = st.file_uploader("Subir extracto (JSON)", type=["json"], key="uploader_extract_json")
+        if uploaded_ex is not None:
+            try:
+                raw = uploaded_ex.getvalue()
+                h = hashlib.sha256(raw).hexdigest()
+                if st.session_state._last_import_hash_extract != h:
+                    ex = json.loads(raw.decode("utf-8"))
+                    di2 = _build_import_dict_from_extract(ex)
+                    normalizar_import(di2)
+                    st.session_state._last_import_hash_extract = h
+                    st.success("Importación del extracto OK (convertido a proyecto).")
+                    st.rerun()
+                else:
+                    st.caption("Este extracto ya se importó (evitado bucle).")
+            except Exception as e:
+                st.error(f"Error importando extracto: {e}")
+
+        if st.button("🧹 Permitir re-importar el mismo extracto", key="reset_import_extract"):
+            st.session_state._last_import_hash_extract = None
             st.success("Listo.")
 
     with st.expander("📤 Exportar JSON", expanded=True):
