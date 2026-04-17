@@ -3412,9 +3412,19 @@ if modo_comercial and res_final:
     extras_html += "</div>"
 
     emb_html = "<div class='sec-title'>📦 Embalajes</div><div class='card'>"
+    emb_html += "<div class='small muted'>El precio de embalaje mostrado en la tabla es <b>€/ud repercutido</b>. Si un embalaje es multipack (p.ej. 5 uds/caja), el <b>coste real por caja</b> es (€/ud × uds/caja).</div>"
     for emb in st.session_state.embalajes:
         L, W, H = emb["dims"].get("L",0), emb["dims"].get("W",0), emb["dims"].get("H",0)
-        emb_html += f"<div class='small'>• <b>{emb.get('nombre','')}</b> — {emb.get('tipo','')} — {emb.get('material','')} — {L:.0f}×{W:.0f}×{H:.0f} mm</div>"
+        try:
+            upc = int(emb.get("uds_por_caja", 1) or 1)
+        except Exception:
+            upc = 1
+        upc = max(1, upc)
+        upc_txt = f" — <b>{upc} uds/caja</b>" if upc > 1 else ""
+        emb_html += (
+            f"<div class='small'>• <b>{emb.get('nombre','')}</b> — {emb.get('tipo','')} — {emb.get('material','')} — "
+            f"{L:.0f}×{W:.0f}×{H:.0f} mm{upc_txt}</div>"
+        )
     emb_html += "</div>"
 
     ext_html = "<div class='sec-title'>📌 Externos</div><div class='card'>"
@@ -3466,20 +3476,46 @@ if modo_comercial and res_final:
     emb_opts_html = ""
     try:
         if isinstance(st.session_state.embalajes, list) and len(st.session_state.embalajes) > 1:
+            # Mapa por nombre para encontrar uds/caja
+            _emb_by_name = {}
+            for _e in st.session_state.embalajes:
+                try:
+                    _emb_by_name[str(_e.get("nombre",""))] = _e
+                except Exception:
+                    pass
+
             emb_opts_html += "<div class='sec-title'>📦 Opciones de embalaje</div>"
             emb_opts_html += "<div class='card'>"
-            emb_opts_html += "<div class='small muted'>Precios de embalaje por opción (no altera el precio principal mostrado arriba).</div>"
+            emb_opts_html += "<div class='small muted'>Precios de embalaje por opción. El valor mostrado es <b>€/ud repercutido</b>; si es multipack, también se indica el <b>€/caja</b> (€/ud × uds/caja).</div>"
             for q in sorted(resumen_costes_export.keys()):
                 emb_opts_html += f"<div style='margin-top:10px; font-weight:700;'>Cantidad: {int(q)} uds</div>"
                 emb_opts_html += "<table class='comercial-table' style='margin-top:6px;'>"
-                emb_opts_html += "<tr><th>Embalaje</th><th>€/ud</th><th>Total</th></tr>"
+                emb_opts_html += "<tr><th>Embalaje</th><th>Uds/caja</th><th>€/ud (repercutido)</th><th>€/caja</th><th>Total</th></tr>"
                 opts = (resumen_costes_export.get(q, {}) or {}).get("embalajes_venta_por_opcion", [])
                 if isinstance(opts, list) and opts:
                     for opt in opts:
-                        emb_opts_html += f"<tr><td>{opt.get('nombre','')}</td><td>{float(opt.get('unit',0.0)):.3f}€</td><td>{float(opt.get('total',0.0)):.2f}€</td></tr>"
+                        nom = str(opt.get("nombre",""))
+                        unit = float(opt.get("unit", 0.0) or 0.0)
+                        total = float(opt.get("total", 0.0) or 0.0)
+                        upc = 1
+                        try:
+                            e0 = _emb_by_name.get(nom, None)
+                            if isinstance(e0, dict):
+                                upc = int(e0.get("uds_por_caja", 1) or 1)
+                        except Exception:
+                            upc = 1
+                        upc = max(1, upc)
+                        caja = unit * upc
+                        emb_opts_html += (
+                            f"<tr><td>{html.escape(nom)}</td>"
+                            f"<td>{upc}</td>"
+                            f"<td>{unit:.3f}€</td>"
+                            f"<td>{caja:.3f}€</td>"
+                            f"<td>{total:.2f}€</td></tr>"
+                        )
                 emb_opts_html += "</table>"
             emb_opts_html += "</div>"
-    except Exception:
+except Exception:
         emb_opts_html = ""
 
         # Opcionales (a parte) - tabla
