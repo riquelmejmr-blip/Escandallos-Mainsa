@@ -3515,10 +3515,10 @@ if modo_comercial and res_final:
                         )
                 emb_opts_html += "</table>"
             emb_opts_html += "</div>"
-except Exception:
+    except Exception:
         emb_opts_html = ""
 
-        # Opcionales (a parte) - tabla
+    # Opcionales (a parte) - tabla
     opc_html = ""
     if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
         opc_html += "<div class='sec-title'>🧩 Opcionales (a parte)</div>"
