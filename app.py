@@ -696,6 +696,7 @@ def crear_embalaje_vacio(idx):
         "tipo": "Manual",
         "material": "Canal 5",
         "dims": {"L": 0.0, "W": 0.0, "H": 0.0},
+        "uds_por_caja": 1,
         "costes": {}
     }
 
@@ -998,7 +999,7 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
                 del st.session_state[k]
 
     for ei in range(max(0, embalajes_len)):
-        for k in [f"emb_name_{ei}", f"emb_tipo_{ei}", f"emb_mat_{ei}", f"embL_{ei}", f"embW_{ei}", f"embH_{ei}", f"emb_del_{ei}"]:
+        for k in [f"emb_name_{ei}", f"emb_tipo_{ei}", f"emb_mat_{ei}", f"embUPC_{ei}", f"embL_{ei}", f"embW_{ei}", f"embH_{ei}", f"emb_del_{ei}"]:
             if k in st.session_state:
                 del st.session_state[k]
         for q in lista_cants:
@@ -1522,6 +1523,11 @@ def normalizar_import(di: dict):
             base["nombre"] = str(e.get("nombre", base["nombre"]))
             base["tipo"] = str(e.get("tipo", base["tipo"]))
             base["material"] = str(e.get("material", base["material"]))
+            try:
+                upc = int(float(e.get("uds_por_caja", e.get("uds_caja", e.get("unidades_por_caja", 1))) or 1))
+            except Exception:
+                upc = 1
+            base["uds_por_caja"] = max(1, int(upc))
             dims_in = e.get("dims", {}) if isinstance(e.get("dims", None), dict) else {}
             # ✅ Import robusto de dimensiones (compat JSON antiguos):
             # - Acepta claves en dims: "L","W","H" o en minúscula ("l","w","h").
@@ -2493,11 +2499,12 @@ with tab_calculadora:
     else:
         for ei, emb in enumerate(st.session_state.embalajes):
             with st.expander(f"📦 {emb.get('nombre', f'Embalaje {ei+1}')}", expanded=True):
-                c0, c1, c2, c3 = st.columns([2, 2, 2, 1])
+                c0, c1, c2, c3, c4 = st.columns([2, 2, 2, 2, 1])
                 emb["nombre"] = c0.text_input("Nombre", value=emb.get("nombre", f"Embalaje {ei+1}"), key=f"emb_name_{ei}")
                 emb["tipo"] = c1.selectbox("Tipo", TIPOS_EMB, index=TIPOS_EMB.index(emb.get("tipo", "Manual")) if emb.get("tipo","Manual") in TIPOS_EMB else 0, key=f"emb_tipo_{ei}")
                 emb["material"] = c2.selectbox("Material", EMB_MATS, index=EMB_MATS.index(emb.get("material","Canal 5")) if emb.get("material","Canal 5") in EMB_MATS else 0, key=f"emb_mat_{ei}")
-                if c3.button("🗑", key=f"emb_del_{ei}"):
+                emb["uds_por_caja"] = int(c3.number_input("Uds por caja", min_value=1, step=1, value=int(emb.get("uds_por_caja", 1) or 1), key=f"embUPC_{ei}"))
+                if c4.button("🗑", key=f"emb_del_{ei}"):
                     if len(st.session_state.embalajes) > 1:
                         st.session_state.embalajes.pop(ei)
                         st.rerun()
@@ -2513,24 +2520,31 @@ with tab_calculadora:
                 cols = st.columns(len(lista_cants))
 
                 for idx, q in enumerate(lista_cants):
+                    # Si una caja contiene varias uds, el coste automático debe calcularse por nº de cajas.
+                    try:
+                        uds_por_caja = int(emb.get("uds_por_caja", 1) or 1)
+                    except Exception:
+                        uds_por_caja = 1
+                    uds_por_caja = max(1, int(uds_por_caja))
+                    q_calc = int(math.ceil(int(q) / float(uds_por_caja))) if int(q) > 0 else 0
                     if emb["tipo"] == "Manual":
-                        emb["costes"][q] = float(cols[idx].number_input(f"Coste compra {q}", value=float(emb["costes"].get(q, 0.0)), key=f"embMan_{ei}_{q}"))
+                        emb["costes"][q] = float(cols[idx].number_input(f"Coste compra caja ({q} uds)", value=float(emb["costes"].get(q, 0.0)), key=f"embMan_{ei}_{q}"))
                     elif emb["tipo"] == "Embalaje Guaina (Automático)":
                         L, W, H = emb["dims"]["L"], emb["dims"]["W"], emb["dims"]["H"]
                         sup_m2 = ((2*(L+W)*H) + (L*W)) / 1_000_000 if (L>0 and W>0 and H>0) else 0.0
-                        coste_auto = (sup_m2 * 0.70) + (30 / q) if q>0 else 0.0
+                        coste_auto = (sup_m2 * 0.70) + (30 / q_calc) if q_calc>0 else 0.0
                         coste_auto *= mult
                         emb["costes"][q] = float(coste_auto)
                         cols[idx].metric(f"{q} uds", f"{coste_auto:.3f}€")
                     elif emb["tipo"] == "Embalaje en Plano":
                         L, W, H = emb["dims"]["L"], emb["dims"]["W"], emb["dims"]["H"]
-                        c_plano, _S = embalaje_plano_unit(L, W, H, q)
+                        c_plano, _S = embalaje_plano_unit(L, W, H, q_calc)
                         c_plano *= mult
                         emb["costes"][q] = float(c_plano)
                         cols[idx].metric(f"{q} uds", f"{c_plano:.3f}€")
                     elif emb["tipo"] == "Embalaje en Volumen":
                         L, W, H = emb["dims"]["L"], emb["dims"]["W"], emb["dims"]["H"]
-                        c_vol, _S = embalaje_volumen_unit(L, W, H, q)
+                        c_vol, _S = embalaje_volumen_unit(L, W, H, q_calc)
                         c_vol *= mult
                         emb["costes"][q] = float(c_vol)
                         cols[idx].metric(f"{q} uds", f"{c_vol:.3f}€")
@@ -3059,21 +3073,51 @@ if lista_cants and st.session_state.piezas_dict and sum(lista_cants) > 0:
         emb_compra_total = 0.0
         emb_det = []
         for emb in st.session_state.embalajes:
-            cu = float(emb.get("costes", {}).get(q_n, 0.0))
-            emb_compra_total += cu * q_n
-            emb_det.append({"nombre": emb.get("nombre",""), "tipo": emb.get("tipo",""), "material": emb.get("material",""), "coste_unit_compra": cu})
+            # Embalajes pueden ser por caja (varias uds dentro). En ese caso el coste es por CAJA.
+            try:
+                uds_por_caja = int(float(emb.get("uds_por_caja", 1) or 1))
+            except Exception:
+                uds_por_caja = 1
+            uds_por_caja = max(1, int(uds_por_caja))
+
+            cu_caja = float(emb.get("costes", {}).get(q_n, 0.0))
+            n_cajas = int(math.ceil(q_n / float(uds_por_caja))) if q_n > 0 else 0
+
+            emb_compra_total += cu_caja * n_cajas
+            emb_det.append({
+                "nombre": emb.get("nombre",""),
+                "tipo": emb.get("tipo",""),
+                "material": emb.get("material",""),
+                "uds_por_caja": uds_por_caja,
+                "cajas": n_cajas,
+                "coste_caja_compra": cu_caja,
+                "coste_total_compra": float(cu_caja * n_cajas),
+                "coste_unit_compra": float((cu_caja * n_cajas) / q_n) if q_n > 0 else 0.0,
+            })
 
         # ✅ Venta de embalajes por opción (para mostrar en oferta si hay varias opciones)
         pv_emb_por_embalaje = []
         for j, emb in enumerate(st.session_state.embalajes):
             nombre_emb = str(emb.get("nombre", "")).strip() or f"EMB_{j+1}"
-            cu_compra = float(emb.get("costes", {}).get(q_n, 0.0))
-            pv_unit = cu_compra * margen_embalajes
-            pv_tot = pv_unit * q_n
+            try:
+                uds_por_caja = int(float(emb.get("uds_por_caja", 1) or 1))
+            except Exception:
+                uds_por_caja = 1
+            uds_por_caja = max(1, int(uds_por_caja))
+
+            cu_compra = float(emb.get("costes", {}).get(q_n, 0.0))  # €/caja (o €/ud si uds_por_caja=1)
+            n_cajas = int(math.ceil(q_n / float(uds_por_caja))) if q_n > 0 else 0
+
+            pv_caja = cu_compra * margen_embalajes
+            pv_tot = pv_caja * n_cajas
+            pv_unit = (pv_tot / q_n) if q_n > 0 else 0.0
             nombre_key = re.sub(r"[\r\n\t]+", " ", nombre_emb)
             pv_emb_por_embalaje.append({
                 "nombre": nombre_key,
                 "unit": pv_unit,
+                "uds_por_caja": uds_por_caja,
+                "cajas": n_cajas,
+                "pv_caja": pv_caja,
                 "total": pv_tot,
             })
 
