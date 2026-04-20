@@ -1612,6 +1612,57 @@ def construir_export(resumen_compra=None, resumen_costes=None):
     c1_out = (str(_c1_num) if _c1_num is not None else str(_c1_raw or ""))
     c2_out = (str(_c2_num) if _c2_num is not None else str(_c2_raw or ""))
 
+    # Embalajes: export normalizado para asegurar dims.L/W/H (especialmente H) y claves de costes numéricas.
+    embalajes_out = []
+    for emb in (st.session_state.get("embalajes") or []):
+        if not isinstance(emb, dict):
+            continue
+        dims = emb.get("dims", {}) if isinstance(emb.get("dims", None), dict) else {}
+
+        def _dim(key: str) -> float:
+            # Acepta clave en mayúscula/minúscula dentro de dims y/o claves planas (compat).
+            for kk in (key, key.lower()):
+                if kk in dims:
+                    try:
+                        return float(dims.get(kk, 0.0) or 0.0)
+                    except Exception:
+                        return 0.0
+                if kk in emb:
+                    try:
+                        return float(emb.get(kk, 0.0) or 0.0)
+                    except Exception:
+                        return 0.0
+            return 0.0
+
+        # Costes por cantidad: normalizamos claves a int
+        costes_in = emb.get("costes", {}) if isinstance(emb.get("costes", None), dict) else {}
+        costes_out: dict[int, float] = {}
+        for k, v in costes_in.items():
+            try:
+                kk = int(float(k))
+            except Exception:
+                continue
+            try:
+                vv = float(v)
+            except Exception:
+                vv = 0.0
+            costes_out[kk] = vv
+
+        try:
+            upc = int(float(emb.get("uds_por_caja", 1) or 1))
+        except Exception:
+            upc = 1
+
+        embalajes_out.append({
+            "id": str(emb.get("id", "")),
+            "nombre": str(emb.get("nombre", "")),
+            "tipo": str(emb.get("tipo", "Manual")),
+            "material": str(emb.get("material", "Canal 5")),
+            "uds_por_caja": max(1, int(upc)),
+            "dims": {"L": _dim("L"), "W": _dim("W"), "H": _dim("H")},
+            "costes": costes_out,
+        })
+
     data = {
         "brf": st.session_state.brf,
         "comercial_1": c1_out,
@@ -1627,7 +1678,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "db_descuentos": deepcopy(st.session_state.db_descuentos),
         "piezas": piezas_out,
         "extras": deepcopy(st.session_state.lista_extras_grabados),
-        "embalajes": deepcopy(st.session_state.embalajes),
+        "embalajes": embalajes_out,
         "externos": deepcopy(st.session_state.externos),
         "mermas_imp": deepcopy(st.session_state.mermas_imp_manual),
         "mermas_imp_digital": deepcopy(st.session_state.mermas_imp_digital_manual),
