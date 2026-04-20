@@ -212,7 +212,8 @@ PRECIOS_BASE = {
         "CINTA D/CARA": 0.26, "CINTA LOHMAN": 0.49, "CINTA GEL": 1.2,
         "GOMA TERMINALES": 0.079, "IMAN 20x2mm": 1.145, "TUBOS": 1.06,
         "REMACHES": 0.049, "VELCRO": 0.43, "PUNTO ADHESIVO": 0.08,
-        "Soporte Balda Blanco": 0.08, "Soporte Balda Negro": 0.10
+        "Soporte Balda Blanco": 0.08, "Soporte Balda Negro": 0.10,
+        "PUNTO ADHESIVO REDONDO 30mm GEL": 0,085
     },
     "troquelado": {
         "Pequeño (< 1000x700)": {"arranque": 48.19, "tiro": 0.06},
