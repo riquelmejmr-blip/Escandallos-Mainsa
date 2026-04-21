@@ -178,24 +178,24 @@ PRECIOS_BASE = {
         "Ninguna": {"C/C": 0.0, "peg": 0.0},
         "Microcanal / Canal 3": {"C/C": 0.702, "B/C": 0.725, "B/B": 0.805, "peg": 0.217},
         "Doble Micro / Doble Doble": {"C/C": 1.128, "B/C": 1.187, "B/B": 1.378, "peg": 0.263},
-        "AC (Cuero/Cuero)": {"C/C": 2.505, "peg": 0.217},
+        "AC (Cuero/Cuero)": {"C/C": 2.705, "peg": 0.217},
     },
     "rigidos": {
         "Ninguno": {"precio_ud": 0.0, "w": 0, "h": 0},
-        "PVC TRANSPARENTE 300 MICRAS": {"precio_ud": 1.80, "w": 1000, "h": 700},
-        "PVC TRANSPARENTE 500 MICRAS": {"precio_ud": 2.99, "w": 1000, "h": 700},
-        "PVC TRANSPARENTE 700 MICRAS": {"precio_ud": 4.22, "w": 1000, "h": 700},
+        "PVC TRANSPARENTE 300 MICRAS": {"precio_ud": 1.926, "w": 1000, "h": 700},
+        "PVC TRANSPARENTE 500 MICRAS": {"precio_ud": 3.209, "w": 1000, "h": 700},
+        "PVC TRANSPARENTE 700 MICRAS": {"precio_ud": 4.523, "w": 1000, "h": 700},
         "PVC BLANCO MATE 300 MICRAS": {"precio_ud": 1.76, "w": 1000, "h": 700},
         "PVC BLANCO MATE 500 MICRAS": {"precio_ud": 2.94, "w": 1000, "h": 700},
         "PVC BLANCO MATE 700 MICRAS": {"precio_ud": 4.11, "w": 1000, "h": 700},
-        "APET 300 MICRAS": {"precio_ud": 1.35, "w": 1000, "h": 700},
-        "APET 500 MICRAS": {"precio_ud": 2.25, "w": 1000, "h": 700},
+        "APET 300 MICRAS": {"precio_ud": 1.43, "w": 1000, "h": 700},
+        "APET 500 MICRAS": {"precio_ud": 2.383, "w": 1000, "h": 700},
         "PET G 0,5mm": {"precio_ud": 8.87, "w": 1250, "h": 2050},
         "PET G 0,7mm": {"precio_ud": 11.22, "w": 1250, "h": 2050},
         "PET G 1mm": {"precio_ud": 13.61, "w": 1250, "h": 2050},
-        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 300 MICRAS": {"precio_ud": 1.00, "w": 1000, "h": 700},
-        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 500 MICRAS": {"precio_ud": 1.67, "w": 1000, "h": 700},
-        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 800 MICRAS": {"precio_ud": 2.67, "w": 1000, "h": 700},
+        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 300 MICRAS": {"precio_ud": 1.095, "w": 1000, "h": 700},
+        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 500 MICRAS": {"precio_ud": 1.826, "w": 1000, "h": 700},
+        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 800 MICRAS": {"precio_ud": 2.921, "w": 1000, "h": 700},
         "COMPACTO 1,5 MM": {"precio_ud": 1.80, "w": 1050, "h": 750},
         "COMPACTO 2 MM": {"precio_ud": 2.15, "w": 1050, "h": 750},
         "COMPACTO 3 MM": {"precio_ud": 3.00, "w": 1050, "h": 750},
@@ -1612,57 +1612,6 @@ def construir_export(resumen_compra=None, resumen_costes=None):
     c1_out = (str(_c1_num) if _c1_num is not None else str(_c1_raw or ""))
     c2_out = (str(_c2_num) if _c2_num is not None else str(_c2_raw or ""))
 
-    # Embalajes: export normalizado para asegurar dims.L/W/H (especialmente H) y claves de costes numéricas.
-    embalajes_out = []
-    for emb in (st.session_state.get("embalajes") or []):
-        if not isinstance(emb, dict):
-            continue
-        dims = emb.get("dims", {}) if isinstance(emb.get("dims", None), dict) else {}
-
-        def _dim(key: str) -> float:
-            # Acepta clave en mayúscula/minúscula dentro de dims y/o claves planas (compat).
-            for kk in (key, key.lower()):
-                if kk in dims:
-                    try:
-                        return float(dims.get(kk, 0.0) or 0.0)
-                    except Exception:
-                        return 0.0
-                if kk in emb:
-                    try:
-                        return float(emb.get(kk, 0.0) or 0.0)
-                    except Exception:
-                        return 0.0
-            return 0.0
-
-        # Costes por cantidad: normalizamos claves a int
-        costes_in = emb.get("costes", {}) if isinstance(emb.get("costes", None), dict) else {}
-        costes_out: dict[int, float] = {}
-        for k, v in costes_in.items():
-            try:
-                kk = int(float(k))
-            except Exception:
-                continue
-            try:
-                vv = float(v)
-            except Exception:
-                vv = 0.0
-            costes_out[kk] = vv
-
-        try:
-            upc = int(float(emb.get("uds_por_caja", 1) or 1))
-        except Exception:
-            upc = 1
-
-        embalajes_out.append({
-            "id": str(emb.get("id", "")),
-            "nombre": str(emb.get("nombre", "")),
-            "tipo": str(emb.get("tipo", "Manual")),
-            "material": str(emb.get("material", "Canal 5")),
-            "uds_por_caja": max(1, int(upc)),
-            "dims": {"L": _dim("L"), "W": _dim("W"), "H": _dim("H")},
-            "costes": costes_out,
-        })
-
     data = {
         "brf": st.session_state.brf,
         "comercial_1": c1_out,
@@ -1678,7 +1627,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "db_descuentos": deepcopy(st.session_state.db_descuentos),
         "piezas": piezas_out,
         "extras": deepcopy(st.session_state.lista_extras_grabados),
-        "embalajes": embalajes_out,
+        "embalajes": deepcopy(st.session_state.embalajes),
         "externos": deepcopy(st.session_state.externos),
         "mermas_imp": deepcopy(st.session_state.mermas_imp_manual),
         "mermas_imp_digital": deepcopy(st.session_state.mermas_imp_digital_manual),
