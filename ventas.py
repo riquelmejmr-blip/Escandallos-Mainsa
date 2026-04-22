@@ -178,24 +178,24 @@ PRECIOS_BASE = {
         "Ninguna": {"C/C": 0.0, "peg": 0.0},
         "Microcanal / Canal 3": {"C/C": 0.702, "B/C": 0.725, "B/B": 0.805, "peg": 0.217},
         "Doble Micro / Doble Doble": {"C/C": 1.128, "B/C": 1.187, "B/B": 1.378, "peg": 0.263},
-        "AC (Cuero/Cuero)": {"C/C": 2.705, "peg": 0.217},
+        "AC (Cuero/Cuero)": {"C/C": 2.505, "peg": 0.217},
     },
     "rigidos": {
         "Ninguno": {"precio_ud": 0.0, "w": 0, "h": 0},
-        "PVC TRANSPARENTE 300 MICRAS": {"precio_ud": 1.926, "w": 1000, "h": 700},
-        "PVC TRANSPARENTE 500 MICRAS": {"precio_ud": 3.209, "w": 1000, "h": 700},
-        "PVC TRANSPARENTE 700 MICRAS": {"precio_ud": 4.523, "w": 1000, "h": 700},
+        "PVC TRANSPARENTE 300 MICRAS": {"precio_ud": 1.80, "w": 1000, "h": 700},
+        "PVC TRANSPARENTE 500 MICRAS": {"precio_ud": 2.99, "w": 1000, "h": 700},
+        "PVC TRANSPARENTE 700 MICRAS": {"precio_ud": 4.22, "w": 1000, "h": 700},
         "PVC BLANCO MATE 300 MICRAS": {"precio_ud": 1.76, "w": 1000, "h": 700},
         "PVC BLANCO MATE 500 MICRAS": {"precio_ud": 2.94, "w": 1000, "h": 700},
         "PVC BLANCO MATE 700 MICRAS": {"precio_ud": 4.11, "w": 1000, "h": 700},
-        "APET 300 MICRAS": {"precio_ud": 1.43, "w": 1000, "h": 700},
-        "APET 500 MICRAS": {"precio_ud": 2.383, "w": 1000, "h": 700},
+        "APET 300 MICRAS": {"precio_ud": 1.35, "w": 1000, "h": 700},
+        "APET 500 MICRAS": {"precio_ud": 2.25, "w": 1000, "h": 700},
         "PET G 0,5mm": {"precio_ud": 8.87, "w": 1250, "h": 2050},
         "PET G 0,7mm": {"precio_ud": 11.22, "w": 1250, "h": 2050},
         "PET G 1mm": {"precio_ud": 13.61, "w": 1250, "h": 2050},
-        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 300 MICRAS": {"precio_ud": 1.095, "w": 1000, "h": 700},
-        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 500 MICRAS": {"precio_ud": 1.826, "w": 1000, "h": 700},
-        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 800 MICRAS": {"precio_ud": 2.921, "w": 1000, "h": 700},
+        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 300 MICRAS": {"precio_ud": 1.00, "w": 1000, "h": 700},
+        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 500 MICRAS": {"precio_ud": 1.67, "w": 1000, "h": 700},
+        "POLIPROPILENO COMPACTO BLANCO/ NATURAL 800 MICRAS": {"precio_ud": 2.67, "w": 1000, "h": 700},
         "COMPACTO 1,5 MM": {"precio_ud": 1.80, "w": 1050, "h": 750},
         "COMPACTO 2 MM": {"precio_ud": 2.15, "w": 1050, "h": 750},
         "COMPACTO 3 MM": {"precio_ud": 3.00, "w": 1050, "h": 750},
@@ -934,6 +934,7 @@ if "_last_import_hash" not in st.session_state: st.session_state._last_import_ha
 if "_tarifa_mp_import_hash" not in st.session_state: st.session_state._tarifa_mp_import_hash = None
 if "_tarifa_mp_mismatch" not in st.session_state: st.session_state._tarifa_mp_mismatch = False
 if "_export_blob" not in st.session_state: st.session_state._export_blob = None
+if "_export_blob_hash" not in st.session_state: st.session_state._export_blob_hash = None
 if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
 if "_imported_compras_legible" not in st.session_state: st.session_state._imported_compras_legible = None
 if "_imported_resumen_costes" not in st.session_state: st.session_state._imported_resumen_costes = None
@@ -1641,6 +1642,42 @@ def construir_export(resumen_compra=None, resumen_costes=None):
     if resumen_costes is not None:
         data["resumen_costes"] = resumen_costes
     return data
+
+
+# =========================================================
+# EXPORT CACHE (robusto y coherente)
+# - Evita que el JSON se quede "antiguo" si cambias Brief/Descripción y no recalculas.
+# - Evita que el tick ✅ JSON descargado desaparezca al descargar la oferta (no resetea si el JSON no cambia).
+# =========================================================
+def _update_export_cache(export_data: dict) -> None:
+    """Actualiza st.session_state._export_blob y flags SOLO si cambia el contenido."""
+    try:
+        blob = json.dumps(export_data, indent=4, ensure_ascii=False)
+    except Exception:
+        blob = json.dumps(export_data, ensure_ascii=False)
+
+    h = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+
+    prev_h = st.session_state.get("_export_blob_hash", None)
+    if prev_h != h:
+        st.session_state._export_blob = blob
+        st.session_state._export_blob_hash = h
+        # Si el JSON cambió, el tick de "descargado" ya no aplica al nuevo contenido.
+        st.session_state._json_downloaded = False
+        st.session_state._json_downloaded_filename = ""
+
+def _ensure_export_blob() -> None:
+    """(Re)genera el export_blob con el estado actual del proyecto.
+
+    Nota:
+    - Esto evita que el JSON se quede con Brief/Descripción antiguos si no recalculas.
+    - _update_export_cache() decide si debe resetear el tick de "descargado".
+    """
+    export_data = construir_export(
+        resumen_compra=st.session_state.get("_imported_compras_legible"),
+        resumen_costes=st.session_state.get("_imported_resumen_costes"),
+    )
+    _update_export_cache(export_data)
 # =========================================================
 # CSS
 # =========================================================
@@ -1718,6 +1755,7 @@ with st.sidebar:
             st.success("Listo.")
 
     with st.expander("📤 Exportar JSON", expanded=True):
+        _ensure_export_blob()
         if st.session_state._export_blob:
             st.download_button(
                 "💾 Descargar JSON",
@@ -3271,9 +3309,7 @@ export_data = construir_export(
     resumen_compra=resumen_compra_to_export,
     resumen_costes=resumen_costes_to_export
 )
-st.session_state._export_blob = json.dumps(export_data, indent=4, ensure_ascii=False)
-st.session_state._json_downloaded = False
-st.session_state._json_downloaded_filename = ""
+_update_export_cache(export_data)
 
 # =========================================================
 # SALIDAS
