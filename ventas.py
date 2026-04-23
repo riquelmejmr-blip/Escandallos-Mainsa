@@ -934,12 +934,12 @@ if "_last_import_hash" not in st.session_state: st.session_state._last_import_ha
 if "_tarifa_mp_import_hash" not in st.session_state: st.session_state._tarifa_mp_import_hash = None
 if "_tarifa_mp_mismatch" not in st.session_state: st.session_state._tarifa_mp_mismatch = False
 if "_export_blob" not in st.session_state: st.session_state._export_blob = None
-if "_export_blob_hash" not in st.session_state: st.session_state._export_blob_hash = None
 if "_export_filename" not in st.session_state: st.session_state._export_filename = "oferta.json"
 if "_imported_compras_legible" not in st.session_state: st.session_state._imported_compras_legible = None
 if "_imported_resumen_costes" not in st.session_state: st.session_state._imported_resumen_costes = None
 if "_json_downloaded" not in st.session_state: st.session_state._json_downloaded = False
 if "_json_downloaded_filename" not in st.session_state: st.session_state._json_downloaded_filename = ""
+if "_import_lock_margen" not in st.session_state: st.session_state._import_lock_margen = False
 
 # =========================================================
 # FIX IMPORT: PURGE KEYS DE WIDGETS
@@ -1290,6 +1290,13 @@ def normalizar_import(di: dict):
         if bool(st.session_state.get("repeticion_proyecto", False)):
             st.session_state.imp_fijo_pvp = 0.0
         if "margen" in params: st.session_state.margen = float(params["margen"])
+        # ✅ Lock: al importar, no auto-ajustar margen en el primer render (evita diferencias de precio tras importar)
+        st.session_state._import_lock_margen = True
+        # Evita que el autómata interprete el margen importado como "auto" del proyecto anterior
+        try:
+            st.session_state.last_auto_margen = float("nan")
+        except Exception:
+            st.session_state.last_auto_margen = -999999.0
         # ✅ Nuevos (compatibles hacia atrás)
         if "descuento_procesos" in params: st.session_state.descuento_procesos = float(params["descuento_procesos"])
         if "margen_extras" in params: st.session_state.margen_extras = float(params["margen_extras"])
@@ -1643,41 +1650,51 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         data["resumen_costes"] = resumen_costes
     return data
 
+# =========================================================
+# EXPORT JSON (ROBUSTO): SIEMPRE ÚLTIMO ESTADO + TICK ESTABLE
+# =========================================================
+def _compute_export_payload() -> tuple[dict, str]:
+    """Construye el dict de export + devuelve (export_data, export_hash).
+    - Usa los snapshots importados si todavía no hay cálculo (misma lógica que venías usando).
+    - Hash estable para no resetear el tick al descargar oferta u otras acciones.
+    """
+    resumen_compra_export = st.session_state.get("compras_legible_export", None)
+    resumen_costes_export = st.session_state.get("resumen_costes_export", None)
 
-# =========================================================
-# EXPORT CACHE (robusto y coherente)
-# - Evita que el JSON se quede "antiguo" si cambias Brief/Descripción y no recalculas.
-# - Evita que el tick ✅ JSON descargado desaparezca al descargar la oferta (no resetea si el JSON no cambia).
-# =========================================================
-def _update_export_cache(export_data: dict) -> None:
-    """Actualiza st.session_state._export_blob y flags SOLO si cambia el contenido."""
+    resumen_compra_to_export = resumen_compra_export if isinstance(resumen_compra_export, dict) and len(resumen_compra_export) > 0 else st.session_state.get("_imported_compras_legible")
+    resumen_costes_to_export = resumen_costes_export if isinstance(resumen_costes_export, dict) and len(resumen_costes_export) > 0 else st.session_state.get("_imported_resumen_costes")
+
+    export_data = construir_export(
+        resumen_compra=resumen_compra_to_export,
+        resumen_costes=resumen_costes_to_export
+    )
+
+    # Hash estable (sin indent) para detectar cambios reales
     try:
-        blob = json.dumps(export_data, indent=4, ensure_ascii=False)
+        blob_compact = json.dumps(export_data, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
     except Exception:
-        blob = json.dumps(export_data, ensure_ascii=False)
+        blob_compact = str(export_data)
 
-    h = hashlib.sha256(blob.encode("utf-8")).hexdigest()
+    export_hash = hashlib.sha256(blob_compact.encode("utf-8")).hexdigest()
+    return export_data, export_hash
 
-    prev_h = st.session_state.get("_export_blob_hash", None)
-    if prev_h != h:
-        st.session_state._export_blob = blob
-        st.session_state._export_blob_hash = h
-        # Si el JSON cambió, el tick de "descargado" ya no aplica al nuevo contenido.
+
+def _refresh_export_cache_if_needed(force: bool = False) -> None:
+    """Refresca st.session_state._export_blob solo si ha cambiado (por hash).
+    Así el JSON es 100% fiable y el tick de "JSON descargado" no se cae por otras descargas.
+    """
+    if "_export_hash" not in st.session_state:
+        st.session_state._export_hash = None
+
+    export_data, export_hash = _compute_export_payload()
+
+    if force or (st.session_state._export_hash != export_hash) or (st.session_state.get("_export_blob") is None):
+        st.session_state._export_blob = json.dumps(export_data, indent=4, ensure_ascii=False)
+        st.session_state._export_hash = export_hash
+        # Si cambia el contenido, el tick vuelve a "pendiente"
         st.session_state._json_downloaded = False
         st.session_state._json_downloaded_filename = ""
 
-def _ensure_export_blob() -> None:
-    """(Re)genera el export_blob con el estado actual del proyecto.
-
-    Nota:
-    - Esto evita que el JSON se quede con Brief/Descripción antiguos si no recalculas.
-    - _update_export_cache() decide si debe resetear el tick de "descargado".
-    """
-    export_data = construir_export(
-        resumen_compra=st.session_state.get("_imported_compras_legible"),
-        resumen_costes=st.session_state.get("_imported_resumen_costes"),
-    )
-    _update_export_cache(export_data)
 # =========================================================
 # CSS
 # =========================================================
@@ -1753,22 +1770,6 @@ with st.sidebar:
         if st.button("🧹 Permitir re-importar el mismo JSON", key="reset_import"):
             st.session_state._last_import_hash = None
             st.success("Listo.")
-
-    with st.expander("📤 Exportar JSON", expanded=True):
-        _ensure_export_blob()
-        if st.session_state._export_blob:
-            st.download_button(
-                "💾 Descargar JSON",
-                data=st.session_state._export_blob,
-                file_name=st.session_state._export_filename,
-                mime="application/json",
-                on_click=_mark_json_download,
-                key="dl_json_sidebar"
-            )
-            if st.session_state.get("_json_downloaded", False):
-                st.success(f"✅ JSON descargado: {st.session_state.get('_json_downloaded_filename', '') or st.session_state._export_filename}")
-        else:
-            st.caption("Calcula una vez para habilitar la exportación.")
 
 # =========================================================
 # PESTAÑAS (SIEMPRE ADMIN)
@@ -1910,7 +1911,11 @@ with tab_calculadora:
         st.text_input("Nº Comercial 2 (opcional)", key="comercial_2")
         st.text_input("Cliente", key="cli")
         st.text_area("Notas / Comentarios", key="notas", height=180, placeholder="Escribe aquí notas internas o comentarios para incluir en la oferta comercial...")
-        _aplicar_margen_auto_si_procede()
+        # ✅ Import safety: tras importar un JSON, no reescribimos el margen automáticamente en este primer render.
+        if bool(st.session_state.get("_import_lock_margen", False)):
+            st.session_state._import_lock_margen = False
+        else:
+            _aplicar_margen_auto_si_procede()
     with cB:
         st.text_input("Descripción", key="desc")
         st.text_input("Cantidades (ej: 500, 1000)", key="cants_str_saved")
@@ -3303,13 +3308,6 @@ else:
     st.session_state._export_filename = f"{safe_brf}_{safe_cli}_{safe_desc}.json"
 
 resumen_compra_to_export = compras_legible if isinstance(compras_legible, dict) and len(compras_legible) > 0 else st.session_state.get("_imported_compras_legible")
-resumen_costes_to_export = resumen_costes_export if isinstance(resumen_costes_export, dict) and len(resumen_costes_export) > 0 else st.session_state.get("_imported_resumen_costes")
-
-export_data = construir_export(
-    resumen_compra=resumen_compra_to_export,
-    resumen_costes=resumen_costes_to_export
-)
-_update_export_cache(export_data)
 
 # =========================================================
 # SALIDAS
@@ -3381,6 +3379,7 @@ if modo_comercial and res_final:
         else:
             base_info = f"Ondulado: {p.get('pl','')} ({p.get('ap','')})"
 
+        flexo_txt = " | Flexografía" if bool(p.get("flexografia", False)) else ""
         cara = f"{p.get('pf','')} ({p.get('gf',0)}g)"
         dorso = f"{p.get('pd','')} ({p.get('gd',0)}g)"
         imp_c = f"{p.get('im','No')}"
@@ -3433,7 +3432,7 @@ if modo_comercial and res_final:
             f"<span class='tag'>{p.get('nombre','')}</span>"
             f"<span class='small muted'>{int(p.get('h',0))}×{int(p.get('w',0))} mm | Pliegos/ud: {float(p.get('pliegos',1.0)):.4f}</span>"
             "<div class='small'>"
-            f"<b>Soporte:</b> {base_info}<br>"
+            f"<b>Soporte:</b> {base_info}{flexo_txt}<br>"
             f"<b>Cara:</b> {cara} | <b>Imp:</b> {imp_c}{tintas_c} | <b>Pel:</b> {pel_c}<br>"
             f"<b>Dorso:</b> {dorso} | <b>Imp:</b> {imp_d}{tintas_d} | <b>Pel:</b> {pel_d}<br>"
             f"<b>Corte (def):</b> {corte} | <b>Troquel (venta):</b> {trq}" + impresiones_info_html + "</div></div>"
@@ -3588,16 +3587,39 @@ if modo_comercial and res_final:
     # Acceso rápido también en el panel lateral (sin quitar el botón de arriba)
     with st.sidebar:
         st.divider()
-        st.subheader("📄 Oferta comercial")
+    
+
+    # =========================================================
+    # SIDEBAR: Descargas (OFERTA arriba, JSON abajo) - fiable 100%
+    # =========================================================
+    # Refrescamos caché de export antes de mostrar botones
+    _refresh_export_cache_if_needed(force=False)
+
+    with st.sidebar.expander("📄 Descargar oferta", expanded=True):
         st.download_button(
             "⬇️ Descargar OFERTA (HTML)",
             data=oferta_html.encode("utf-8"),
             file_name=fname_html,
             mime="text/html",
             use_container_width=True,
-            key="dl_oferta_html_sidebar"
+            key="dl_oferta_html_sidebar_top"
         )
 
+    with st.sidebar.expander("📤 Exportar JSON", expanded=True):
+        if st.session_state.get("_export_blob"):
+            st.download_button(
+                "💾 Descargar JSON",
+                data=st.session_state._export_blob,
+                file_name=st.session_state._export_filename,
+                mime="application/json",
+                on_click=_mark_json_download,
+                use_container_width=True,
+                key="dl_json_sidebar_bottom"
+            )
+            if st.session_state.get("_json_downloaded", False):
+                st.success(f"✅ JSON descargado: {st.session_state.get('_json_downloaded_filename', '') or st.session_state._export_filename}")
+        else:
+            st.caption("Calcula una vez para habilitar la exportación.")
 
     st.download_button(
         "⬇️ Descargar VISTA OFERTA (HTML)",
