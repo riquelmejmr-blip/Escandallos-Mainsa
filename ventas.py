@@ -3592,7 +3592,26 @@ if modo_comercial and res_final:
     # =========================================================
     # SIDEBAR: Descargas (OFERTA arriba, JSON abajo) - fiable 100%
     # =========================================================
-    # Refrescamos caché de export antes de mostrar botones
+    
+    # Guardamos el resumen de compras y el resumen de costes en session_state para export JSON.
+    # IMPORTANTE: esto debe ejecutarse en cada rerun después del cálculo, para que el JSON exportado
+    # incluya siempre "compras_legible" y "resumen_costes" actualizados.
+    try:
+        if isinstance(globals().get("compras_legible", None), dict):
+            st.session_state.compras_legible_export = deepcopy(globals().get("compras_legible", {}))
+        else:
+            st.session_state.compras_legible_export = {}
+    except Exception:
+        st.session_state.compras_legible_export = {}
+
+    try:
+        if isinstance(globals().get("resumen_costes_export", None), dict):
+            st.session_state.resumen_costes_export = deepcopy(globals().get("resumen_costes_export", {}))
+        else:
+            st.session_state.resumen_costes_export = {}
+    except Exception:
+        st.session_state.resumen_costes_export = {}
+# Refrescamos caché de export antes de mostrar botones
     _refresh_export_cache_if_needed(force=False)
 
     with st.sidebar.expander("📄 Descargar oferta", expanded=True):
