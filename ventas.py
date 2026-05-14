@@ -985,37 +985,6 @@ if "_calc_cache" not in st.session_state:
 if "_calc_status" not in st.session_state:
     st.session_state._calc_status = "Pendiente"
 
-if "_calc_last_signature" not in st.session_state:
-    st.session_state._calc_last_signature = None
-
-def _calc_project_signature() -> str:
-    """Firma estable de los datos que afectan al cálculo.
-
-    Se usa para avisar cuando hay cambios introducidos que aún no se han recalculado.
-    No incluye cachés, blobs de descarga ni flags internos.
-    """
-    keys = [
-        "brf", "cli", "desc", "notas", "cants_str_saved",
-        "piezas_dict", "lista_extras_grabados", "embalajes", "externos",
-        "mermas_imp_manual", "mermas_imp_digital_manual", "mermas_proc_manual",
-        "impresiones_by_qty", "impresiones_by_qty_fmt", "impresiones_by_qty_fmt_enabled",
-        "unidad_t", "t_input", "rell_enabled", "rell_t_input", "arm_enabled", "arm_t_input",
-        "dif_ud", "dif_preset_sel", "imp_fijo_pvp", "repeticion_proyecto",
-        "margen", "margen_extras", "margen_embalajes", "descuento_procesos",
-        "db_descuentos", "db_precios",
-    ]
-    snap = {}
-    for k in keys:
-        try:
-            snap[k] = deepcopy(st.session_state.get(k))
-        except Exception:
-            snap[k] = str(st.session_state.get(k))
-    try:
-        payload = json.dumps(_normalizar_mp_para_hash(snap), sort_keys=True, ensure_ascii=False)
-    except Exception:
-        payload = repr(snap)
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
-
 # =========================================================
 # FIX IMPORT: PURGE KEYS DE WIDGETS
 # =========================================================
@@ -1227,44 +1196,6 @@ def _coerce_float(x, default=0.0):
         return float(x)
     except:
         return default
-
-
-def _get_merma_impresion_digital_hojas(q: int, default: int | None = None) -> int:
-    """Devuelve la merma de impresión DIGITAL para una cantidad, respetando 0 como valor manual válido.
-
-    Compatibilidad:
-    - Nuevo/actual: st.session_state.mermas_imp_digital_manual puede tener claves int o str.
-    - Si no existe valor manual, usa el default digital calculado por calcular_mermas_estandar().
-    """
-    try:
-        q_i = int(q)
-    except Exception:
-        q_i = 0
-
-    if default is None:
-        try:
-            default_i = int(calcular_mermas_estandar(q_i, es_digital=True)[1])
-        except Exception:
-            default_i = 10
-    else:
-        try:
-            default_i = int(default)
-        except Exception:
-            default_i = 10
-
-    d = st.session_state.get("mermas_imp_digital_manual", {})
-    if not isinstance(d, dict):
-        return int(default_i)
-
-    # IMPORTANTE: 0 es válido. No usar "or default".
-    for k in (q_i, str(q_i)):
-        if k in d:
-            try:
-                return int(float(d.get(k)))
-            except Exception:
-                return int(default_i)
-
-    return int(default_i)
 
 def _normalizar_pieza_dict(pid: int, v: dict):
     base = crear_forma_vacia(pid)
@@ -1858,24 +1789,6 @@ with st.sidebar:
         st.session_state._calc_status = "Calculando…"
     st.caption(f"Estado cálculo: {st.session_state.get('_calc_status','Pendiente')}")
 
-    try:
-        _current_calc_signature = _calc_project_signature()
-        _last_calc_signature = st.session_state.get("_calc_last_signature")
-        _has_calc_cache = isinstance(st.session_state.get("_calc_cache"), dict)
-        _calc_en_curso = bool(st.session_state.get("_calc_requested", False))
-
-        # Si acabas de pulsar "Calcular", el sidebar se pinta antes de que termine el motor de cálculo.
-        # En ese caso NO mostramos el aviso de "datos sin calcular", porque quedaría visible durante
-        # esta ejecución aunque el cálculo se complete correctamente al final del script.
-        if _calc_en_curso:
-            st.info("🧮 Calculando…")
-        elif _has_calc_cache and _last_calc_signature and _current_calc_signature != _last_calc_signature:
-            st.warning("⚠️ Hay datos introducidos sin calcular. Pulsa 🧮 Calcular para actualizar oferta y JSON.")
-        elif not _has_calc_cache:
-            st.info("Pulsa 🧮 Calcular para generar la oferta y el JSON.")
-    except Exception:
-        pass
-
     # =========================================================
     # Aviso + botón (sidebar) sobre materia prima importada vs tarifa actual
     # =========================================================
@@ -2201,57 +2114,6 @@ with tab_calculadora:
     # PASO 2: TÉCNICO
     # -----------------------------------------------------
     st.header("Paso 2 · Datos técnicos")
-
-    c_btns = st.columns([1, 4])
-    with c_btns[0]:
-        dup_prev = st.checkbox("Repetir datos de la anterior", key="dup_prev_forma", value=False)
-        if st.button("➕ Forma", key="btn_add_forma"):
-            last_id = max(st.session_state.piezas_dict.keys())
-            nid = int(last_id) + 1
-
-            if dup_prev and last_id in st.session_state.piezas_dict:
-                # Copiamos la forma anterior (inputs técnicos) y ajustamos el nombre
-                st.session_state.piezas_dict[nid] = deepcopy(st.session_state.piezas_dict[last_id])
-                st.session_state.piezas_dict[nid]["nombre"] = f"Forma {nid}"
-
-                # Duplicamos también configuraciones asociadas al formato (si existen)
-                for kdict in ["mermas_proc_manual", "mermas_imp_manual", "mermas_imp_digital_manual"]:
-                    d = st.session_state.get(kdict, {})
-                    if isinstance(d, dict):
-                        # Aceptamos claves int o str (compatibilidad)
-                        if str(last_id) in d:
-                            d[str(nid)] = deepcopy(d[str(last_id)])
-                        elif last_id in d:
-                            d[str(nid)] = deepcopy(d[last_id])
-
-                # Impresiones por cantidad por formato
-                en = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
-                if isinstance(en, dict):
-                    if str(last_id) in en:
-                        en[str(nid)] = bool(en.get(str(last_id), False))
-                    elif last_id in en:
-                        en[str(nid)] = bool(en.get(last_id, False))
-
-                cfg_fmt = st.session_state.get("impresiones_by_qty_fmt", {})
-                if isinstance(cfg_fmt, dict):
-                    if str(last_id) in cfg_fmt:
-                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[str(last_id)])
-                    elif last_id in cfg_fmt:
-                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[last_id])
-
-            else:
-                st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
-
-            st.rerun()
-    if c_btns[1].button("🗑 Reiniciar"):
-
-        st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
-        st.session_state.lista_extras_grabados = []
-        st.session_state.embalajes = [crear_embalaje_vacio(0)]
-        st.session_state.externos = [crear_externo_vacio(0)]
-        st.session_state.mermas_imp_manual = {}
-        st.session_state.mermas_proc_manual = {}
-        st.rerun()
 
     def callback_cambio_frontal(pid):
         new_mat = st.session_state[f"pf_{pid}"]
@@ -2618,6 +2480,61 @@ with tab_calculadora:
                     del st.session_state.piezas_dict[p_id]
                     st.rerun()
 
+    # Controles de formas: colocados al final del bloque de Datos técnicos
+    # para evitar tener que volver arriba cuando hay muchas formas minimizadas.
+    c_btns = st.columns([1.4, 1, 4])
+    with c_btns[0]:
+        dup_prev = st.checkbox("Repetir datos de la anterior", key="dup_prev_forma", value=False)
+    with c_btns[1]:
+        if st.button("➕ Forma", key="btn_add_forma"):
+            last_id = max(st.session_state.piezas_dict.keys())
+            nid = int(last_id) + 1
+
+            if dup_prev and last_id in st.session_state.piezas_dict:
+                # Copiamos la forma anterior (inputs técnicos) y ajustamos el nombre
+                st.session_state.piezas_dict[nid] = deepcopy(st.session_state.piezas_dict[last_id])
+                st.session_state.piezas_dict[nid]["nombre"] = f"Forma {nid}"
+
+                # Duplicamos también configuraciones asociadas al formato (si existen)
+                for kdict in ["mermas_proc_manual", "mermas_imp_manual", "mermas_imp_digital_manual"]:
+                    d = st.session_state.get(kdict, {})
+                    if isinstance(d, dict):
+                        # Aceptamos claves int o str (compatibilidad)
+                        if str(last_id) in d:
+                            d[str(nid)] = deepcopy(d[str(last_id)])
+                        elif last_id in d:
+                            d[str(nid)] = deepcopy(d[last_id])
+
+                # Impresiones por cantidad por formato
+                en = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
+                if isinstance(en, dict):
+                    if str(last_id) in en:
+                        en[str(nid)] = bool(en.get(str(last_id), False))
+                    elif last_id in en:
+                        en[str(nid)] = bool(en.get(last_id, False))
+
+                cfg_fmt = st.session_state.get("impresiones_by_qty_fmt", {})
+                if isinstance(cfg_fmt, dict):
+                    if str(last_id) in cfg_fmt:
+                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[str(last_id)])
+                    elif last_id in cfg_fmt:
+                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[last_id])
+
+            else:
+                st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
+
+            st.rerun()
+    with c_btns[2]:
+        if st.button("🗑 Reiniciar", key="btn_reiniciar_formas_bottom"):
+            st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
+            st.session_state.lista_extras_grabados = []
+            st.session_state.embalajes = [crear_embalaje_vacio(0)]
+            st.session_state.externos = [crear_externo_vacio(0)]
+            st.session_state.mermas_imp_manual = {}
+            st.session_state.mermas_proc_manual = {}
+            st.rerun()
+
+
     st.divider()
     st.subheader("📦 2. Materiales extra")
 
@@ -2926,7 +2843,11 @@ else:
                 # Mermas:
                 # - Digital: mermas_imp_digital_manual (fallback a regla digital si no existe)
                 # - Procesos e impresión OFFSET: por forma+cantidad (ver _ss_get_* en helpers)
-                merma_imp_digital_hojas = int(_get_merma_impresion_digital_hojas(q_n))
+                merma_imp_digital_hojas = int(
+                    st.session_state.mermas_imp_digital_manual.get(
+                        q_n, calcular_mermas_estandar(q_n, es_digital=True)[1]
+                    )
+                )
 
                 coste_f = 0.0
                 det_f = []
@@ -3457,10 +3378,6 @@ else:
             "compras_legible": compras_legible,
             "resumen_costes_export": resumen_costes_export,
         }
-        try:
-            st.session_state._calc_last_signature = _calc_project_signature()
-        except Exception:
-            st.session_state._calc_last_signature = None
         st.session_state._calc_requested = False
         st.session_state._calc_status = "OK" if (isinstance(res_final
 , list) and len(res_final) > 0) else "Sin datos"
@@ -4112,7 +4029,6 @@ with tab_auditoria:
                         nb = _ceil_int(uds * pl)  # pliegos netos reales
 
                         # Mermas (proceso + impresión por lado) usando los mismos helpers que el motor
-                        merma_imp_digital_hojas = int(_get_merma_impresion_digital_hojas(q_sel))
                         mp_def = int(_tabla_merma_procesos_offset(int(nb)))
                         mp_final = int(_ss_get_merma_proc(int(pid), int(q_sel), int(mp_def)))
                         hp_produccion = int(nb) + int(mp_final)
@@ -4136,26 +4052,18 @@ with tab_auditoria:
                         im_c = str(p.get("im", "No"))
                         im_d = str(p.get("im_d", "No"))
 
-                        # Merma impresión (cara/dorso)
-                        # IMPORTANTE: en esta zona de auditoría no debemos depender de variables
-                        # creadas dentro del motor de cálculo. Leemos la merma digital con helper
-                        # para evitar NameError y respetar 0 como valor manual válido.
-                        try:
-                            merma_imp_digital_hojas_local = int(_get_merma_impresion_digital_hojas(int(q_sel)))
-                        except Exception:
-                            merma_imp_digital_hojas_local = 10
-
+                        # Merma impresión (cara)
                         merma_cara = 0
                         if im_c == "Digital":
-                            merma_cara = int(merma_imp_digital_hojas_local)
+                            merma_cara = int(merma_imp_digital_hojas)
                         elif im_c == "Offset":
                             mi_def_c = int(_merma_impresion_offset_por_pasadas(int(p.get("nt", 0)), bool(p.get("ba", False))))
                             mi_final_c = int(_ss_get_merma_imp(int(pid), int(q_sel), "cara", int(mi_def_c)))
                             merma_cara = mi_final_c
-
+                        # Merma impresión (dorso)
                         merma_dorso = 0
                         if im_d == "Digital":
-                            merma_dorso = int(merma_imp_digital_hojas_local)
+                            merma_dorso = int(merma_imp_digital_hojas)
                         elif im_d == "Offset":
                             mi_def_d = int(_merma_impresion_offset_por_pasadas(int(p.get("nt_d", 0)), bool(p.get("ba_d", False))))
                             mi_final_d = int(_ss_get_merma_imp(int(pid), int(q_sel), "dorso", int(mi_def_d)))
@@ -4170,29 +4078,7 @@ with tab_auditoria:
                             h = float(p.get("h", 0.0))
                             m2_papel = (w * h) / 1_000_000.0 if (w > 0 and h > 0) else 0.0
                         except Exception:
-                            w = h = 0.0
                             m2_papel = 0.0
-
-                        # Variables auxiliares de contracolado para auditoría.
-                        # Se calculan aquí para que no dependan del scope interno del motor de cálculo.
-                        try:
-                            has_cart_cara_aud = (p.get("pf", "Ninguno") != "Ninguno")
-                            has_cart_dorso_aud = (p.get("pd", "Ninguno") != "Ninguno")
-                            has_base_ondulado_aud = (
-                                p.get("tipo_base") == "Ondulado/Cartón"
-                                and p.get("pl", "Ninguna") != "Ninguna"
-                            )
-                            has_base_rigido_aud = (
-                                p.get("tipo_base") == "Material Rígido"
-                                and (bool(p.get("rig_manual", False)) or p.get("mat_rigido", "Ninguno") != "Ninguno")
-                            )
-                            has_base_aud = bool(has_base_ondulado_aud or has_base_rigido_aud)
-                            if has_base_aud:
-                                capas_contracolado = (1 if has_cart_cara_aud else 0) + (1 if has_cart_dorso_aud else 0)
-                            else:
-                                capas_contracolado = 1 if (has_cart_cara_aud and has_cart_dorso_aud) else 0
-                        except Exception:
-                            capas_contracolado = 0
 
                         st.markdown("**Pliegos netos reales**")
                         st.code(f"nb = ceil(uds * pliegos_por_ud) = ceil({uds} * {pl}) = {nb}")
@@ -4327,7 +4213,7 @@ with tab_auditoria:
                         # Impresión (incl. FR24 si aplica)
                         st.write(f"Impresión: {float(det_row.get('Impresión', 0.0)):.4f} €")
                         try:
-                            merma_imp_digital_hojas_local = int(_get_merma_impresion_digital_hojas(q_sel))
+                            merma_imp_digital_hojas_local = int(globals().get("merma_imp_digital_hojas", 10) or 10)
                         except Exception:
                             merma_imp_digital_hojas_local = 10
                         fr24_enabled = bool(p.get("fr24", False))
