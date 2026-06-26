@@ -2643,12 +2643,23 @@ with tab_calculadora:
         if _extras_tags:
             _extras_line = f"<br><b>Procesos marcados:</b> {' · '.join(_extras_tags)}"
 
+        _card_border = "2px solid var(--primary-color)" if _is_active else "1px solid rgba(128, 128, 128, 0.45)"
+        _card_shadow = "0 0 0 1px rgba(128, 128, 128, 0.10)" if _is_active else "none"
+
         _resumen_html = f"""
-        <div style="border:1px solid #e6e6e6; border-radius:10px; padding:10px 12px; margin-bottom:8px; background:{'#f7fbff' if _is_active else '#ffffff'};">
-            <div style="font-weight:800; margin-bottom:4px;">
+        <div style="
+            border:{_card_border};
+            border-radius:10px;
+            padding:10px 12px;
+            margin-bottom:8px;
+            background:var(--secondary-background-color);
+            color:var(--text-color);
+            box-shadow:{_card_shadow};
+        ">
+            <div style="font-weight:800; margin-bottom:4px; color:var(--text-color);">
                 {_p.get('nombre', f'Forma {_pid}')} · {int(_p.get('h', 0) or 0)}×{int(_p.get('w', 0) or 0)} mm · Pliegos/Ud: {_fmt_num_resumen(_p.get('pliegos', 1.0), 4)}
             </div>
-            <div style="font-size:0.92em; line-height:1.35;">
+            <div style="font-size:0.92em; line-height:1.35; color:var(--text-color);">
                 <b>Cartoncillo cara:</b> {_cara_txt}<br>
                 <b>Plancha / material rígido:</b> {_soporte_txt}{_dorso_line}<br>
                 <b>Corte:</b> {_corte_txt}{_cortes_qty_line}{_extras_line}
