@@ -176,9 +176,9 @@ PRECIOS_BASE = {
     },
     "planchas": {
         "Ninguna": {"C/C": 0.0, "peg": 0.0},
-        "Microcanal / Canal 3": {"C/C": 0.702, "B/C": 0.725, "B/B": 0.805, "peg": 0.217},
-        "Doble Micro / Doble Doble": {"C/C": 1.128, "B/C": 1.187, "B/B": 1.378, "peg": 0.263},
-        "AC (Cuero/Cuero)": {"C/C": 2.505, "peg": 0.217},
+        "Microcanal / Canal 3": {"C/C": 0.702, "B/C": 0.725, "B/B": 0.805, "peg": 0.2353},
+        "Doble Micro / Doble Doble": {"C/C": 1.128, "B/C": 1.187, "B/B": 1.378, "peg": 0.2726},
+        "AC (Cuero/Cuero)": {"C/C": 2.505, "peg": 0.2353},
     },
     "rigidos": {
         "Ninguno": {"precio_ud": 0.0, "w": 0, "h": 0},
@@ -203,7 +203,7 @@ PRECIOS_BASE = {
     },
     "peliculado": {
         "Sin Peliculado": 0.0,
-        "Polipropileno": 0.26,
+        "Polipropileno": 0.2709,
         "Poliéster brillo": 0.38,
         "Poliéster mate": 0.64,
     },
@@ -216,15 +216,21 @@ PRECIOS_BASE = {
         "PUNTO ADHESIVO REDONDO 30mm GEL": 0.085
     },
     "troquelado": {
-        "Pequeño (< 1000x700)": {"arranque": 48.19, "tiro": 0.06},
-        "Mediano (Estándar)": {"arranque": 80.77, "tiro": 0.09},
-        "Grande (> 1000x700)": {"arranque": 107.80, "tiro": 0.135}
+        "Pequeño (< 1000x700)": {"arranque": 50.12, "tiro": 0.0624},
+        "Mediano (Estándar)": {"arranque": 84.00, "tiro": 0.0936},
+        "Grande (> 1000x700)": {"arranque": 112.01, "tiro": 0.1398}
     },
     # Stamping (película + calor). Similar a troquelado pero con consumible de película por superficie.
-    "stamping": {"arreglo": 168.0, "pisada": 0.21, "pelicula_m2": 0.39},
+    "stamping": {"arreglo": 176.40, "pisada": 0.2117, "pelicula_m2": 0.4095},
     # Flexografía (coste fijo por plancha)
     "flexografia": {"arreglo": 180.0},
-    "plotter": {"precio_hoja": 2.03}
+    "plotter": {"precio_hoja": 2.03},
+    "narba": {
+        "contracolado_a_mano_m2": 0.6864,
+        "peliculado_menor_50x70_hoja": 0.0572,
+        "guillotina_impresion_corte": 0.0175,
+        "guillotina_plancha_corte": 0.1398
+    }
 }
 
 FORMATOS_STD = {
@@ -313,6 +319,39 @@ def calcular_mermas_estandar(n_uds: int, pliegos_por_ud: float = 1.0, es_digital
     merma_imp = _merma_impresion_offset_por_pasadas(n_tintas=n_tintas, barniz=barniz)
     return int(merma_proc), int(merma_imp)
 
+
+
+# =========================================================
+# NARBA 2026 - CONTRACOLADO
+# =========================================================
+def _get_contracolado_rate_m2(pieza: dict, db: dict, f_narba: float = 1.0) -> float:
+    """Devuelve la tarifa de contracolado €/m² aplicable a una forma.
+
+    - Si la forma tiene "contracolado_a_mano" activo, aplica la tarifa a mano NARBA 2026:
+      0,6864 €/m², independiente del material.
+    - En caso contrario, usa la tarifa "peg" de la plancha de la forma.
+      Si no hay plancha o falta la tarifa, usa Microcanal / Canal 3 como fallback
+      para mantener compatibilidad con proyectos antiguos.
+    """
+    try:
+        mult = float(f_narba)
+    except Exception:
+        mult = 1.0
+
+    if bool((pieza or {}).get("contracolado_a_mano", False)):
+        try:
+            return float((db or {}).get("narba", {}).get("contracolado_a_mano_m2", 0.6864)) * mult
+        except Exception:
+            return 0.6864 * mult
+
+    try:
+        plancha = str((pieza or {}).get("pl", "Microcanal / Canal 3"))
+        planchas = (db or {}).get("planchas", {})
+        if plancha in planchas and isinstance(planchas.get(plancha), dict) and "peg" in planchas[plancha]:
+            return float(planchas[plancha].get("peg", 0.0)) * mult
+        return float(planchas.get("Microcanal / Canal 3", {}).get("peg", 0.2353)) * mult
+    except Exception:
+        return 0.2353 * mult
 
 
 # =========================================================
@@ -924,6 +963,7 @@ if "impresiones_by_qty_fmt" not in st.session_state: st.session_state.impresione
 if "impresiones_by_qty_fmt_enabled" not in st.session_state: st.session_state.impresiones_by_qty_fmt_enabled = {}  # {str(pid): bool}
 
 if "brf" not in st.session_state: st.session_state.brf = ""
+if "version_presupuesto" not in st.session_state: st.session_state.version_presupuesto = ""
 if "cli" not in st.session_state: st.session_state.cli = ""
 if "desc" not in st.session_state: st.session_state.desc = ""
 if "notas" not in st.session_state: st.session_state.notas = ""
@@ -985,6 +1025,37 @@ if "_calc_cache" not in st.session_state:
 if "_calc_status" not in st.session_state:
     st.session_state._calc_status = "Pendiente"
 
+if "_calc_last_signature" not in st.session_state:
+    st.session_state._calc_last_signature = None
+
+def _calc_project_signature() -> str:
+    """Firma estable de los datos que afectan al cálculo.
+
+    Se usa para avisar cuando hay cambios introducidos que aún no se han recalculado.
+    No incluye cachés, blobs de descarga ni flags internos.
+    """
+    keys = [
+        "brf", "version_presupuesto", "cli", "desc", "notas", "cants_str_saved",
+        "piezas_dict", "lista_extras_grabados", "embalajes", "externos",
+        "mermas_imp_manual", "mermas_imp_digital_manual", "mermas_proc_manual",
+        "impresiones_by_qty", "impresiones_by_qty_fmt", "impresiones_by_qty_fmt_enabled",
+        "unidad_t", "t_input", "rell_enabled", "rell_t_input", "arm_enabled", "arm_t_input",
+        "dif_ud", "dif_preset_sel", "imp_fijo_pvp", "repeticion_proyecto",
+        "margen", "margen_extras", "margen_embalajes", "descuento_procesos",
+        "db_descuentos", "db_precios",
+    ]
+    snap = {}
+    for k in keys:
+        try:
+            snap[k] = deepcopy(st.session_state.get(k))
+        except Exception:
+            snap[k] = str(st.session_state.get(k))
+    try:
+        payload = json.dumps(_normalizar_mp_para_hash(snap), sort_keys=True, ensure_ascii=False)
+    except Exception:
+        payload = repr(snap)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
 # =========================================================
 # FIX IMPORT: PURGE KEYS DE WIDGETS
 # =========================================================
@@ -1002,7 +1073,7 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         "n_", "p_", "std_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_",
         "pf_", "gf_", "tb_", "pl_", "pldif_", "plh_", "plw_", "ap_",
         "rigman_", "rigwman_", "righman_", "rigpman_", "mrig_",
-        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "stamp_", "stampw_", "stamph_", "stamparr_", "flexo_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
+        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "stamp_", "stampw_", "stamph_", "stamparr_", "flexo_", "contramano_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
     ]
 
     for pid in piezas_ids:
@@ -1114,6 +1185,7 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
         st.session_state[f"stamph_{pid}"] = int(p.get("stamping_h", 0))
         st.session_state[f"stamparr_{pid}"] = bool(p.get("stamping_cobrar_arreglo", True))
         st.session_state[f"flexo_{pid}"] = bool(p.get("flexografia", False))
+        st.session_state[f"contramano_{pid}"] = bool(p.get("contracolado_a_mano", False))
         st.session_state[f"trqp_{pid}"] = int(p.get("troquel_piezas", 0) or 0)
 
         st.session_state[f"im_d_{pid}"] = p.get("im_d", "No")
@@ -1197,6 +1269,44 @@ def _coerce_float(x, default=0.0):
     except:
         return default
 
+
+def _get_merma_impresion_digital_hojas(q: int, default: int | None = None) -> int:
+    """Devuelve la merma de impresión DIGITAL para una cantidad, respetando 0 como valor manual válido.
+
+    Compatibilidad:
+    - Nuevo/actual: st.session_state.mermas_imp_digital_manual puede tener claves int o str.
+    - Si no existe valor manual, usa el default digital calculado por calcular_mermas_estandar().
+    """
+    try:
+        q_i = int(q)
+    except Exception:
+        q_i = 0
+
+    if default is None:
+        try:
+            default_i = int(calcular_mermas_estandar(q_i, es_digital=True)[1])
+        except Exception:
+            default_i = 10
+    else:
+        try:
+            default_i = int(default)
+        except Exception:
+            default_i = 10
+
+    d = st.session_state.get("mermas_imp_digital_manual", {})
+    if not isinstance(d, dict):
+        return int(default_i)
+
+    # IMPORTANTE: 0 es válido. No usar "or default".
+    for k in (q_i, str(q_i)):
+        if k in d:
+            try:
+                return int(float(d.get(k)))
+            except Exception:
+                return int(default_i)
+
+    return int(default_i)
+
 def _normalizar_pieza_dict(pid: int, v: dict):
     base = crear_forma_vacia(pid)
     if isinstance(v, dict):
@@ -1259,6 +1369,7 @@ def _normalizar_pieza_dict(pid: int, v: dict):
     base["stamping_cobrar_arreglo"] = _coerce_bool(base.get("stamping_cobrar_arreglo", True), True)
 
     base["flexografia"] = _coerce_bool(base.get("flexografia", False), False)
+    base["contracolado_a_mano"] = _coerce_bool(base.get("contracolado_a_mano", False), False)
 
     base["troquel_piezas"] = max(0, _coerce_int(base.get("troquel_piezas", 0), 0))
 
@@ -1272,6 +1383,7 @@ def normalizar_import(di: dict):
     prev_ext_len = len(st.session_state.get("externos", [])) if isinstance(st.session_state.get("externos", None), list) else 0
 
     st.session_state.brf = str(di.get("brf", st.session_state.brf))
+    st.session_state.version_presupuesto = str(di.get("version", di.get("version_presupuesto", st.session_state.get("version_presupuesto", ""))))
     st.session_state.comercial_1 = str(di.get("comercial_1", st.session_state.get("comercial_1", "")))
     st.session_state.comercial_2 = str(di.get("comercial_2", st.session_state.get("comercial_2", "")))
     st.session_state.cli = str(di.get("cli", st.session_state.cli))
@@ -1433,47 +1545,74 @@ def normalizar_import(di: dict):
         st.session_state.lista_extras_grabados = di["extras"]
 
     if isinstance(di.get("mermas_imp", None), dict):
-        # Compatibilidad:
-        # - Nuevo: {pid: {qty: {'cara':x,'dorso':y}}}
-        # - Antiguo: {qty: x}
+        # Compatibilidad robusta:
+        # - Legacy: {"1000": 250, "1500": 250}
+        # - Nuevo: {"1": {"1000": {"cara": 100, "dorso": 0}}}
+        # - Mixto: ambos formatos a la vez (muy habitual en JSON antiguos exportados por versiones intermedias).
+        #
+        # IMPORTANTE:
+        # Antes se decidía entre "todo nuevo" o "todo legacy" con all(isinstance(v, dict)).
+        # Si venía mixto, intentaba hacer int(dict) y fallaba al importar.
         mi = di.get("mermas_imp", {})
-        if mi and all(isinstance(v, dict) for v in mi.values()):
-            # asumimos nuevo por forma
-            out = {}
-            for pid_k, sub in mi.items():
-                if not isinstance(sub, dict):
-                    continue
-                out[str(pid_k)] = {}
-                for qk, vv in sub.items():
+        out = {}
+        for k, v in mi.items():
+            k_str = str(k)
+
+            if isinstance(v, dict):
+                # Tratamos la clave como ID de forma/pieza.
+                pid_key = k_str
+                out.setdefault(pid_key, {})
+                for qk, vv in v.items():
+                    q_key = str(qk)
                     if isinstance(vv, dict):
-                        out[str(pid_k)][str(qk)] = {
-                            "cara": int(vv.get("cara", 0)),
-                            "dorso": int(vv.get("dorso", 0)),
+                        out[pid_key][q_key] = {
+                            "cara": _coerce_int(vv.get("cara", 0), 0),
+                            "dorso": _coerce_int(vv.get("dorso", 0), 0),
                         }
                     else:
-                        # valor único -> ambos lados
-                        out[str(pid_k)][str(qk)] = {"cara": int(vv), "dorso": int(vv)}
-            st.session_state.mermas_imp_manual = out
-        else:
-            # legacy por cantidad
-            st.session_state.mermas_imp_manual = {int(k): int(v) for k, v in mi.items() if str(k).isdigit()}
+                        val = _coerce_int(vv, 0)
+                        out[pid_key][q_key] = {"cara": val, "dorso": val}
+            else:
+                # Legacy global por cantidad. Solo aceptamos claves numéricas.
+                if k_str.isdigit():
+                    out[k_str] = _coerce_int(v, 0)
+
+        st.session_state.mermas_imp_manual = out
 
     if isinstance(di.get("mermas_imp_digital", None), dict):
-        st.session_state.mermas_imp_digital_manual = {int(k): int(v) for k, v in di["mermas_imp_digital"].items()}
+        # Digital sigue siendo global por cantidad; ignoramos cualquier estructura no numérica.
+        out_dig = {}
+        for k, v in di["mermas_imp_digital"].items():
+            k_str = str(k)
+            if k_str.isdigit() and not isinstance(v, dict):
+                out_dig[k_str] = _coerce_int(v, 0)
+        st.session_state.mermas_imp_digital_manual = out_dig
+
     if isinstance(di.get("mermas_proc", None), dict):
-        # Compatibilidad:
-        # - Nuevo: {pid: {qty: val}}
-        # - Antiguo: {qty: val}
+        # Compatibilidad robusta:
+        # - Legacy: {"1000": 50, "1500": 50}
+        # - Nuevo: {"1": {"1000": 60, "1500": 60}}
+        # - Mixto: ambos formatos a la vez.
         mp = di.get("mermas_proc", {})
-        if mp and all(isinstance(v, dict) for v in mp.values()):
-            out = {}
-            for pid_k, sub in mp.items():
-                if not isinstance(sub, dict):
-                    continue
-                out[str(pid_k)] = {str(qk): int(vv) for qk, vv in sub.items()}
-            st.session_state.mermas_proc_manual = out
-        else:
-            st.session_state.mermas_proc_manual = {int(k): int(v) for k, v in mp.items() if str(k).isdigit()}
+        out = {}
+        for k, v in mp.items():
+            k_str = str(k)
+
+            if isinstance(v, dict):
+                pid_key = k_str
+                out.setdefault(pid_key, {})
+                for qk, vv in v.items():
+                    if isinstance(vv, dict):
+                        # Tolerancia por si alguna versión guardó cara/dorso por error.
+                        val = _coerce_int(vv.get("valor", vv.get("proc", vv.get("cara", 0))), 0)
+                    else:
+                        val = _coerce_int(vv, 0)
+                    out[pid_key][str(qk)] = val
+            else:
+                if k_str.isdigit():
+                    out[k_str] = _coerce_int(v, 0)
+
+        st.session_state.mermas_proc_manual = out
 # Impresiones por cantidad (multi-tirada) - opcional en JSON
     if isinstance(di.get("impresiones_by_qty", None), dict):
         cfg_new = {}
@@ -1666,6 +1805,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
 
     data = {
         "brf": st.session_state.brf,
+        "version": st.session_state.get("version_presupuesto", ""),
         "comercial_1": c1_out,
         "comercial_2": c2_out,
         "cli": st.session_state.cli,
@@ -1789,6 +1929,17 @@ with st.sidebar:
         st.session_state._calc_status = "Calculando…"
     st.caption(f"Estado cálculo: {st.session_state.get('_calc_status','Pendiente')}")
 
+    try:
+        _current_calc_signature = _calc_project_signature()
+        _last_calc_signature = st.session_state.get("_calc_last_signature")
+        _has_calc_cache = isinstance(st.session_state.get("_calc_cache"), dict)
+        if _has_calc_cache and _last_calc_signature and _current_calc_signature != _last_calc_signature:
+            st.warning("⚠️ Hay datos introducidos sin calcular. Pulsa 🧮 Calcular para actualizar oferta y JSON.")
+        elif not _has_calc_cache:
+            st.info("Pulsa 🧮 Calcular para generar la oferta y el JSON.")
+    except Exception:
+        pass
+
     # =========================================================
     # Aviso + botón (sidebar) sobre materia prima importada vs tarifa actual
     # =========================================================
@@ -1910,6 +2061,14 @@ with tab_costes:
                             f"{k} · peg", value=float(v["peg"]), key=f"cost_peg_{k}", format="%.4f"
                         )
 
+            db.setdefault("narba", {})
+            db["narba"]["contracolado_a_mano_m2"] = st.number_input(
+                "Contracolado a mano (€/m²)",
+                value=float(db.get("narba", {}).get("contracolado_a_mano_m2", 0.6864)),
+                key="cost_contracolado_a_mano_m2",
+                format="%.4f"
+            )
+
             st.markdown("---")
             st.markdown("##### Peliculado (€/m²)")
             for k, v in db["peliculado"].items():
@@ -1959,6 +2118,7 @@ with tab_calculadora:
     cA, cB, cC = st.columns([2, 2, 3])
     with cA:
         st.text_input("Nº Briefing", key="brf")
+        st.text_input("Versión presupuesto", key="version_presupuesto", placeholder="A, B, B2...")
         st.text_input("Nº Comercial 1", key="comercial_1")
         st.text_input("Nº Comercial 2 (opcional)", key="comercial_2")
         st.text_input("Cliente", key="cli")
@@ -2115,377 +2275,9 @@ with tab_calculadora:
     # -----------------------------------------------------
     st.header("Paso 2 · Datos técnicos")
 
-    def callback_cambio_frontal(pid):
-        new_mat = st.session_state[f"pf_{pid}"]
-        if new_mat != "Ninguno":
-            st.session_state[f"gf_{pid}"] = st.session_state.db_precios["cartoncillo"][new_mat]["gramaje"]
-            st.session_state[f"im_{pid}"] = "Offset"
-            st.session_state[f"nt_{pid}"] = 4
-        else:
-            st.session_state[f"im_{pid}"] = "No"
-            st.session_state[f"nt_{pid}"] = 0
-
-    def callback_cambio_dorso(pid):
-        new_mat = st.session_state[f"pd_{pid}"]
-        if new_mat != "Ninguno":
-            st.session_state[f"gd_{pid}"] = st.session_state.db_precios["cartoncillo"][new_mat]["gramaje"]
-            if st.session_state.get(f"im_d_{pid}", "No") == "No":
-                st.session_state[f"im_d_{pid}"] = "No"
-        else:
-            st.session_state[f"im_d_{pid}"] = "No"
-            st.session_state[f"nt_d_{pid}"] = 0
-
-    def callback_medida_estandar(pid):
-        fmt = st.session_state[f"std_{pid}"]
-        if fmt != "Personalizado":
-            nh, nw = FORMATOS_STD[fmt]
-            st.session_state[f"h_{pid}"] = nh
-            st.session_state[f"w_{pid}"] = nw
-            if not st.session_state.get(f"pldif_{pid}", False):
-                st.session_state[f"plh_{pid}"] = nh
-                st.session_state[f"plw_{pid}"] = nw
-
-    def callback_rigido(pid):
-        mat = st.session_state.get(f"mrig_{pid}", "Ninguno")
-        if mat != "Ninguno":
-            info = st.session_state.db_precios["rigidos"][mat]
-            st.session_state[f"w_{pid}"] = int(info["w"])
-            st.session_state[f"h_{pid}"] = int(info["h"])
-
-
-    def callback_corte_default(pid, cants):
-        """Sincroniza el corte por cantidad con el corte por defecto."""
-        new_val = st.session_state.get(f"cor_def_{pid}", "Troquelado")
-        # Actualiza widgets por cantidad
-        for q in cants:
-            st.session_state[f"cor_qty_{pid}_{q}"] = new_val
-        # Actualiza estructura en memoria (por si se usa en cálculos sin rerun completo)
-        try:
-            pieza = st.session_state.piezas_dict.get(pid, None)
-            if isinstance(pieza, dict):
-                pieza["cor_default"] = new_val
-                if not isinstance(pieza.get("cor_by_qty", {}), dict):
-                    pieza["cor_by_qty"] = {}
-                for q in cants:
-                    pieza["cor_by_qty"][str(q)] = new_val
-        except Exception:
-            pass
-
-    for p_id, p in st.session_state.piezas_dict.items():
-        with st.expander(f"🛠 {p.get('nombre','Forma')} - {p.get('h',0)}x{p.get('w',0)} mm", expanded=True):
-            col1, col2, col3 = st.columns(3)
-
-            with col1:
-                p["nombre"] = st.text_input("Etiqueta", p.get("nombre", f"Forma {p_id}"), key=f"n_{p_id}")
-                p["pliegos"] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get("pliegos", 1.0)), format="%.4f", key=f"p_{p_id}")
-
-                st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}",
-                             on_change=callback_medida_estandar, args=(p_id,))
-
-                c_h, c_w = st.columns(2)
-                p["h"] = c_h.number_input("Largo Papel (mm)", 0, 5000, value=int(p.get("h", 0)), key=f"h_{p_id}")
-                p["w"] = c_w.number_input("Ancho Papel (mm)", 0, 5000, value=int(p.get("w", 0)), key=f"w_{p_id}")
-
-                opts_im = ["Offset", "Digital", "No"]
-                val_im_raw = p.get("im", "No")
-                val_im_norm = str(val_im_raw).strip().lower()
-                if val_im_norm in ("offset", "off"):
-                    val_im = "Offset"
-                elif val_im_norm in ("digital", "dig"):
-                    val_im = "Digital"
-                elif val_im_norm in ("no", "ninguno", "none", ""):
-                    val_im = "No"
-                else:
-                    # Compatibilidad: si viene algo raro de JSON antiguo, mantenemos "No"
-                    val_im = "No"
-                idx_im = opts_im.index(val_im)
-                p["im"] = st.selectbox("Impresión Cara", opts_im, index=idx_im, key=f"im_{p_id}")
-
-                if p["im"] == "Offset":
-                    p["nt"] = st.number_input("Tintas Cara", 0, 12, int(p.get("nt", 4)), key=f"nt_{p_id}")
-                    p["ba"] = st.checkbox("Barniz Cara", value=bool(p.get("ba", False)), key=f"ba_{p_id}")
-                elif p["im"] == "Digital":
-                    p["ld"] = st.checkbox("Laminado Digital Cara", value=bool(p.get("ld", False)), key=f"ld_{p_id}")
-
-                opts_pel = list(db["peliculado"].keys())
-                val_pel = p.get("pel", "Sin Peliculado")
-                idx_pel = opts_pel.index(val_pel) if val_pel in opts_pel else 0
-                p["pel"] = st.selectbox("Peliculado Cara", opts_pel, index=idx_pel, key=f"pel_{p_id}")
-
-                # -----------------------------------------------------
-                # TINTA ESPECIAL FR24 (extra por m²)
-                # -----------------------------------------------------
-                p["fr24"] = st.checkbox("🧪 Tinta especial FR24 (extra €/m²)", value=bool(p.get("fr24", False)), key=f"fr24_{p_id}")
-                if bool(p["fr24"]):
-                    p["fr24_rate"] = float(st.number_input(
-                        "Coste extra FR24 (€/m²)",
-                        min_value=0.0,
-                        max_value=999.0,
-                        value=float(p.get("fr24_rate", 0.05)),
-                        step=0.01,
-                        key=f"fr24r_{p_id}",
-                    ))
-                else:
-                    # Mantener el último valor configurado (si existe) para no perderlo al desactivar.
-                    p["fr24_rate"] = float(p.get("fr24_rate", 0.05))
-
-                # -----------------------------------------------------
-                # STAMPING (película + calor) - proceso poco habitual
-                # -----------------------------------------------------
-                p["stamping"] = st.checkbox("✨ Stamping (película + pisada)", value=bool(p.get("stamping", False)), key=f"stamp_{p_id}")
-                if bool(p["stamping"]):
-                    col_s1, col_s2, col_s3 = st.columns([1, 1, 1])
-                    with col_s1:
-                        p["stamping_w"] = int(st.number_input("Ancho stamping (mm)", min_value=0, max_value=5000, value=int(p.get("stamping_w", 0)), step=1, key=f"stampw_{p_id}"))
-                    with col_s2:
-                        p["stamping_h"] = int(st.number_input("Alto stamping (mm)", min_value=0, max_value=5000, value=int(p.get("stamping_h", 0)), step=1, key=f"stamph_{p_id}"))
-                    with col_s3:
-                        p["stamping_cobrar_arreglo"] = bool(st.checkbox("Cobrar arreglo stamping", value=bool(p.get("stamping_cobrar_arreglo", True)), key=f"stamparr_{p_id}"))
-                    st.caption("Tarifa: arreglo 168€ · pisada 0,21€/hoja · película 0,39€/m² (rectángulo) · hojas = hp_corte (ajustado por piezas por troquel).")
-                else:
-                    p["stamping_w"] = int(p.get("stamping_w", 0))
-                    p["stamping_h"] = int(p.get("stamping_h", 0))
-                    p["stamping_cobrar_arreglo"] = bool(p.get("stamping_cobrar_arreglo", True))
-
-                # -----------------------------------------------------
-                # IMPRESIONES POR CANTIDAD (multi-tirada) - POR FORMATO (TIC)
-                # -----------------------------------------------------
-                # Si una misma cantidad se imprime en varias tiradas (p.ej. 100+400+500) para ESTA forma,
-                # indícalo aquí. Solo afecta a: (1) coste de impresión y (2) merma de cartoncillo (una merma extra por cada impresión).
-                # El resto de procesos mantiene su merma habitual.
-                pid_key = str(int(p_id))
-                if "impresiones_by_qty_fmt_enabled" not in st.session_state:
-                    st.session_state.impresiones_by_qty_fmt_enabled = {}
-                if "impresiones_by_qty_fmt" not in st.session_state:
-                    st.session_state.impresiones_by_qty_fmt = {}
-
-                tic_def = bool(st.session_state.impresiones_by_qty_fmt_enabled.get(pid_key, False)) if isinstance(st.session_state.impresiones_by_qty_fmt_enabled, dict) else False
-                tic = st.checkbox("🖨️ Varias impresiones por cantidad (esta forma)", value=bool(st.session_state.get(f"impact_{p_id}", tic_def)), key=f"impact_{p_id}")
-                if isinstance(st.session_state.impresiones_by_qty_fmt_enabled, dict):
-                    st.session_state.impresiones_by_qty_fmt_enabled[pid_key] = bool(tic)
-
-                if bool(tic) and lista_cants:
-                    with st.expander("🖨️ Desglose de impresiones por cantidad (esta forma)", expanded=False):
-                        st.caption("Ejemplo: 1000 uds -> 3 impresiones: 100+400+500. "
-                                   "Solo afecta a coste de impresión y merma extra de cartoncillo por impresión.")
-                        cfg_fmt_all = st.session_state.impresiones_by_qty_fmt if isinstance(st.session_state.impresiones_by_qty_fmt, dict) else {}
-                        cfg_fmt = cfg_fmt_all.get(pid_key, {}) if isinstance(cfg_fmt_all.get(pid_key, {}), dict) else {}
-
-                        for q in lista_cants:
-                            cfg = cfg_fmt.get(str(int(q)), {}) if isinstance(cfg_fmt.get(str(int(q)), {}), dict) else {}
-                            try:
-                                n_def = int(cfg.get("n", 1))
-                            except Exception:
-                                n_def = 1
-                            n_def = max(1, n_def)
-                            modo_def = str(cfg.get("modo", "igual")).lower().strip()
-                            igual_def = (modo_def != "manual")
-                            partes_def = cfg.get("partes", []) if isinstance(cfg.get("partes", []), list) else []
-                            try:
-                                partes_def_str = "+".join(str(int(x)) for x in partes_def) if partes_def else ""
-                            except Exception:
-                                partes_def_str = ""
-
-                            c1i, c2i = st.columns([1, 3])
-                            with c1i:
-                                n_imp = st.number_input(
-                                    f"{q} uds · Nº impresiones",
-                                    min_value=1,
-                                    step=1,
-                                    value=int(st.session_state.get(f"impn_{p_id}_{q}", n_def)),
-                                    key=f"impn_{p_id}_{q}",
-                                )
-                            with c2i:
-                                igual = st.checkbox(
-                                    "Repartir a partes iguales",
-                                    value=bool(st.session_state.get(f"impigual_{p_id}_{q}", igual_def)),
-                                    key=f"impigual_{p_id}_{q}",
-                                )
-
-                            partes = []
-                            if int(n_imp) <= 1:
-                                partes = [int(q)]
-                                cfg_fmt[str(int(q))] = {"n": 1, "modo": "igual", "partes": partes}
-                                st.caption("Tirada única.")
-                                continue
-
-                            if bool(igual):
-                                partes = _split_equal(int(q), int(n_imp))
-                                cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
-                                st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
-                            else:
-                                txt = st.text_input(
-                                    "Desglose (ej: 100+400+500)",
-                                    value=str(st.session_state.get(f"impman_{p_id}_{q}", partes_def_str)),
-                                    key=f"impman_{p_id}_{q}",
-                                )
-                                partes_manual = _parse_partes_str(txt)
-                                if partes_manual and len(partes_manual) == int(n_imp) and sum(partes_manual) == int(q):
-                                    partes = partes_manual
-                                    cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "manual", "partes": partes}
-                                    st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
-                                else:
-                                    partes = _split_equal(int(q), int(n_imp))
-                                    cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
-                                    st.warning("El desglose manual no cuadra (nº partes o suma). Se ha aplicado reparto igual.")
-                                    st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
-
-                        cfg_fmt_all[pid_key] = cfg_fmt
-                        st.session_state.impresiones_by_qty_fmt = cfg_fmt_all
-
-
-            with col2:
-                opts_pf = list(db["cartoncillo"].keys())
-                val_pf = p.get("pf", "Ninguno")
-                idx_pf = opts_pf.index(val_pf) if val_pf in opts_pf else 0
-                p["pf"] = st.selectbox("Cartoncillo Cara", opts_pf, index=idx_pf, key=f"pf_{p_id}",
-                                       on_change=callback_cambio_frontal, args=(p_id,))
-                p["gf"] = st.number_input("Gramaje Cara (g)", value=int(p.get("gf", 0)), key=f"gf_{p_id}")
-
-                st.divider()
-
-                opts_base = ["Ondulado/Cartón", "Material Rígido"]
-                idx_base = opts_base.index(p.get("tipo_base", "Ondulado/Cartón")) if p.get("tipo_base") in opts_base else 0
-                p["tipo_base"] = st.selectbox("Tipo Soporte", opts_base, index=idx_base, key=f"tb_{p_id}")
-
-                if p["tipo_base"] == "Ondulado/Cartón":
-                    opts_pl = list(db["planchas"].keys())
-                    val_pl = p.get("pl", "Ninguna")
-                    idx_pl = opts_pl.index(val_pl) if val_pl in opts_pl else 0
-                    p["pl"] = st.selectbox("Plancha Base", opts_pl, index=idx_pl, key=f"pl_{p_id}")
-
-                    if p["pl"] != "Ninguna":
-                        p["pl_dif"] = st.checkbox("📏 Medida Plancha Diferente", value=bool(p.get("pl_dif", False)), key=f"pldif_{p_id}")
-                        if p["pl_dif"]:
-                            c_ph, c_pw = st.columns(2)
-                            p["pl_h"] = c_ph.number_input("Alto Plancha", 0, 5000, value=int(p.get("pl_h", p["h"])), key=f"plh_{p_id}")
-                            p["pl_w"] = c_pw.number_input("Ancho Plancha", 0, 5000, value=int(p.get("pl_w", p["w"])), key=f"plw_{p_id}")
-                        else:
-                            p["pl_h"] = p["h"]
-                            p["pl_w"] = p["w"]
-
-                    opts_ap = ["C/C", "B/C", "B/B"]
-                    val_ap = p.get("ap", "B/C")
-                    idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 1
-                    p["ap"] = st.selectbox("Calidad Ondulado", opts_ap, index=idx_ap, key=f"ap_{p_id}")
-
-                    p["flexografia"] = st.checkbox("🟪 Flexografía (coste fijo por plancha)", value=bool(p.get("flexografia", False)), key=f"flexo_{p_id}")
-
-                else:
-                    p["rig_manual"] = st.checkbox("🧩 Rígido Manual (tamaño + precio)", value=bool(p.get("rig_manual", False)), key=f"rigman_{p_id}")
-
-                    if p["rig_manual"]:
-                        c_rw, c_rh, c_rp = st.columns(3)
-                        p["rig_w"] = int(c_rw.number_input("Hoja w (mm)", 0, 10000, value=int(p.get("rig_w", 0)), key=f"rigwman_{p_id}"))
-                        p["rig_h"] = int(c_rh.number_input("Hoja h (mm)", 0, 10000, value=int(p.get("rig_h", 0)), key=f"righman_{p_id}"))
-                        p["rig_precio_ud"] = float(c_rp.number_input("Precio hoja (€)", 0.0, 999999.0, value=float(p.get("rig_precio_ud", 0.0)), step=0.01, key=f"rigpman_{p_id}"))
-                        st.caption("Este rígido manual se usa SOLO en esta pieza.")
-                        p["mat_rigido"] = "MANUAL"
-                    else:
-                        opts_rig = list(db["rigidos"].keys())
-                        val_rig = p.get("mat_rigido", "Ninguno")
-                        idx_rig = opts_rig.index(val_rig) if val_rig in opts_rig else 0
-                        p["mat_rigido"] = st.selectbox("Material Rígido (hoja)", opts_rig, index=idx_rig, key=f"mrig_{p_id}",
-                                                       on_change=callback_rigido, args=(p_id,))
-                        if p["mat_rigido"] != "Ninguno":
-                            info = db["rigidos"][p["mat_rigido"]]
-                            st.info(f"Tamaño hoja: {info['w']}x{info['h']} mm | Precio: {info['precio_ud']:.2f}€/hoja")
-
-                st.divider()
-
-                opts_pd = list(db["cartoncillo"].keys())
-                val_pd = p.get("pd", "Ninguno")
-                idx_pd = opts_pd.index(val_pd) if val_pd in opts_pd else 0
-                p["pd"] = st.selectbox("Cartoncillo Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}",
-                                       on_change=callback_cambio_dorso, args=(p_id,))
-                if p["pd"] != "Ninguno":
-                    p["gd"] = st.number_input("Gramaje Dorso (g)", value=int(p.get("gd", 0)), key=f"gd_{p_id}")
-                else:
-                    p["gd"] = 0
-
-            with col3:
-                st.markdown("##### Corte")
-                opts_cor = ["Sin corte", "Troquelado", "Plotter"]
-                val_cor = p.get("cor_default", p.get("cor", "Troquelado"))
-                idx_troq = opts_cor.index("Troquelado")
-                idx_cor = opts_cor.index(val_cor) if val_cor in opts_cor else idx_troq
-                p["cor_default"] = st.selectbox(
-                    "Corte (por defecto)", opts_cor, index=idx_cor, key=f"cor_def_{p_id}",
-                    on_change=callback_corte_default, args=(p_id, lista_cants,)
-                )
-
-                if lista_cants:
-                    st.caption("Corte por cantidad (opcional):")
-                    if not isinstance(p.get("cor_by_qty", {}), dict):
-                        p["cor_by_qty"] = {}
-                    for q in lista_cants:
-                        cur = p["cor_by_qty"].get(str(q), p["cor_default"])
-                        idxq = opts_cor.index(cur) if cur in opts_cor else idx_cor
-                        p["cor_by_qty"][str(q)] = st.selectbox(
-                            f"{q} uds", opts_cor, index=idxq, key=f"cor_qty_{p_id}_{q}"
-                        )
-
-                st.divider()
-
-                p["cobrar_arreglo"] = st.checkbox("¿Cobrar Arreglo?", value=bool(p.get("cobrar_arreglo", True)), key=f"arr_{p_id}")
-                p["pv_troquel"] = st.number_input("Precio Venta Troquel (€) (si aplica)", value=float(p.get("pv_troquel", 0.0)), key=f"pvt_{p_id}")
-
-                # ✅ Troquelado: permitir forzar manualmente cuántas piezas salen por golpe de troquel.
-                # 0 = automático (se asume 1/pliegos_por_ud cuando pliegos<1).
-                p["troquel_piezas"] = int(st.number_input(
-                    "Piezas por troquel (0 = automático)",
-                    min_value=0,
-                    step=1,
-                    value=int(p.get("troquel_piezas", 0) or 0),
-                    key=f"trqp_{p_id}",
-                ))
-
-                if p.get("pd", "Ninguno") != "Ninguno":
-                    opts_imd = ["Offset", "Digital", "No"]
-                    val_imd_raw = p.get("im_d", "No")
-                    val_imd_norm = str(val_imd_raw).strip().lower()
-                    if val_imd_norm in ("offset", "off"):
-                        val_imd = "Offset"
-                    elif val_imd_norm in ("digital", "dig"):
-                        val_imd = "Digital"
-                    elif val_imd_norm in ("no", "ninguno", "none", ""):
-                        val_imd = "No"
-                    else:
-                        val_imd = "No"
-                    idx_imd = opts_imd.index(val_imd)
-                    p["im_d"] = st.selectbox("Impresión Dorso", opts_imd, index=idx_imd, key=f"im_d_{p_id}")
-
-                    if p["im_d"] == "Offset":
-                        p["nt_d"] = st.number_input("Tintas Dorso", 0, 12, int(p.get("nt_d", 0)), key=f"nt_d_{p_id}")
-                        p["ba_d"] = st.checkbox("Barniz Dorso", value=bool(p.get("ba_d", False)), key=f"ba_d_{p_id}")
-                    elif p["im_d"] == "Digital":
-                        p["ld_d"] = st.checkbox("Laminado Digital Dorso", value=bool(p.get("ld_d", False)), key=f"ld_d_{p_id}")
-                    else:
-                        p["nt_d"] = 0
-                        p["ba_d"] = False
-                        p["ld_d"] = False
-
-                    opts_pel = list(db["peliculado"].keys())
-                    val_peld = p.get("pel_d", "Sin Peliculado")
-                    idx_peld = opts_pel.index(val_peld) if val_peld in opts_pel else 0
-                    p["pel_d"] = st.selectbox("Peliculado Dorso", opts_pel, index=idx_peld, key=f"pel_d_{p_id}")
-                else:
-                    p["im_d"] = "No"
-                    p["nt_d"] = 0
-                    p["ba_d"] = False
-                    p["ld_d"] = False
-                    p["pel_d"] = "Sin Peliculado"
-
-                if st.button("🗑 Borrar Forma", key=f"del_{p_id}"):
-                    del st.session_state.piezas_dict[p_id]
-                    st.rerun()
-
-    # Controles de formas: colocados al final del bloque de Datos técnicos
-    # para evitar tener que volver arriba cuando hay muchas formas minimizadas.
-    c_btns = st.columns([1.4, 1, 4])
+    c_btns = st.columns([1, 4])
     with c_btns[0]:
         dup_prev = st.checkbox("Repetir datos de la anterior", key="dup_prev_forma", value=False)
-    with c_btns[1]:
         if st.button("➕ Forma", key="btn_add_forma"):
             last_id = max(st.session_state.piezas_dict.keys())
             nid = int(last_id) + 1
@@ -2523,17 +2315,686 @@ with tab_calculadora:
             else:
                 st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
 
+            # Al añadir una forma, pasamos directamente a editarla para evitar modificar la anterior por error.
+            st.session_state._forma_edit_id = int(nid)
             st.rerun()
-    with c_btns[2]:
-        if st.button("🗑 Reiniciar", key="btn_reiniciar_formas_bottom"):
-            st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
-            st.session_state.lista_extras_grabados = []
-            st.session_state.embalajes = [crear_embalaje_vacio(0)]
-            st.session_state.externos = [crear_externo_vacio(0)]
-            st.session_state.mermas_imp_manual = {}
-            st.session_state.mermas_proc_manual = {}
-            st.rerun()
+    if c_btns[1].button("🗑 Reiniciar"):
 
+        st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
+        st.session_state.lista_extras_grabados = []
+        st.session_state.embalajes = [crear_embalaje_vacio(0)]
+        st.session_state.externos = [crear_externo_vacio(0)]
+        st.session_state.mermas_imp_manual = {}
+        st.session_state.mermas_proc_manual = {}
+        st.rerun()
+
+    def callback_cambio_frontal(pid):
+        """Al cambiar cartoncillo cara, sincroniza widgets Y datos de la forma.
+
+        Streamlit renderiza la columna de impresión antes que la columna de cartoncillo.
+        Por eso, al cambiar cartoncillo, no basta con modificar solo las keys de widget:
+        también actualizamos st.session_state.piezas_dict para que el siguiente rerun no
+        pise los defaults con valores antiguos de la forma.
+        """
+        new_mat = st.session_state.get(f"pf_{pid}", "Ninguno")
+        pieza = st.session_state.piezas_dict.get(pid, {}) if isinstance(st.session_state.get("piezas_dict", {}), dict) else {}
+
+        if new_mat != "Ninguno":
+            gramaje = int(st.session_state.db_precios["cartoncillo"].get(new_mat, {}).get("gramaje", 0))
+            defaults = {
+                "pf": new_mat,
+                "gf": gramaje,
+                "im": "Offset",
+                "nt": 4,
+                "ba": False,
+                "ld": False,
+                "pel": "Polipropileno",
+            }
+            st.session_state[f"gf_{pid}"] = gramaje
+            st.session_state[f"im_{pid}"] = "Offset"
+            st.session_state[f"nt_{pid}"] = 4
+            st.session_state[f"ba_{pid}"] = False
+            st.session_state[f"ld_{pid}"] = False
+            st.session_state[f"pel_{pid}"] = "Polipropileno"
+        else:
+            defaults = {
+                "pf": "Ninguno",
+                "gf": 0,
+                "im": "No",
+                "nt": 0,
+                "ba": False,
+                "ld": False,
+                "pel": "Sin Peliculado",
+            }
+            st.session_state[f"gf_{pid}"] = 0
+            st.session_state[f"im_{pid}"] = "No"
+            st.session_state[f"nt_{pid}"] = 0
+            st.session_state[f"ba_{pid}"] = False
+            st.session_state[f"ld_{pid}"] = False
+            st.session_state[f"pel_{pid}"] = "Sin Peliculado"
+
+        if isinstance(pieza, dict):
+            pieza.update(defaults)
+
+    def callback_cambio_dorso(pid):
+        """Al cambiar cartoncillo dorso, sincroniza widgets Y datos de la forma."""
+        new_mat = st.session_state.get(f"pd_{pid}", "Ninguno")
+        pieza = st.session_state.piezas_dict.get(pid, {}) if isinstance(st.session_state.get("piezas_dict", {}), dict) else {}
+
+        if new_mat != "Ninguno":
+            gramaje = int(st.session_state.db_precios["cartoncillo"].get(new_mat, {}).get("gramaje", 0))
+            defaults = {
+                "pd": new_mat,
+                "gd": gramaje,
+                "im_d": "Offset",
+                "nt_d": 4,
+                "ba_d": False,
+                "ld_d": False,
+                "pel_d": "Polipropileno",
+            }
+            st.session_state[f"gd_{pid}"] = gramaje
+            st.session_state[f"im_d_{pid}"] = "Offset"
+            st.session_state[f"nt_d_{pid}"] = 4
+            st.session_state[f"ba_d_{pid}"] = False
+            st.session_state[f"ld_d_{pid}"] = False
+            st.session_state[f"pel_d_{pid}"] = "Polipropileno"
+        else:
+            defaults = {
+                "pd": "Ninguno",
+                "gd": 0,
+                "im_d": "No",
+                "nt_d": 0,
+                "ba_d": False,
+                "ld_d": False,
+                "pel_d": "Sin Peliculado",
+            }
+            st.session_state[f"gd_{pid}"] = 0
+            st.session_state[f"im_d_{pid}"] = "No"
+            st.session_state[f"nt_d_{pid}"] = 0
+            st.session_state[f"ba_d_{pid}"] = False
+            st.session_state[f"ld_d_{pid}"] = False
+            st.session_state[f"pel_d_{pid}"] = "Sin Peliculado"
+
+        if isinstance(pieza, dict):
+            pieza.update(defaults)
+
+    def callback_medida_estandar(pid):
+        fmt = st.session_state[f"std_{pid}"]
+        if fmt != "Personalizado":
+            nh, nw = FORMATOS_STD[fmt]
+            st.session_state[f"h_{pid}"] = nh
+            st.session_state[f"w_{pid}"] = nw
+            if not st.session_state.get(f"pldif_{pid}", False):
+                st.session_state[f"plh_{pid}"] = nh
+                st.session_state[f"plw_{pid}"] = nw
+
+    def callback_rigido(pid):
+        mat = st.session_state.get(f"mrig_{pid}", "Ninguno")
+        if mat != "Ninguno":
+            info = st.session_state.db_precios["rigidos"][mat]
+            st.session_state[f"w_{pid}"] = int(info["w"])
+            st.session_state[f"h_{pid}"] = int(info["h"])
+
+
+    def callback_corte_default(pid, cants):
+        """Sincroniza el corte por cantidad con el corte por defecto."""
+        new_val = st.session_state.get(f"cor_def_{pid}", "Troquelado")
+        # Actualiza widgets por cantidad
+        for q in cants:
+            st.session_state[f"cor_qty_{pid}_{q}"] = new_val
+        # Actualiza estructura en memoria (por si se usa en cálculos sin rerun completo)
+        try:
+            pieza = st.session_state.piezas_dict.get(pid, None)
+            if isinstance(pieza, dict):
+                pieza["cor_default"] = new_val
+                if not isinstance(pieza.get("cor_by_qty", {}), dict):
+                    pieza["cor_by_qty"] = {}
+                for q in cants:
+                    pieza["cor_by_qty"][str(q)] = new_val
+        except Exception:
+            pass
+
+
+
+    def _normalizar_acabados_cartoncillo(pid: int, pieza: dict) -> None:
+        """Reglas de coherencia para cartoncillo/impresión/barniz/peliculado.
+
+        - Sin cartoncillo: no impresión, 0 tintas, sin barniz y sin peliculado.
+        - Con barniz: se anula el peliculado.
+        - La selección de cartoncillo pone por defecto Offset 4 tintas + Polipropileno en los callbacks.
+        - Primero sincroniza desde las keys de widgets para evitar que un valor antiguo de pieza
+          pise el cambio recién hecho durante el rerun.
+        """
+        for _field, _key in {
+            "pf": f"pf_{pid}", "pd": f"pd_{pid}",
+            "ba": f"ba_{pid}", "ba_d": f"ba_d_{pid}",
+        }.items():
+            if _key in st.session_state:
+                pieza[_field] = st.session_state[_key]
+
+        # Cara
+        if pieza.get("pf", "Ninguno") == "Ninguno":
+            pieza["im"] = "No"
+            pieza["nt"] = 0
+            pieza["ba"] = False
+            pieza["ld"] = False
+            pieza["pel"] = "Sin Peliculado"
+            for k, v in {
+                f"im_{pid}": "No",
+                f"nt_{pid}": 0,
+                f"ba_{pid}": False,
+                f"ld_{pid}": False,
+                f"pel_{pid}": "Sin Peliculado",
+            }.items():
+                st.session_state[k] = v
+        elif bool(pieza.get("ba", False)):
+            pieza["pel"] = "Sin Peliculado"
+            st.session_state[f"pel_{pid}"] = "Sin Peliculado"
+
+        # Dorso
+        if pieza.get("pd", "Ninguno") == "Ninguno":
+            pieza["im_d"] = "No"
+            pieza["nt_d"] = 0
+            pieza["ba_d"] = False
+            pieza["ld_d"] = False
+            pieza["pel_d"] = "Sin Peliculado"
+            for k, v in {
+                f"im_d_{pid}": "No",
+                f"nt_d_{pid}": 0,
+                f"ba_d_{pid}": False,
+                f"ld_d_{pid}": False,
+                f"pel_d_{pid}": "Sin Peliculado",
+            }.items():
+                st.session_state[k] = v
+        elif bool(pieza.get("ba_d", False)):
+            pieza["pel_d"] = "Sin Peliculado"
+            st.session_state[f"pel_d_{pid}"] = "Sin Peliculado"
+    # -----------------------------------------------------
+    # FORMAS - MODO EDICIÓN INDIVIDUAL (rendimiento/estabilidad UI)
+    # -----------------------------------------------------
+    # Antes se renderizaban todos los widgets de todas las formas en cada rerun.
+    # Con muchas formas, Streamlit reconstruía muchos widgets y podía abrir/saltar a
+    # formatos anteriores. Ahora se renderiza una lista resumen y SOLO se pintan los
+    # campos completos de la forma seleccionada.
+    if "_forma_edit_id" not in st.session_state:
+        st.session_state._forma_edit_id = None
+
+    _forma_ids = sorted([int(x) for x in st.session_state.piezas_dict.keys()])
+    if not _forma_ids:
+        st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
+        _forma_ids = [1]
+
+    if st.session_state._forma_edit_id not in _forma_ids:
+        st.session_state._forma_edit_id = _forma_ids[0]
+
+    st.markdown("##### Formas del proyecto")
+    st.caption("Solo se editan los campos completos de una forma cada vez. Las demás quedan como resumen para evitar saltos y mejorar la velocidad.")
+
+    def _fmt_num_resumen(v, dec=4):
+        try:
+            return f"{float(v):.{dec}f}"
+        except Exception:
+            return f"{v}"
+
+    def _si_no_resumen(v):
+        return "Sí" if bool(v) else "No"
+
+    for _pid in _forma_ids:
+        _p = st.session_state.piezas_dict.get(_pid, {})
+        _is_active = int(st.session_state._forma_edit_id) == int(_pid)
+
+        _tipo_base = str(_p.get("tipo_base", "Ondulado/Cartón"))
+
+        def _acabado_txt(prefix: str = "") -> str:
+            """Resumen limpio de impresión/acabados para cara o dorso."""
+            im = str(_p.get(f"im{prefix}", "No"))
+            nt = int(_p.get(f"nt{prefix}", 0) or 0)
+            ba = bool(_p.get(f"ba{prefix}", False))
+            pel = str(_p.get(f"pel{prefix}", "Sin Peliculado"))
+            ld = bool(_p.get(f"ld{prefix}", False))
+
+            partes = []
+            if im != "No":
+                partes.append(f"{im} {nt} tintas" if nt > 0 else im)
+            if ba:
+                partes.append("barniz")
+            if pel and pel != "Sin Peliculado":
+                partes.append(f"pel. {pel}")
+            if ld:
+                partes.append("laminado digital")
+            return " · ".join(partes) if partes else "sin impresión/acabado"
+
+        def _cartoncillo_txt(prefix: str = "") -> str:
+            """Resumen de cartoncillo de cara o dorso."""
+            mat_key = "pf" if prefix == "" else "pd"
+            gr_key = "gf" if prefix == "" else "gd"
+            mat = str(_p.get(mat_key, "Ninguno"))
+            gr = int(_p.get(gr_key, 0) or 0)
+            if mat == "Ninguno":
+                return ""
+            gr_txt = f" {gr}g" if gr > 0 else ""
+            return f"{mat}{gr_txt} ({_acabado_txt(prefix)})"
+
+        _cara_txt = _cartoncillo_txt("")
+        if not _cara_txt:
+            _cara_txt = "Sin cartoncillo"
+
+        _dorso_txt = _cartoncillo_txt("_d")
+        _doble_impresion_activa = (
+            str(_p.get("im_d", "No")) != "No"
+            or int(_p.get("nt_d", 0) or 0) > 0
+            or bool(_p.get("ba_d", False))
+            or str(_p.get("pel_d", "Sin Peliculado")) != "Sin Peliculado"
+            or bool(_p.get("ld_d", False))
+        )
+
+        if _tipo_base == "Ondulado/Cartón":
+            _soporte = str(_p.get("pl", "Ninguna"))
+            _calidad = str(_p.get("ap", "B/C"))
+            _soporte_txt = f"{_soporte} ({_calidad})"
+            if bool(_p.get("pl_dif", False)):
+                _soporte_txt += f" · plancha dif. {int(_p.get('pl_h', 0) or 0)}×{int(_p.get('pl_w', 0) or 0)} mm"
+        else:
+            _soporte_txt = str(_p.get("mat_rigido", "Ninguno"))
+            if bool(_p.get("rig_manual", False)):
+                _soporte_txt += (
+                    f" · manual {int(_p.get('rig_h', 0) or 0)}×{int(_p.get('rig_w', 0) or 0)} mm"
+                    f" · {float(_p.get('rig_precio_ud', 0.0) or 0.0):.4f} €/ud"
+                )
+
+        _corte_txt = str(_p.get("cor_default", "Troquelado"))
+        _troquel_piezas = int(_p.get("troquel_piezas", 0) or 0)
+        if _troquel_piezas > 0:
+            _corte_txt += f" · {_troquel_piezas} piezas/troquel"
+        if not bool(_p.get("cobrar_arreglo", True)):
+            _corte_txt += " · sin arreglo"
+
+        _cor_by_qty = _p.get("cor_by_qty", {})
+        _cortes_qty_txt = ""
+        if isinstance(_cor_by_qty, dict) and _cor_by_qty:
+            try:
+                _cortes_qty_txt = " · ".join([f"{k}: {v}" for k, v in sorted(_cor_by_qty.items(), key=lambda x: int(x[0]))])
+            except Exception:
+                _cortes_qty_txt = " · ".join([f"{k}: {v}" for k, v in _cor_by_qty.items()])
+
+        _extras_tags = []
+        if bool(_p.get("flexografia", False)):
+            _extras_tags.append("Flexografía")
+        if bool(_p.get("stamping", False)):
+            _extras_tags.append(
+                f"Stamping {int(_p.get('stamping_w', 0) or 0)}×{int(_p.get('stamping_h', 0) or 0)} mm"
+            )
+        if bool(_p.get("fr24", False)):
+            _extras_tags.append(f"FR24 {float(_p.get('fr24_rate', 0.05) or 0.0):.4f} €/ud")
+        if bool(_p.get("contracolado_a_mano", False)):
+            _extras_tags.append("Contracolado a mano")
+        if _doble_impresion_activa:
+            _extras_tags.append(f"Doble impresión: {_acabado_txt('_d')}")
+
+        _dorso_line = ""
+        if _dorso_txt:
+            _dorso_line = f"<br><b>Cartoncillo dorso:</b> {_dorso_txt}"
+
+        _cortes_qty_line = ""
+        if _cortes_qty_txt:
+            _cortes_qty_line = f"<br><b>Corte por cantidad:</b> {_cortes_qty_txt}"
+
+        _extras_line = ""
+        if _extras_tags:
+            _extras_line = f"<br><b>Procesos marcados:</b> {' · '.join(_extras_tags)}"
+
+        _resumen_html = f"""
+        <div style="border:1px solid #e6e6e6; border-radius:10px; padding:10px 12px; margin-bottom:8px; background:{'#f7fbff' if _is_active else '#ffffff'};">
+            <div style="font-weight:800; margin-bottom:4px;">
+                {_p.get('nombre', f'Forma {_pid}')} · {int(_p.get('h', 0) or 0)}×{int(_p.get('w', 0) or 0)} mm · Pliegos/Ud: {_fmt_num_resumen(_p.get('pliegos', 1.0), 4)}
+            </div>
+            <div style="font-size:0.92em; line-height:1.35;">
+                <b>Cartoncillo cara:</b> {_cara_txt}<br>
+                <b>Plancha / material rígido:</b> {_soporte_txt}{_dorso_line}<br>
+                <b>Corte:</b> {_corte_txt}{_cortes_qty_line}{_extras_line}
+            </div>
+        </div>
+        """
+
+        c_edit, c_res = st.columns([1, 7])
+        btn_label = "✅ Editando" if _is_active else "✏️ Editar"
+        if c_edit.button(btn_label, key=f"edit_forma_{_pid}", disabled=_is_active):
+            st.session_state._forma_edit_id = int(_pid)
+            st.rerun()
+        c_res.markdown(_resumen_html, unsafe_allow_html=True)
+
+    st.divider()
+
+    p_id = int(st.session_state._forma_edit_id)
+    p = st.session_state.piezas_dict[p_id]
+    _normalizar_acabados_cartoncillo(p_id, p)
+    with st.container():
+        st.markdown(f"##### Editando: {p.get('nombre', f'Forma {p_id}')} - {p.get('h', 0)}×{p.get('w', 0)} mm")
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            p["nombre"] = st.text_input("Etiqueta", p.get("nombre", f"Forma {p_id}"), key=f"n_{p_id}")
+            p["pliegos"] = st.number_input("Pliegos/Ud", 0.0, 100.0, float(p.get("pliegos", 1.0)), format="%.4f", key=f"p_{p_id}")
+
+            st.selectbox("Medidas Estándar", list(FORMATOS_STD.keys()), key=f"std_{p_id}",
+                         on_change=callback_medida_estandar, args=(p_id,))
+
+            c_h, c_w = st.columns(2)
+            p["h"] = c_h.number_input("Largo Papel (mm)", 0, 5000, value=int(p.get("h", 0)), key=f"h_{p_id}")
+            p["w"] = c_w.number_input("Ancho Papel (mm)", 0, 5000, value=int(p.get("w", 0)), key=f"w_{p_id}")
+
+            opts_im = ["Offset", "Digital", "No"]
+            val_im_raw = p.get("im", "No")
+            val_im_norm = str(val_im_raw).strip().lower()
+            if val_im_norm in ("offset", "off"):
+                val_im = "Offset"
+            elif val_im_norm in ("digital", "dig"):
+                val_im = "Digital"
+            elif val_im_norm in ("no", "ninguno", "none", ""):
+                val_im = "No"
+            else:
+                # Compatibilidad: si viene algo raro de JSON antiguo, mantenemos "No"
+                val_im = "No"
+            idx_im = opts_im.index(val_im)
+            p["im"] = st.selectbox("Impresión Cara", opts_im, index=idx_im, key=f"im_{p_id}")
+
+            if p["im"] == "Offset":
+                p["nt"] = st.number_input("Tintas Cara", 0, 12, int(p.get("nt", 4)), key=f"nt_{p_id}")
+                p["ba"] = st.checkbox("Barniz Cara", value=bool(p.get("ba", False)), key=f"ba_{p_id}")
+                if bool(p["ba"]):
+                    p["pel"] = "Sin Peliculado"
+                    st.session_state[f"pel_{p_id}"] = "Sin Peliculado"
+            elif p["im"] == "Digital":
+                p["ld"] = st.checkbox("Laminado Digital Cara", value=bool(p.get("ld", False)), key=f"ld_{p_id}")
+
+            opts_pel = list(db["peliculado"].keys())
+            val_pel = p.get("pel", "Sin Peliculado")
+            idx_pel = opts_pel.index(val_pel) if val_pel in opts_pel else 0
+            p["pel"] = st.selectbox("Peliculado Cara", opts_pel, index=idx_pel, key=f"pel_{p_id}")
+
+            # -----------------------------------------------------
+            # TINTA ESPECIAL FR24 (extra por m²)
+            # -----------------------------------------------------
+            p["fr24"] = st.checkbox("🧪 Tinta especial FR24 (extra €/m²)", value=bool(p.get("fr24", False)), key=f"fr24_{p_id}")
+            if bool(p["fr24"]):
+                p["fr24_rate"] = float(st.number_input(
+                    "Coste extra FR24 (€/m²)",
+                    min_value=0.0,
+                    max_value=999.0,
+                    value=float(p.get("fr24_rate", 0.05)),
+                    step=0.01,
+                    key=f"fr24r_{p_id}",
+                ))
+            else:
+                # Mantener el último valor configurado (si existe) para no perderlo al desactivar.
+                p["fr24_rate"] = float(p.get("fr24_rate", 0.05))
+
+            # -----------------------------------------------------
+            # STAMPING (película + calor) - proceso poco habitual
+            # -----------------------------------------------------
+            p["stamping"] = st.checkbox("✨ Stamping (película + pisada)", value=bool(p.get("stamping", False)), key=f"stamp_{p_id}")
+            if bool(p["stamping"]):
+                col_s1, col_s2, col_s3 = st.columns([1, 1, 1])
+                with col_s1:
+                    p["stamping_w"] = int(st.number_input("Ancho stamping (mm)", min_value=0, max_value=5000, value=int(p.get("stamping_w", 0)), step=1, key=f"stampw_{p_id}"))
+                with col_s2:
+                    p["stamping_h"] = int(st.number_input("Alto stamping (mm)", min_value=0, max_value=5000, value=int(p.get("stamping_h", 0)), step=1, key=f"stamph_{p_id}"))
+                with col_s3:
+                    p["stamping_cobrar_arreglo"] = bool(st.checkbox("Cobrar arreglo stamping", value=bool(p.get("stamping_cobrar_arreglo", True)), key=f"stamparr_{p_id}"))
+                st.caption("Tarifa: arreglo 168€ · pisada 0,21€/hoja · película 0,39€/m² (rectángulo) · hojas = hp_corte (ajustado por piezas por troquel).")
+            else:
+                p["stamping_w"] = int(p.get("stamping_w", 0))
+                p["stamping_h"] = int(p.get("stamping_h", 0))
+                p["stamping_cobrar_arreglo"] = bool(p.get("stamping_cobrar_arreglo", True))
+
+            # -----------------------------------------------------
+            # IMPRESIONES POR CANTIDAD (multi-tirada) - POR FORMATO (TIC)
+            # -----------------------------------------------------
+            # Si una misma cantidad se imprime en varias tiradas (p.ej. 100+400+500) para ESTA forma,
+            # indícalo aquí. Solo afecta a: (1) coste de impresión y (2) merma de cartoncillo (una merma extra por cada impresión).
+            # El resto de procesos mantiene su merma habitual.
+            pid_key = str(int(p_id))
+            if "impresiones_by_qty_fmt_enabled" not in st.session_state:
+                st.session_state.impresiones_by_qty_fmt_enabled = {}
+            if "impresiones_by_qty_fmt" not in st.session_state:
+                st.session_state.impresiones_by_qty_fmt = {}
+
+            tic_def = bool(st.session_state.impresiones_by_qty_fmt_enabled.get(pid_key, False)) if isinstance(st.session_state.impresiones_by_qty_fmt_enabled, dict) else False
+            tic = st.checkbox("🖨️ Varias impresiones por cantidad (esta forma)", value=bool(st.session_state.get(f"impact_{p_id}", tic_def)), key=f"impact_{p_id}")
+            if isinstance(st.session_state.impresiones_by_qty_fmt_enabled, dict):
+                st.session_state.impresiones_by_qty_fmt_enabled[pid_key] = bool(tic)
+
+            if bool(tic) and lista_cants:
+                with st.expander("🖨️ Desglose de impresiones por cantidad (esta forma)", expanded=False):
+                    st.caption("Ejemplo: 1000 uds -> 3 impresiones: 100+400+500. "
+                               "Solo afecta a coste de impresión y merma extra de cartoncillo por impresión.")
+                    cfg_fmt_all = st.session_state.impresiones_by_qty_fmt if isinstance(st.session_state.impresiones_by_qty_fmt, dict) else {}
+                    cfg_fmt = cfg_fmt_all.get(pid_key, {}) if isinstance(cfg_fmt_all.get(pid_key, {}), dict) else {}
+
+                    for q in lista_cants:
+                        cfg = cfg_fmt.get(str(int(q)), {}) if isinstance(cfg_fmt.get(str(int(q)), {}), dict) else {}
+                        try:
+                            n_def = int(cfg.get("n", 1))
+                        except Exception:
+                            n_def = 1
+                        n_def = max(1, n_def)
+                        modo_def = str(cfg.get("modo", "igual")).lower().strip()
+                        igual_def = (modo_def != "manual")
+                        partes_def = cfg.get("partes", []) if isinstance(cfg.get("partes", []), list) else []
+                        try:
+                            partes_def_str = "+".join(str(int(x)) for x in partes_def) if partes_def else ""
+                        except Exception:
+                            partes_def_str = ""
+
+                        c1i, c2i = st.columns([1, 3])
+                        with c1i:
+                            n_imp = st.number_input(
+                                f"{q} uds · Nº impresiones",
+                                min_value=1,
+                                step=1,
+                                value=int(st.session_state.get(f"impn_{p_id}_{q}", n_def)),
+                                key=f"impn_{p_id}_{q}",
+                            )
+                        with c2i:
+                            igual = st.checkbox(
+                                "Repartir a partes iguales",
+                                value=bool(st.session_state.get(f"impigual_{p_id}_{q}", igual_def)),
+                                key=f"impigual_{p_id}_{q}",
+                            )
+
+                        partes = []
+                        if int(n_imp) <= 1:
+                            partes = [int(q)]
+                            cfg_fmt[str(int(q))] = {"n": 1, "modo": "igual", "partes": partes}
+                            st.caption("Tirada única.")
+                            continue
+
+                        if bool(igual):
+                            partes = _split_equal(int(q), int(n_imp))
+                            cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
+                            st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+                        else:
+                            txt = st.text_input(
+                                "Desglose (ej: 100+400+500)",
+                                value=str(st.session_state.get(f"impman_{p_id}_{q}", partes_def_str)),
+                                key=f"impman_{p_id}_{q}",
+                            )
+                            partes_manual = _parse_partes_str(txt)
+                            if partes_manual and len(partes_manual) == int(n_imp) and sum(partes_manual) == int(q):
+                                partes = partes_manual
+                                cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "manual", "partes": partes}
+                                st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+                            else:
+                                partes = _split_equal(int(q), int(n_imp))
+                                cfg_fmt[str(int(q))] = {"n": int(n_imp), "modo": "igual", "partes": partes}
+                                st.warning("El desglose manual no cuadra (nº partes o suma). Se ha aplicado reparto igual.")
+                                st.caption(f"Tiradas: {partes} (suma {sum(partes)})")
+
+                    cfg_fmt_all[pid_key] = cfg_fmt
+                    st.session_state.impresiones_by_qty_fmt = cfg_fmt_all
+
+
+        with col2:
+            opts_pf = list(db["cartoncillo"].keys())
+            val_pf = p.get("pf", "Ninguno")
+            idx_pf = opts_pf.index(val_pf) if val_pf in opts_pf else 0
+            p["pf"] = st.selectbox("Cartoncillo Cara", opts_pf, index=idx_pf, key=f"pf_{p_id}",
+                                   on_change=callback_cambio_frontal, args=(p_id,))
+            p["gf"] = st.number_input("Gramaje Cara (g)", value=int(p.get("gf", 0)), key=f"gf_{p_id}")
+
+            st.divider()
+
+            opts_base = ["Ondulado/Cartón", "Material Rígido"]
+            idx_base = opts_base.index(p.get("tipo_base", "Ondulado/Cartón")) if p.get("tipo_base") in opts_base else 0
+            p["tipo_base"] = st.selectbox("Tipo Soporte", opts_base, index=idx_base, key=f"tb_{p_id}")
+
+            if p["tipo_base"] == "Ondulado/Cartón":
+                opts_pl = list(db["planchas"].keys())
+                val_pl = p.get("pl", "Ninguna")
+                idx_pl = opts_pl.index(val_pl) if val_pl in opts_pl else 0
+                p["pl"] = st.selectbox("Plancha Base", opts_pl, index=idx_pl, key=f"pl_{p_id}")
+
+                if p["pl"] != "Ninguna":
+                    p["pl_dif"] = st.checkbox("📏 Medida Plancha Diferente", value=bool(p.get("pl_dif", False)), key=f"pldif_{p_id}")
+                    if p["pl_dif"]:
+                        c_ph, c_pw = st.columns(2)
+                        p["pl_h"] = c_ph.number_input("Alto Plancha", 0, 5000, value=int(p.get("pl_h", p["h"])), key=f"plh_{p_id}")
+                        p["pl_w"] = c_pw.number_input("Ancho Plancha", 0, 5000, value=int(p.get("pl_w", p["w"])), key=f"plw_{p_id}")
+                    else:
+                        p["pl_h"] = p["h"]
+                        p["pl_w"] = p["w"]
+
+                opts_ap = ["C/C", "B/C", "B/B"]
+                val_ap = p.get("ap", "B/C")
+                idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 1
+                p["ap"] = st.selectbox("Calidad Ondulado", opts_ap, index=idx_ap, key=f"ap_{p_id}")
+
+                p["flexografia"] = st.checkbox("🟪 Flexografía (coste fijo por plancha)", value=bool(p.get("flexografia", False)), key=f"flexo_{p_id}")
+
+            else:
+                p["rig_manual"] = st.checkbox("🧩 Rígido Manual (tamaño + precio)", value=bool(p.get("rig_manual", False)), key=f"rigman_{p_id}")
+
+                if p["rig_manual"]:
+                    c_rw, c_rh, c_rp = st.columns(3)
+                    p["rig_w"] = int(c_rw.number_input("Hoja w (mm)", 0, 10000, value=int(p.get("rig_w", 0)), key=f"rigwman_{p_id}"))
+                    p["rig_h"] = int(c_rh.number_input("Hoja h (mm)", 0, 10000, value=int(p.get("rig_h", 0)), key=f"righman_{p_id}"))
+                    p["rig_precio_ud"] = float(c_rp.number_input("Precio hoja (€)", 0.0, 999999.0, value=float(p.get("rig_precio_ud", 0.0)), step=0.01, key=f"rigpman_{p_id}"))
+                    st.caption(
+                        "Este rígido manual se usa SOLO en esta pieza. "
+                        "Si las medidas de la forma no caben en la hoja del rígido, "
+                        "la app imputará 1 hoja rígida por hoja de producción para evitar coste 0."
+                    )
+                    p["mat_rigido"] = "MANUAL"
+                else:
+                    opts_rig = list(db["rigidos"].keys())
+                    val_rig = p.get("mat_rigido", "Ninguno")
+                    idx_rig = opts_rig.index(val_rig) if val_rig in opts_rig else 0
+                    p["mat_rigido"] = st.selectbox("Material Rígido (hoja)", opts_rig, index=idx_rig, key=f"mrig_{p_id}",
+                                                   on_change=callback_rigido, args=(p_id,))
+                    if p["mat_rigido"] != "Ninguno":
+                        info = db["rigidos"][p["mat_rigido"]]
+                        st.info(f"Tamaño hoja: {info['w']}x{info['h']} mm | Precio: {info['precio_ud']:.2f}€/hoja")
+
+            p["contracolado_a_mano"] = st.checkbox(
+                "🖐️ Contracolado a mano (NARBA 2026 · 0,6864 €/m²)",
+                value=bool(p.get("contracolado_a_mano", False)),
+                key=f"contramano_{p_id}",
+                help="Aplica la tarifa de contracolado a mano por m², independiente del material."
+            )
+
+            st.divider()
+
+            opts_pd = list(db["cartoncillo"].keys())
+            val_pd = p.get("pd", "Ninguno")
+            idx_pd = opts_pd.index(val_pd) if val_pd in opts_pd else 0
+            p["pd"] = st.selectbox("Cartoncillo Dorso", opts_pd, index=idx_pd, key=f"pd_{p_id}",
+                                   on_change=callback_cambio_dorso, args=(p_id,))
+            if p["pd"] != "Ninguno":
+                p["gd"] = st.number_input("Gramaje Dorso (g)", value=int(p.get("gd", 0)), key=f"gd_{p_id}")
+            else:
+                p["gd"] = 0
+
+        with col3:
+            st.markdown("##### Corte")
+            opts_cor = ["Sin corte", "Troquelado", "Plotter"]
+            val_cor = p.get("cor_default", p.get("cor", "Troquelado"))
+            idx_troq = opts_cor.index("Troquelado")
+            idx_cor = opts_cor.index(val_cor) if val_cor in opts_cor else idx_troq
+            p["cor_default"] = st.selectbox(
+                "Corte (por defecto)", opts_cor, index=idx_cor, key=f"cor_def_{p_id}",
+                on_change=callback_corte_default, args=(p_id, lista_cants,)
+            )
+
+            if lista_cants:
+                st.caption("Corte por cantidad (opcional):")
+                if not isinstance(p.get("cor_by_qty", {}), dict):
+                    p["cor_by_qty"] = {}
+                for q in lista_cants:
+                    cur = p["cor_by_qty"].get(str(q), p["cor_default"])
+                    idxq = opts_cor.index(cur) if cur in opts_cor else idx_cor
+                    p["cor_by_qty"][str(q)] = st.selectbox(
+                        f"{q} uds", opts_cor, index=idxq, key=f"cor_qty_{p_id}_{q}"
+                    )
+
+            st.divider()
+
+            p["cobrar_arreglo"] = st.checkbox("¿Cobrar Arreglo?", value=bool(p.get("cobrar_arreglo", True)), key=f"arr_{p_id}")
+            p["pv_troquel"] = st.number_input("Precio Venta Troquel (€) (si aplica)", value=float(p.get("pv_troquel", 0.0)), key=f"pvt_{p_id}")
+
+            # ✅ Troquelado: permitir forzar manualmente cuántas piezas salen por golpe de troquel.
+            # 0 = automático (se asume 1/pliegos_por_ud cuando pliegos<1).
+            p["troquel_piezas"] = int(st.number_input(
+                "Piezas por troquel (0 = automático)",
+                min_value=0,
+                step=1,
+                value=int(p.get("troquel_piezas", 0) or 0),
+                key=f"trqp_{p_id}",
+            ))
+
+            if p.get("pd", "Ninguno") != "Ninguno":
+                opts_imd = ["Offset", "Digital", "No"]
+                val_imd_raw = p.get("im_d", "No")
+                val_imd_norm = str(val_imd_raw).strip().lower()
+                if val_imd_norm in ("offset", "off"):
+                    val_imd = "Offset"
+                elif val_imd_norm in ("digital", "dig"):
+                    val_imd = "Digital"
+                elif val_imd_norm in ("no", "ninguno", "none", ""):
+                    val_imd = "No"
+                else:
+                    val_imd = "No"
+                idx_imd = opts_imd.index(val_imd)
+                p["im_d"] = st.selectbox("Impresión Dorso", opts_imd, index=idx_imd, key=f"im_d_{p_id}")
+
+                if p["im_d"] == "Offset":
+                    p["nt_d"] = st.number_input("Tintas Dorso", 0, 12, int(p.get("nt_d", 0)), key=f"nt_d_{p_id}")
+                    p["ba_d"] = st.checkbox("Barniz Dorso", value=bool(p.get("ba_d", False)), key=f"ba_d_{p_id}")
+                    if bool(p["ba_d"]):
+                        p["pel_d"] = "Sin Peliculado"
+                        st.session_state[f"pel_d_{p_id}"] = "Sin Peliculado"
+                elif p["im_d"] == "Digital":
+                    p["ld_d"] = st.checkbox("Laminado Digital Dorso", value=bool(p.get("ld_d", False)), key=f"ld_d_{p_id}")
+                else:
+                    p["nt_d"] = 0
+                    p["ba_d"] = False
+                    p["ld_d"] = False
+
+                opts_pel = list(db["peliculado"].keys())
+                val_peld = p.get("pel_d", "Sin Peliculado")
+                idx_peld = opts_pel.index(val_peld) if val_peld in opts_pel else 0
+                p["pel_d"] = st.selectbox("Peliculado Dorso", opts_pel, index=idx_peld, key=f"pel_d_{p_id}")
+            else:
+                p["im_d"] = "No"
+                p["nt_d"] = 0
+                p["ba_d"] = False
+                p["ld_d"] = False
+                p["pel_d"] = "Sin Peliculado"
+
+            if st.button("🗑 Borrar Forma", key=f"del_{p_id}"):
+                _remaining_ids = [int(x) for x in st.session_state.piezas_dict.keys() if int(x) != int(p_id)]
+                del st.session_state.piezas_dict[p_id]
+                st.session_state._forma_edit_id = min(_remaining_ids) if _remaining_ids else None
+                st.rerun()
 
     st.divider()
     st.subheader("📦 2. Materiales extra")
@@ -2843,11 +3304,7 @@ else:
                 # Mermas:
                 # - Digital: mermas_imp_digital_manual (fallback a regla digital si no existe)
                 # - Procesos e impresión OFFSET: por forma+cantidad (ver _ss_get_* en helpers)
-                merma_imp_digital_hojas = int(
-                    st.session_state.mermas_imp_digital_manual.get(
-                        q_n, calcular_mermas_estandar(q_n, es_digital=True)[1]
-                    )
-                )
+                merma_imp_digital_hojas = int(_get_merma_impresion_digital_hojas(q_n))
 
                 coste_f = 0.0
                 det_f = []
@@ -2976,12 +3433,35 @@ else:
                             else:
                                 mw = mh = precio_hoja = 0.0
 
-                        if w > 0 and h > 0 and mw > 0 and mh > 0:
-                            y1 = int(mw // w) * int(mh // h)
-                            y2 = int(mw // h) * int(mh // w)
+                        rigido_manual_activo = bool(p.get("rig_manual", False))
+
+                        # Para rígidos manuales/custom evitamos que el coste quede a 0 silenciosamente:
+                        # - Si el usuario ha informado hoja y precio, pero las medidas de la forma están vacías,
+                        #   usamos la hoja del rígido como medida efectiva.
+                        # - Si la forma no cabe en la hoja del rígido, contamos 1 hoja rígida por hoja de producción
+                        #   en vez de dejar el material sin coste. Así el supuesto no se infravalora por error de encaje.
+                        w_calc = float(w)
+                        h_calc = float(h)
+                        fallback_rigido_manual = False
+                        aviso_rigido_manual = ""
+
+                        if rigido_manual_activo and (w_calc <= 0 or h_calc <= 0) and mw > 0 and mh > 0:
+                            w_calc = mw
+                            h_calc = mh
+                            fallback_rigido_manual = True
+                            aviso_rigido_manual = "medidas forma vacías: se usa hoja rígida como 1 unidad"
+
+                        if w_calc > 0 and h_calc > 0 and mw > 0 and mh > 0:
+                            y1 = int(mw // w_calc) * int(mh // h_calc)
+                            y2 = int(mw // h_calc) * int(mh // w_calc)
                             by = max(y1, y2)
                         else:
                             by = 0
+
+                        if by <= 0 and rigido_manual_activo and mw > 0 and mh > 0 and precio_hoja > 0:
+                            by = 1
+                            fallback_rigido_manual = True
+                            aviso_rigido_manual = "la forma no cabe en la hoja rígida: se imputa 1 hoja rígida por hoja de producción"
 
                         if by > 0:
                             n_net = math.ceil(hp_produccion / by)
@@ -2991,7 +3471,7 @@ else:
                                 n_pl = math.ceil(n_net * 1.02)
                             c_rigido = n_pl * precio_hoja
 
-                            debug_log.append({
+                            log_rigido = {
                                 "qty": q_n,
                                 "pieza": p.get("nombre",""),
                                 "tipo": "rigido",
@@ -3001,7 +3481,10 @@ else:
                                 "precio_hoja": precio_hoja,
                                 "coste": c_rigido,
                                 "merma_regla": "fija" if capas_contracolado == 0 else "2%"
-                            })
+                            }
+                            if fallback_rigido_manual:
+                                log_rigido["aviso"] = aviso_rigido_manual
+                            debug_log.append(log_rigido)
                     else:
                         if p.get("pl", "Ninguna") != "Ninguna":
                             if bool(p.get("pl_dif", False)) and float(p.get("pl_h", 0)) > 0 and float(p.get("pl_w", 0)) > 0:
@@ -3018,7 +3501,7 @@ else:
                     if p.get("pd", "Ninguno") != "Ninguno" and m2_papel > 0:
                         c_cart_dorso = hp_papel_d * m2_papel * (float(p.get("gd", 0))/1000.0) * float(db["cartoncillo"][p["pd"]]["precio_kg"]) * f_cart
 
-                    peg_rate = float(db["planchas"]["Microcanal / Canal 3"]["peg"]) * f_narba
+                    peg_rate = _get_contracolado_rate_m2(p, db, f_narba)
                     if capas_contracolado > 0 and m2_papel > 0:
                         c_contracolado = hp_produccion * m2_papel * peg_rate * capas_contracolado
 
@@ -3144,6 +3627,7 @@ else:
                         "Plancha Ondulado": c_ondulado,
                         "Material Rígido": c_rigido,
                         "Contracolado": c_contracolado,
+                        "Contracolado a mano": bool(p.get("contracolado_a_mano", False)),
                         "Impresión": c_imp_total,
                         "Peliculado": c_pel_total,
                         "Corte (Troquel/Plotter)": c_troquel_taller + c_plotter,
@@ -3378,11 +3862,16 @@ else:
             "compras_legible": compras_legible,
             "resumen_costes_export": resumen_costes_export,
         }
+        try:
+            st.session_state._calc_last_signature = _calc_project_signature()
+        except Exception:
+            st.session_state._calc_last_signature = None
         st.session_state._calc_requested = False
         st.session_state._calc_status = "OK" if (isinstance(res_final
 , list) and len(res_final) > 0) else "Sin datos"
 
 safe_brf = re.sub(r'[\/*?:"<>|]', "", st.session_state.brf or "Ref").replace(" ", "_")
+safe_ver = re.sub(r'[\/*?:"<>|]', "", str(st.session_state.get("version_presupuesto", "") or "")).replace(" ", "_")
 safe_cli = re.sub(r'[\/*?:"<>|]', "", st.session_state.cli or "Cli").replace(" ", "_")
 safe_desc = re.sub(r'[\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
 # Incluir nº(s) de comercial en el nombre de archivo (si están informados)
@@ -3394,10 +3883,11 @@ if c1_num is not None:
 if c2_num is not None:
     com_parts.append(f"C{c2_num}")
 com_tag = "_".join(com_parts)
+brf_tag = f"{safe_brf}_{safe_ver}" if safe_ver else safe_brf
 if com_tag:
-    st.session_state._export_filename = f"{safe_brf}_{com_tag}_{safe_cli}_{safe_desc}.json"
+    st.session_state._export_filename = f"{brf_tag}_{com_tag}_{safe_cli}_{safe_desc}.json"
 else:
-    st.session_state._export_filename = f"{safe_brf}_{safe_cli}_{safe_desc}.json"
+    st.session_state._export_filename = f"{brf_tag}_{safe_cli}_{safe_desc}.json"
 
 resumen_compra_to_export = compras_legible if isinstance(compras_legible, dict) and len(compras_legible) > 0 else st.session_state.get("_imported_compras_legible")
 
@@ -3417,7 +3907,7 @@ def build_comercial_html(res_final_rows, desc_html, extras_html, emb_html, ext_h
 <body>
 <div class='comercial-box'>
   <div class='comercial-header'>OFERTA COMERCIAL - {st.session_state.cli or 'CLIENTE'}</div>
-  <div class='comercial-ref'>Ref. Briefing: {st.session_state.brf or '-'}</div>
+  <div class='comercial-ref'>Ref. Briefing: {st.session_state.brf or '-'}{(' · Versión: ' + str(st.session_state.get('version_presupuesto', '')).strip()) if str(st.session_state.get('version_presupuesto', '')).strip() else ''}</div>
   {desc_html}
   {extras_html}
   {emb_html}
@@ -3668,6 +4158,8 @@ if modo_comercial and res_final:
     else:
         oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, (ext_html + emb_opts_html + opc_html), tabla)
         safe_desc = re.sub(r'[\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
+        safe_ver = re.sub(r'[\/*?:"<>|]', "", str(st.session_state.get("version_presupuesto", "") or "")).replace(" ", "_")
+        brf_tag = f"{safe_brf}_{safe_ver}" if safe_ver else safe_brf
         # Incluir nº(s) de comercial en el nombre de archivo (si están informados)
         c1_num = _parse_comercial_num(st.session_state.get('comercial_1', ''))
         c2_num = _parse_comercial_num(st.session_state.get('comercial_2', ''))
@@ -3678,9 +4170,9 @@ if modo_comercial and res_final:
             com_parts.append(f"C{c2_num}")
         com_tag = "_".join(com_parts)
         if com_tag:
-            fname_html = f"OFERTA_{safe_brf}_{com_tag}_{safe_cli}_{safe_desc}.html"
+            fname_html = f"OFERTA_{brf_tag}_{com_tag}_{safe_cli}_{safe_desc}.html"
         else:
-            fname_html = f"OFERTA_{safe_brf}_{safe_cli}_{safe_desc}.html"
+            fname_html = f"OFERTA_{brf_tag}_{safe_cli}_{safe_desc}.html"
     # Guardar oferta HTML en caché
     try:
         if not isinstance(st.session_state._calc_cache, dict) or st.session_state._calc_cache is None:
@@ -3974,7 +4466,7 @@ with tab_auditoria:
   donde `hp_papel = hp_produccion + (merma_impresión * nº_impresiones)`
 
 - **Contracolado**:  
-  `coste = hp_produccion * m2_papel * peg_rate * capas_contracolado`
+  `coste = hp_produccion * m2_papel * tarifa_contracolado * capas_contracolado`
 
 - **Impresión DIGITAL** (por tirada):  
   `coste = (nb_run + merma_digital) * m2_papel * 6.5`  
@@ -4029,6 +4521,7 @@ with tab_auditoria:
                         nb = _ceil_int(uds * pl)  # pliegos netos reales
 
                         # Mermas (proceso + impresión por lado) usando los mismos helpers que el motor
+                        merma_imp_digital_hojas = int(_get_merma_impresion_digital_hojas(q_sel))
                         mp_def = int(_tabla_merma_procesos_offset(int(nb)))
                         mp_final = int(_ss_get_merma_proc(int(pid), int(q_sel), int(mp_def)))
                         hp_produccion = int(nb) + int(mp_final)
@@ -4201,7 +4694,7 @@ with tab_auditoria:
                         # Contracolado
                         st.write(f"Contracolado: {float(det_row.get('Contracolado', 0.0)):.4f} €")
                         try:
-                            peg_rate = float(db["planchas"]["Microcanal / Canal 3"]["peg"]) * f_narba
+                            peg_rate = _get_contracolado_rate_m2(p, db, f_narba)
                         except Exception:
                             peg_rate = 0.0
                         if capas_contracolado > 0 and m2_papel > 0 and peg_rate > 0:
@@ -4213,7 +4706,7 @@ with tab_auditoria:
                         # Impresión (incl. FR24 si aplica)
                         st.write(f"Impresión: {float(det_row.get('Impresión', 0.0)):.4f} €")
                         try:
-                            merma_imp_digital_hojas_local = int(globals().get("merma_imp_digital_hojas", 10) or 10)
+                            merma_imp_digital_hojas_local = int(_get_merma_impresion_digital_hojas(q_sel))
                         except Exception:
                             merma_imp_digital_hojas_local = 10
                         fr24_enabled = bool(p.get("fr24", False))
