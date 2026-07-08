@@ -871,22 +871,29 @@ def es_digital_en_proyecto(piezas_dict):
 # =========================================================
 if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
 
-# Compatibilidad en caliente: si la sesión viene de una versión anterior,
-# añadimos la nueva calidad sin reiniciar ni perder precios/importes existentes.
-def _ensure_bb_test_en_tarifa_activa() -> None:
-    try:
-        db = st.session_state.get("db_precios")
-        if not isinstance(db, dict):
-            return
-        planchas = db.setdefault("planchas", {})
-        if isinstance(planchas.get("Microcanal / Canal 3"), dict):
-            planchas["Microcanal / Canal 3"].setdefault("B/B TEST", 1.038)
-        if isinstance(planchas.get("Doble Micro / Doble Doble"), dict):
-            planchas["Doble Micro / Doble Doble"].setdefault("B/B TEST", 1.334)
-    except Exception:
-        pass
+def _asegurar_bb_test_planchas_en_sesion() -> None:
+    """Asegura la nueva calidad B/B TEST sin reiniciar tarifas ni proyecto.
 
-_ensure_bb_test_en_tarifa_activa()
+    Esto permite que una sesión ya abierta o un JSON antiguo puedan ver la nueva
+    calidad sin perder los precios/materiales que el usuario ya tuviera cargados.
+    """
+    db = st.session_state.get("db_precios")
+    if not isinstance(db, dict):
+        st.session_state.db_precios = deepcopy(PRECIOS_BASE)
+        return
+
+    planchas = db.setdefault("planchas", {})
+    if not isinstance(planchas, dict):
+        db["planchas"] = deepcopy(PRECIOS_BASE.get("planchas", {}))
+        return
+
+    if isinstance(planchas.get("Microcanal / Canal 3"), dict):
+        planchas["Microcanal / Canal 3"]["B/B TEST"] = 1.038
+    if isinstance(planchas.get("Doble Micro / Doble Doble"), dict):
+        planchas["Doble Micro / Doble Doble"]["B/B TEST"] = 1.334
+
+
+_asegurar_bb_test_planchas_en_sesion()
 
 # =========================================================
 # TARIFA MATERIA PRIMA (comparación vs proyectos importados)
@@ -2913,9 +2920,17 @@ with tab_calculadora:
                         p["pl_h"] = p["h"]
                         p["pl_w"] = p["w"]
 
-                opts_ap = ["C/C", "B/C", "B/B", "B/B TEST"]
+                orden_calidades = ["C/C", "B/C", "B/B", "B/B TEST"]
+                plancha_info = db.get("planchas", {}).get(p["pl"], {})
+                if isinstance(plancha_info, dict):
+                    opts_ap = [q for q in orden_calidades if q in plancha_info]
+                else:
+                    opts_ap = []
+                if not opts_ap:
+                    opts_ap = ["C/C"]
+
                 val_ap = p.get("ap", "B/C")
-                idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 1
+                idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else (opts_ap.index("B/C") if "B/C" in opts_ap else 0)
                 p["ap"] = st.selectbox("Calidad Ondulado", opts_ap, index=idx_ap, key=f"ap_{p_id}")
 
                 p["flexografia"] = st.checkbox("🟪 Flexografía (coste fijo por plancha)", value=bool(p.get("flexografia", False)), key=f"flexo_{p_id}")
