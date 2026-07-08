@@ -176,8 +176,8 @@ PRECIOS_BASE = {
     },
     "planchas": {
         "Ninguna": {"C/C": 0.0, "peg": 0.0},
-        "Microcanal / Canal 3": {"C/C": 0.702, "B/C": 0.725, "B/B": 0.805, "peg": 0.2353},
-        "Doble Micro / Doble Doble": {"C/C": 1.128, "B/C": 1.187, "B/B": 1.378, "peg": 0.2726},
+        "Microcanal / Canal 3": {"C/C": 0.702, "B/C": 0.725, "B/B": 0.805, "B/B TEST": 1.038, "peg": 0.2353},
+        "Doble Micro / Doble Doble": {"C/C": 1.128, "B/C": 1.187, "B/B": 1.378, "B/B TEST": 1.334, "peg": 0.2726},
         "AC (Cuero/Cuero)": {"C/C": 2.505, "peg": 0.2353},
     },
     "rigidos": {
@@ -870,6 +870,23 @@ def es_digital_en_proyecto(piezas_dict):
 # SESSION STATE INIT
 # =========================================================
 if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
+
+# Compatibilidad en caliente: si la sesión viene de una versión anterior,
+# añadimos la nueva calidad sin reiniciar ni perder precios/importes existentes.
+def _ensure_bb_test_en_tarifa_activa() -> None:
+    try:
+        db = st.session_state.get("db_precios")
+        if not isinstance(db, dict):
+            return
+        planchas = db.setdefault("planchas", {})
+        if isinstance(planchas.get("Microcanal / Canal 3"), dict):
+            planchas["Microcanal / Canal 3"].setdefault("B/B TEST", 1.038)
+        if isinstance(planchas.get("Doble Micro / Doble Doble"), dict):
+            planchas["Doble Micro / Doble Doble"].setdefault("B/B TEST", 1.334)
+    except Exception:
+        pass
+
+_ensure_bb_test_en_tarifa_activa()
 
 # =========================================================
 # TARIFA MATERIA PRIMA (comparación vs proyectos importados)
@@ -2275,50 +2292,71 @@ with tab_calculadora:
     # -----------------------------------------------------
     st.header("Paso 2 · Datos técnicos")
 
-    c_btns = st.columns([1, 4])
+    c_btns = st.columns([2.2, 1.0, 3.0])
+    ids_formas_existentes = sorted([int(x) for x in st.session_state.piezas_dict.keys()])
+    opciones_copia_forma = ["Vacía"] + [f"Forma {pid}" for pid in ids_formas_existentes]
+
     with c_btns[0]:
-        dup_prev = st.checkbox("Repetir datos de la anterior", key="dup_prev_forma", value=False)
+        copiar_desde_forma = st.selectbox(
+            "Crear nueva forma desde",
+            opciones_copia_forma,
+            index=0,
+            key="copy_from_forma_sel",
+            help="Elige una forma existente para duplicar sus datos técnicos, o 'Vacía' para crear una forma en blanco.",
+        )
+
+    with c_btns[1]:
+        st.write("")
         if st.button("➕ Forma", key="btn_add_forma"):
             last_id = max(st.session_state.piezas_dict.keys())
             nid = int(last_id) + 1
 
-            if dup_prev and last_id in st.session_state.piezas_dict:
-                # Copiamos la forma anterior (inputs técnicos) y ajustamos el nombre
-                st.session_state.piezas_dict[nid] = deepcopy(st.session_state.piezas_dict[last_id])
+            src_id = None
+            if isinstance(copiar_desde_forma, str) and copiar_desde_forma.startswith("Forma "):
+                try:
+                    src_id = int(copiar_desde_forma.replace("Forma ", "").strip())
+                except Exception:
+                    src_id = None
+
+            if src_id is not None and src_id in st.session_state.piezas_dict:
+                # Copiamos la forma elegida y ajustamos el nombre para evitar confusión.
+                st.session_state.piezas_dict[nid] = deepcopy(st.session_state.piezas_dict[src_id])
                 st.session_state.piezas_dict[nid]["nombre"] = f"Forma {nid}"
 
-                # Duplicamos también configuraciones asociadas al formato (si existen)
+                # Duplicamos también configuraciones asociadas al formato (si existen),
+                # respetando compatibilidad con claves int/str.
                 for kdict in ["mermas_proc_manual", "mermas_imp_manual", "mermas_imp_digital_manual"]:
                     d = st.session_state.get(kdict, {})
                     if isinstance(d, dict):
-                        # Aceptamos claves int o str (compatibilidad)
-                        if str(last_id) in d:
-                            d[str(nid)] = deepcopy(d[str(last_id)])
-                        elif last_id in d:
-                            d[str(nid)] = deepcopy(d[last_id])
+                        if str(src_id) in d:
+                            d[str(nid)] = deepcopy(d[str(src_id)])
+                        elif src_id in d:
+                            d[str(nid)] = deepcopy(d[src_id])
 
-                # Impresiones por cantidad por formato
+                # Impresiones por cantidad por formato.
                 en = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
                 if isinstance(en, dict):
-                    if str(last_id) in en:
-                        en[str(nid)] = bool(en.get(str(last_id), False))
-                    elif last_id in en:
-                        en[str(nid)] = bool(en.get(last_id, False))
+                    if str(src_id) in en:
+                        en[str(nid)] = bool(en.get(str(src_id), False))
+                    elif src_id in en:
+                        en[str(nid)] = bool(en.get(src_id, False))
 
                 cfg_fmt = st.session_state.get("impresiones_by_qty_fmt", {})
                 if isinstance(cfg_fmt, dict):
-                    if str(last_id) in cfg_fmt:
-                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[str(last_id)])
-                    elif last_id in cfg_fmt:
-                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[last_id])
+                    if str(src_id) in cfg_fmt:
+                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[str(src_id)])
+                    elif src_id in cfg_fmt:
+                        cfg_fmt[str(nid)] = deepcopy(cfg_fmt[src_id])
 
             else:
                 st.session_state.piezas_dict[nid] = crear_forma_vacia(nid)
 
-            # Al añadir una forma, pasamos directamente a editarla para evitar modificar la anterior por error.
+            # Al añadir una forma, pasamos directamente a editarla para evitar modificar otra por error.
+            # Nota Streamlit: no modificamos copy_from_forma_sel aquí porque es la key de un widget
+            # ya instanciado en este rerun. Hacerlo provoca StreamlitAPIException.
             st.session_state._forma_edit_id = int(nid)
             st.rerun()
-    if c_btns[1].button("🗑 Reiniciar"):
+    if c_btns[2].button("🗑 Reiniciar"):
 
         st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
         st.session_state.lista_extras_grabados = []
@@ -2875,7 +2913,7 @@ with tab_calculadora:
                         p["pl_h"] = p["h"]
                         p["pl_w"] = p["w"]
 
-                opts_ap = ["C/C", "B/C", "B/B"]
+                opts_ap = ["C/C", "B/C", "B/B", "B/B TEST"]
                 val_ap = p.get("ap", "B/C")
                 idx_ap = opts_ap.index(val_ap) if val_ap in opts_ap else 1
                 p["ap"] = st.selectbox("Calidad Ondulado", opts_ap, index=idx_ap, key=f"ap_{p_id}")
