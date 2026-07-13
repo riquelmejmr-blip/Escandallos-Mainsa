@@ -327,31 +327,51 @@ def calcular_mermas_estandar(n_uds: int, pliegos_por_ud: float = 1.0, es_digital
 def _get_contracolado_rate_m2(pieza: dict, db: dict, f_narba: float = 1.0) -> float:
     """Devuelve la tarifa de contracolado €/m² aplicable a una forma.
 
+    Reglas:
     - Si la forma tiene "contracolado_a_mano" activo, aplica la tarifa a mano NARBA 2026:
       0,6864 €/m², independiente del material.
-    - En caso contrario, usa la tarifa "peg" de la plancha de la forma.
-      Si no hay plancha o falta la tarifa, usa Microcanal / Canal 3 como fallback
-      para mantener compatibilidad con proyectos antiguos.
+    - Si hay una plancha real seleccionada y tiene tarifa de pegado (>0), usa esa tarifa.
+    - Si NO hay plancha ("Ninguna"), pero sí hay dos capas de cartoncillo u otro soporte,
+      igualmente debe existir contracolado. En ese caso usa una tarifa de fallback segura
+      equivalente al contracolado base por m², evitando que "Ninguna.peg = 0" deje el coste a 0.
     """
     try:
         mult = float(f_narba)
     except Exception:
         mult = 1.0
 
+    narba = (db or {}).get("narba", {}) if isinstance((db or {}).get("narba", {}), dict) else {}
+
     if bool((pieza or {}).get("contracolado_a_mano", False)):
         try:
-            return float((db or {}).get("narba", {}).get("contracolado_a_mano_m2", 0.6864)) * mult
+            return float(narba.get("contracolado_a_mano_m2", 0.6864)) * mult
         except Exception:
             return 0.6864 * mult
 
+    # Tarifa base cuando no hay plancha real. Mantiene compatibilidad con tarifas antiguas:
+    # primero intenta Microcanal/Canal 3.peg, y si no existe usa 0,2353 €/m².
     try:
-        plancha = str((pieza or {}).get("pl", "Microcanal / Canal 3"))
         planchas = (db or {}).get("planchas", {})
-        if plancha in planchas and isinstance(planchas.get(plancha), dict) and "peg" in planchas[plancha]:
-            return float(planchas[plancha].get("peg", 0.0)) * mult
-        return float(planchas.get("Microcanal / Canal 3", {}).get("peg", 0.2353)) * mult
+        fallback = float(planchas.get("Microcanal / Canal 3", {}).get("peg", 0.2353))
+        if fallback <= 0:
+            fallback = 0.2353
     except Exception:
-        return 0.2353 * mult
+        planchas = {}
+        fallback = 0.2353
+
+    try:
+        plancha = str((pieza or {}).get("pl", "Ninguna"))
+        info = planchas.get(plancha, {}) if isinstance(planchas, dict) else {}
+        rate = float(info.get("peg", 0.0)) if isinstance(info, dict) else 0.0
+
+        # Importante: "Ninguna" existe en la tarifa con peg=0.0.
+        # No debe bloquear el coste cuando se contracolan dos cartoncillos entre sí.
+        if plancha.strip().lower() == "ninguna" or rate <= 0:
+            rate = fallback
+
+        return float(rate) * mult
+    except Exception:
+        return float(fallback) * mult
 
 
 # =========================================================
