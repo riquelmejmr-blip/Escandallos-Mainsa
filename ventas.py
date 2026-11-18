@@ -5,11 +5,25 @@ import re
 import html
 import math
 from copy import deepcopy
+from decimal import Decimal, ROUND_HALF_UP
 import hashlib
+import os
+import unicodedata
+from pathlib import Path
+from datetime import datetime
 
 # =========================================================
 # Helpers (mínimo)
 # =========================================================
+def _formato_precio_venta(valor) -> str:
+    """Venta a céntimos: desde medio céntimo se redondea hacia arriba.
+
+    Se aplica solo a la salida; el motor conserva su precisión de cálculo.
+    """
+    importe = Decimal(str(valor)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{importe:.2f}€"
+
+
 MARGEN_NORMAL = 2.2
 MARGEN_ESPECIAL = 2.1
 COMERCIALES_MARGEN_ESPECIAL = {52, 47, 46, 62}
@@ -72,7 +86,7 @@ def _aplicar_margen_auto_si_procede() -> None:
 # =========================================================
 # 1) CONFIGURACIÓN
 # =========================================================
-st.set_page_config(page_title="MAINSA ADMIN V44", layout="wide")
+st.set_page_config(page_title="MAINSA ADMIN V45", layout="wide")
 
 # =========================================================
 # 2) FLEXICO (igual)
@@ -218,6 +232,19 @@ PRECIOS_BASE = {
         "Poliéster mate": 0.79,
     },
     "laminado_digital": 3.5,
+    "impresion_digital": {"precio_m2": 6.5},
+    "offset": {"minimo_tinta": 85.0, "extra_101_500": 0.0875,
+               "base_501_2000": 120.0, "extra_2001": 0.015},
+    "mano_obra": {"manipulado_hora": 18.0, "rellenado_hora": 18.0, "armado_hora": 18.0},
+    "embalajes": {
+        "multiplicador_dd": 1.5,
+        "guaina": {"precio_m2": 0.70, "arreglo": 30.0},
+        "plano": {"arreglo": 152.0, "arreglo_m2": 20.0, "precio_ud": 0.15, "precio_m2": 1.02},
+        "volumen": {"arreglo": 20.0, "arreglo_m2": 8.0, "precio_m2": 0.64},
+        "aros": {"precio_ud": 0.120838225, "precio_m2": 0.469363762,
+                 "arreglo": 1600.52632, "exponente": 1.48},
+    },
+    "flexico": {k: float(v["precio"]) for k, v in PRODUCTOS_FLEXICO.items()},
     "extras_base": {
         "CINTA D/CARA": 0.26, "CINTA LOHMAN": 0.49, "CINTA GEL": 1.2,
         "GOMA TERMINALES": 0.079, "IMAN 20x2mm": 1.145, "TUBOS": 1.06,
@@ -787,8 +814,17 @@ def obtener_partes_impresion_por_formato(pid: int, q_total: int) -> list:
 TIPOS_EMB = ["Manual", "Embalaje Guaina (Automático)", "Embalaje en Plano", "Embalaje en Volumen", "Aros de refuerzo"]
 EMB_MATS = ["Canal 5", "D/D"]
 
+def _tarifa(categoria: str, campo: str, bloque: str = None) -> float:
+    base = PRECIOS_BASE[categoria]
+    actual = st.session_state.get("db_precios", {}).get(categoria, {})
+    if bloque is not None:
+        base = base[bloque]
+        actual = actual.get(bloque, {})
+    return float(actual.get(campo, base[campo]))
+
+
 def emb_mult(material: str) -> float:
-    return 1.5 if material == "D/D" else 1.0
+    return _tarifa("embalajes", "multiplicador_dd") if material == "D/D" else 1.0
 
 
 # =========================================================
@@ -815,7 +851,7 @@ def _aros_refuerzo_precio_ud_c5(L_mm: float, W_mm: float, Q_aros: int) -> float:
     if L <= 0 or W <= 0 or Q <= 0:
         return 0.0
     area_m2 = (L / 1000.0) * (W / 1000.0)
-    return float(_AROS_REF_A0 + _AROS_REF_AAREA * area_m2 + _AROS_REF_AINVQ / (Q ** _AROS_REF_P))
+    return float(_tarifa("embalajes", "precio_ud", "aros") + _tarifa("embalajes", "precio_m2", "aros") * area_m2 + _tarifa("embalajes", "arreglo", "aros") / (Q ** _tarifa("embalajes", "exponente", "aros")))
 
 def aros_refuerzo_precio_ud(L_mm: float, W_mm: float, Q_aros: int, material: str) -> float:
     """Precio unitario (€/aro) según material (Canal 5 o D/D)."""
@@ -828,7 +864,7 @@ def embalaje_plano_unit(L_mm, W_mm, H_mm, Q):
     W = W_mm / 1000.0
     H = H_mm / 1000.0
     S = (L * W) + 2.0 * H * (L + W)
-    P = ((152.0 + (20.0 * S)) / float(Q)) + 0.15 + (1.02 * S)
+    P = ((_tarifa("embalajes", "arreglo", "plano") + (_tarifa("embalajes", "arreglo_m2", "plano") * S)) / float(Q)) + _tarifa("embalajes", "precio_ud", "plano") + (_tarifa("embalajes", "precio_m2", "plano") * S)
     return float(P), float(S)
 
 def embalaje_volumen_unit(L_mm, A_mm, H_mm, Q):
@@ -838,7 +874,7 @@ def embalaje_volumen_unit(L_mm, A_mm, H_mm, Q):
     A = A_mm / 1000.0
     H = H_mm / 1000.0
     S = (2.0 * L + 2.0 * A + 0.05) * (H + A)
-    P = ((20.0 + (8.0 * S)) / float(Q)) + (0.64 * S)
+    P = ((_tarifa("embalajes", "arreglo", "volumen") + (_tarifa("embalajes", "arreglo_m2", "volumen") * S)) / float(Q)) + (_tarifa("embalajes", "precio_m2", "volumen") * S)
     return float(P), float(S)
 
 def crear_embalaje_vacio(idx):
@@ -896,13 +932,13 @@ def coste_offset_por_tinta(n_hojas: int) -> float:
     """
     n = max(0, int(round(n_hojas)))
     if n <= 100:
-        return 85.0
+        return _tarifa("offset", "minimo_tinta")
     if n <= 500:
-        extra = (n - 100) * 0.0875
-        return 85.0 + extra
-    base = 120.0
+        extra = (n - 100) * _tarifa("offset", "extra_101_500")
+        return _tarifa("offset", "minimo_tinta") + extra
+    base = _tarifa("offset", "base_501_2000")
     if n > 2000:
-        base += (n - 2000) * 0.015
+        base += (n - 2000) * _tarifa("offset", "extra_2001")
     return base
 
 # =========================================================
@@ -950,7 +986,28 @@ def es_digital_en_proyecto(piezas_dict):
 # =========================================================
 # SESSION STATE INIT
 # =========================================================
+def _completar_tarifas_editables(db: dict) -> None:
+    """Añade campos editables ausentes sin sustituir las tarifas del proyecto.
+
+    Para stamping histórico se conservan los fallbacks que aplicaba el motor.
+    No se rellenan calidades ni precios de materiales históricos.
+    """
+    defaults = {k: deepcopy(PRECIOS_BASE[k]) for k in (
+        "stamping", "flexografia", "plotter", "narba", "offset", "impresion_digital",
+        "mano_obra", "embalajes", "flexico", "extras_base")}
+    defaults["stamping"] = {"arreglo": 168.0, "pisada": 0.21, "pelicula_m2": 0.39}
+    def completar(actual, base):
+        for key, value in base.items():
+            if key not in actual:
+                actual[key] = deepcopy(value)
+            elif isinstance(value, dict) and isinstance(actual[key], dict):
+                completar(actual[key], value)
+    completar(db, defaults)
+    db.setdefault("laminado_digital", 3.5)
+
+
 if "db_precios" not in st.session_state: st.session_state.db_precios = deepcopy(PRECIOS_BASE)
+_completar_tarifas_editables(st.session_state.db_precios)
 
 # Compatibilidad en caliente: "Poliéster" equivale a "Poliéster oro".
 # Actualiza los precios existentes sin crear opciones duplicadas.
@@ -958,10 +1015,14 @@ if isinstance(st.session_state.get("db_precios"), dict):
     if "peliculado" not in st.session_state.db_precios or not isinstance(st.session_state.db_precios.get("peliculado"), dict):
         st.session_state.db_precios["peliculado"] = deepcopy(PRECIOS_BASE["peliculado"])
     else:
-        st.session_state.db_precios["peliculado"].pop("Poliéster oro brillo", None)
-        st.session_state.db_precios["peliculado"].pop("Poliéster oro+mate", None)
-        st.session_state.db_precios["peliculado"]["Poliéster brillo"] = 0.53
-        st.session_state.db_precios["peliculado"]["Poliéster mate"] = 0.79
+        # Los precios de proyecto prevalecen incluso después de un rerun.
+        _pel = st.session_state.db_precios["peliculado"]
+        for _old, _new in (("Poliéster oro brillo", "Poliéster brillo"),
+                           ("Poliéster oro+mate", "Poliéster mate")):
+            if _old in _pel:
+                _pel.setdefault(_new, _pel[_old])
+        _pel.setdefault("Poliéster brillo", 0.53)
+        _pel.setdefault("Poliéster mate", 0.79)
 
 def _asegurar_bb_test_planchas_en_sesion() -> None:
     """Asegura la nueva calidad B/B TEST sin reiniciar tarifas ni proyecto.
@@ -978,6 +1039,9 @@ def _asegurar_bb_test_planchas_en_sesion() -> None:
     if not isinstance(planchas, dict):
         db["planchas"] = deepcopy(PRECIOS_BASE.get("planchas", {}))
         return
+
+    for nombre, tarifas in PRECIOS_BASE["planchas"].items():
+        planchas.setdefault(nombre, deepcopy(tarifas))
 
     if isinstance(planchas.get("Ninguna"), dict):
         planchas["Ninguna"].setdefault("C/C", 0.0)
@@ -1039,6 +1103,25 @@ def _hash_materia_prima(db: dict) -> str:
         blob = str(subset_norm)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
+def _limpiar_widgets_tarifas(incluir_descuentos=False) -> None:
+    # Streamlit prioriza la clave del widget sobre su valor inicial.
+    prefixes = ("cost_cart_", "cost_pl_", "cost_rig_", "rigw_", "righ_", "cost_pel_", "cost_peg_")
+    for key in list(st.session_state):
+        if str(key).startswith(prefixes) or (incluir_descuentos and (str(key).startswith(("db_desc_", "cost_", "trq_", "tarifa_", "fr24r_")) or key == "plotter_precio")):
+            del st.session_state[key]
+
+
+def _invalidar_calculo() -> None:
+    for key in ("_calc_cache", "_calc_last_signature", "_export_blob", "_export_hash",
+                "_imported_compras_legible", "_imported_resumen_costes"):
+        st.session_state[key] = None
+    st.session_state.compras_legible_export = {}
+    st.session_state.resumen_costes_export = {}
+    st.session_state._calc_requested = False
+    st.session_state._calc_status = "Pendiente"
+    st.session_state._json_downloaded = False
+
+
 def _aplicar_tarifa_actual_materia_prima() -> None:
     """Actualiza SOLO materia prima (cartoncillo/planchas/rigidos/peliculado) a la tarifa actual (PRECIOS_BASE).
 
@@ -1067,11 +1150,16 @@ def _aplicar_tarifa_actual_materia_prima() -> None:
 
         # Reemplazamos/actualizamos solo las entradas de la tarifa actual (manteniendo posibles claves extra del proyecto)
         for k, v in base_cat.items():
-            cur_cat[k] = deepcopy(v)
+            if isinstance(v, dict) and isinstance(cur_cat.get(k), dict):
+                cur_cat[k].update(deepcopy(v))
+            else:
+                cur_cat[k] = deepcopy(v)
 
     # Dejamos constancia de que ya está actualizado respecto a la tarifa actual
     st.session_state._tarifa_mp_import_hash = _hash_materia_prima(st.session_state.db_precios)
     st.session_state._tarifa_mp_mismatch = False
+    _limpiar_widgets_tarifas()
+    _invalidar_calculo()
 
 if "piezas_dict" not in st.session_state: st.session_state.piezas_dict = {1: crear_forma_vacia(1)}
 if "lista_extras_grabados" not in st.session_state: st.session_state.lista_extras_grabados = []
@@ -1285,7 +1373,7 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
         "n_", "p_", "std_", "h_", "w_", "im_", "nt_", "ba_", "ld_", "pel_",
         "pf_", "gf_", "tb_", "pl_", "pldif_", "plh_", "plw_", "ap_",
         "rigman_", "rigwman_", "righman_", "rigpman_", "mrig_",
-        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "stamp_", "stampw_", "stamph_", "stamparr_", "flexo_", "contramano_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
+        "pd_", "gd_", "cor_def_", "arr_", "pvt_", "trqp_", "fr24_", "fr24r_", "stamp_", "stampw_", "stamph_", "stamparr_", "flexo_", "contramano_", "im_d_", "nt_d_", "ba_d_", "ld_d_", "pel_d_"
     ]
 
     for pid in piezas_ids:
@@ -1304,7 +1392,7 @@ def purge_widget_keys_for_import(lista_cants=None, piezas_ids=None, externos_len
             del st.session_state[kdel]
 
     for q in lista_cants:
-        for k in [f"mi_{q}", f"mp_{q}"]:
+        for k in [f"mi_{q}", f"mp_{q}", f"mid_{q}"]:
             if k in st.session_state:
                 del st.session_state[k]
 
@@ -1397,6 +1485,8 @@ def seed_widget_keys_from_import(lista_cants, piezas_dict):
         st.session_state[f"stamph_{pid}"] = int(p.get("stamping_h", 0))
         st.session_state[f"stamparr_{pid}"] = bool(p.get("stamping_cobrar_arreglo", True))
         st.session_state[f"flexo_{pid}"] = bool(p.get("flexografia", False))
+        st.session_state[f"fr24_{pid}"] = bool(p.get("fr24", False))
+        st.session_state[f"fr24r_{pid}"] = float(p.get("fr24_rate", 0.05))
         st.session_state[f"contramano_{pid}"] = bool(p.get("contracolado_a_mano", False))
         st.session_state[f"trqp_{pid}"] = int(p.get("troquel_piezas", 0) or 0)
 
@@ -1598,6 +1688,8 @@ def _normalizar_pieza_dict(pid: int, v: dict):
     return base
 
 def normalizar_import(di: dict):
+    _limpiar_widgets_tarifas(incluir_descuentos=True)
+    _invalidar_calculo()
     prev_cants = parse_cantidades(st.session_state.get("cants_str_saved", ""))
     prev_piezas_ids = list(st.session_state.get("piezas_dict", {}).keys()) if isinstance(st.session_state.get("piezas_dict", None), dict) else []
     prev_extras_len = len(st.session_state.get("lista_extras_grabados", [])) if isinstance(st.session_state.get("lista_extras_grabados", None), list) else 0
@@ -1641,6 +1733,10 @@ def normalizar_import(di: dict):
         if _k in st.session_state:
             del st.session_state[_k]
 
+    st.session_state.dif_ud = 0.091
+    st.session_state.repeticion_proyecto = False
+    st.session_state.imp_fijo_pvp = 500.0
+
     params = di.get("params", {})
     if isinstance(params, dict):
         if "dif_ud" in params: st.session_state.dif_ud = float(params["dif_ud"])
@@ -1683,7 +1779,8 @@ def normalizar_import(di: dict):
 
     if isinstance(di.get("db_precios", None), dict):
         # Importamos SIEMPRE la base de precios del proyecto (compatibilidad hacia atrás)
-        st.session_state.db_precios = di["db_precios"]
+        st.session_state.db_precios = deepcopy(di["db_precios"])
+        _completar_tarifas_editables(st.session_state.db_precios)
         # Anadir nuevas familias a proyectos historicos sin modificar sus tarifas guardadas.
         _import_planchas = st.session_state.db_precios.setdefault("planchas", {})
         if isinstance(_import_planchas, dict):
@@ -1699,8 +1796,10 @@ def normalizar_import(di: dict):
             st.session_state._tarifa_mp_mismatch = False
     else:
         # JSON antiguo sin db_precios: usamos la tarifa actual, pero dejamos flags coherentes
+        st.session_state.db_precios = deepcopy(PRECIOS_BASE)
         st.session_state._tarifa_mp_import_hash = None
         st.session_state._tarifa_mp_mismatch = False
+    st.session_state._import_sin_tarifas = not isinstance(di.get("db_precios"), dict)
 
     # ✅ Descuentos por bloque (si vienen en el JSON)
     if isinstance(di.get("db_descuentos", None), dict):
@@ -1812,7 +1911,7 @@ def normalizar_import(di: dict):
         for k, v in di["mermas_imp_digital"].items():
             k_str = str(k)
             if k_str.isdigit() and not isinstance(v, dict):
-                out_dig[k_str] = _coerce_int(v, 0)
+                out_dig[int(k_str)] = _coerce_int(v, 0)
         st.session_state.mermas_imp_digital_manual = out_dig
 
     if isinstance(di.get("mermas_proc", None), dict):
@@ -2038,7 +2137,7 @@ def construir_export(resumen_compra=None, resumen_costes=None):
         "cli": st.session_state.cli,
         "desc": st.session_state.desc,
         "notas": st.session_state.get("notas",""),
-        "_schema": {"app": "MAINSA ADMIN V44", "piezas_index_base": 1},
+        "_schema": {"app": "MAINSA ADMIN V45", "piezas_index_base": 1},
         "cants_str": st.session_state.cants_str_saved,
         "manip": {"unidad_t": st.session_state.unidad_t, "t_input": float(st.session_state.t_input), "rellenado": {"enabled": bool(st.session_state.rell_enabled), "t_input": float(st.session_state.rell_t_input)}, "armado": {"enabled": bool(st.session_state.arm_enabled), "t_input": float(st.session_state.arm_t_input)}},
         "params": {"dif_ud": float(st.session_state.dif_ud), "dif_preset_sel": str(st.session_state.get("dif_preset_sel","")), "repeticion_proyecto": bool(st.session_state.get("repeticion_proyecto", False)), "imp_fijo_pvp": float(st.session_state.imp_fijo_pvp), "margen": float(st.session_state.margen), "descuento_procesos": float(st.session_state.descuento_procesos), "margen_extras": float(st.session_state.margen_extras), "margen_embalajes": float(st.session_state.margen_embalajes)},
@@ -2134,6 +2233,237 @@ st.title("🛡️ PANEL ADMIN - ESCANDALLO")
 # SIDEBAR (visualización + import/export)
 # =========================================================
 
+# =========================================================
+# BIBLIOTECA JSON · CARPETA SINCRONIZADA DE ONEDRIVE
+# =========================================================
+_OD_ROOT = Path(os.environ.get("MAINSA_JSON_DIR") or (
+    Path(os.environ.get("OneDriveCommercial") or os.environ.get("OneDrive") or
+         (Path.home() / "OneDrive - MAINSA PUNTO DIRECTO PLV S.L")) / "ESCANDALLOS MAINSA"))
+
+
+def _od_normalizar(texto):
+    return "".join(c for c in unicodedata.normalize("NFD", str(texto).casefold())
+                   if unicodedata.category(c) != "Mn")
+
+
+def _od_ruta_segura(raiz, relativo=""):
+    raiz = Path(raiz).resolve()
+    ruta = (raiz / relativo).resolve()
+    if not ruta.is_relative_to(raiz):
+        raise ValueError("La ruta debe estar dentro de la carpeta de escandallos.")
+    return ruta
+
+
+@st.cache_data(ttl=60, show_spinner=False)
+def _od_inventario(raiz):
+    raiz = Path(raiz).resolve()
+    if not raiz.is_dir():
+        raise FileNotFoundError("No se encuentra la carpeta sincronizada ESCANDALLOS MAINSA.")
+    archivos, carpetas, errores = [], {"."}, []
+    def error(exc):
+        errores.append(str(exc))
+    for directorio, subdirs, nombres in os.walk(raiz, followlinks=False, onerror=error):
+        # Los marcadores de nube de OneDrive no son enlaces simbólicos.
+        # Se excluyen enlaces de sistema que puedan salir de la biblioteca.
+        seguras = []
+        for nombre_subdir in subdirs:
+            try:
+                candidato = Path(directorio) / nombre_subdir
+                if not candidato.is_symlink():
+                    _od_ruta_segura(raiz, candidato)
+                    seguras.append(nombre_subdir)
+            except (OSError, ValueError) as exc:
+                errores.append(str(exc))
+        subdirs[:] = seguras
+        carpetas.add(str(Path(directorio).relative_to(raiz)))
+        for nombre in nombres:
+            if not nombre.casefold().endswith(".json"):
+                continue
+            ruta = Path(directorio) / nombre
+            try:
+                if ruta.is_symlink():
+                    continue
+                ruta = _od_ruta_segura(raiz, ruta)
+                stat = ruta.stat()
+                archivos.append({"ruta": str(ruta.relative_to(raiz)), "nombre": nombre,
+                                 "modificado": stat.st_mtime, "bytes": stat.st_size})
+            except (OSError, ValueError) as exc:
+                errores.append(f"{nombre}: {exc}")
+    archivos.sort(key=lambda x: (-x["modificado"], x["ruta"].casefold()))
+    return archivos, sorted(carpetas, key=str.casefold), errores
+
+
+def _od_buscar(archivos, consulta):
+    terminos = _od_normalizar(consulta).split()
+    return [a for a in archivos if all(t in _od_normalizar(a["ruta"]) for t in terminos)]
+
+
+def _od_validar_proyecto(datos):
+    if not isinstance(datos, dict):
+        raise ValueError("El archivo no contiene un proyecto JSON de MAINSA.")
+    piezas = datos.get("piezas")
+    if not isinstance(piezas, (dict, list)) or not piezas:
+        raise ValueError("El JSON no contiene formas de un escandallo MAINSA.")
+    valores = piezas.values() if isinstance(piezas, dict) else piezas
+    if not all(isinstance(p, dict) for p in valores):
+        raise ValueError("El JSON contiene formas con un formato no válido.")
+    return datos
+
+
+def _od_leer(raiz, relativo):
+    ruta = _od_ruta_segura(raiz, relativo)
+    if ruta.suffix.casefold() != ".json" or not ruta.is_file():
+        raise ValueError("Selecciona un archivo JSON de la biblioteca.")
+    if ruta.stat().st_size > 64 * 1024 * 1024:
+        raise ValueError("El JSON supera 64 MB; revisa el archivo antes de abrirlo.")
+    contenido = ruta.read_bytes()
+    return _od_validar_proyecto(json.loads(contenido.decode("utf-8-sig"))), hashlib.sha256(contenido).hexdigest()
+
+
+def _od_nombre(nombre):
+    nombre = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "_", str(nombre)).strip().rstrip(". ")
+    if not nombre.casefold().endswith(".json"):
+        nombre += ".json"
+    stem = nombre[:-5].rstrip(". ")
+    if not stem or stem in (".", ".."):
+        raise ValueError("Escribe un nombre para el JSON.")
+    if stem.split(".")[0].upper() in {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}:
+        raise ValueError("Ese nombre está reservado en Windows. Elige otro nombre.")
+    if len(stem) > 180:
+        raise ValueError("Acorta el nombre del archivo a un máximo de 180 caracteres.")
+    return stem + ".json"
+
+
+def _od_guardar(raiz, carpeta, nombre, contenido):
+    """Crea y verifica un archivo local exclusivo. No acredita la sincronización en nube."""
+    _od_validar_proyecto(json.loads(contenido))
+    destino = _od_ruta_segura(raiz, carpeta)
+    if not destino.is_dir():
+        raise FileNotFoundError("La carpeta de destino ya no está disponible.")
+    nombre = _od_nombre(nombre)
+    stem = nombre[:-5]
+    prefijo = re.sub(r"_REV\d+$", "", stem, flags=re.I)
+    blob = contenido.encode("utf-8")
+    for numero in range(10001):
+        candidato = nombre if numero == 0 else f"{prefijo}_REV{numero}.json"
+        ruta = _od_ruta_segura(raiz, destino / candidato)
+        try:
+            archivo = ruta.open("xb")
+        except FileExistsError:
+            continue
+        try:
+            with archivo:
+                archivo.write(blob)
+                archivo.flush()
+                os.fsync(archivo.fileno())
+        except Exception:
+            ruta.unlink(missing_ok=True)
+            raise
+        if hashlib.sha256(ruta.read_bytes()).digest() != hashlib.sha256(blob).digest():
+            raise OSError("No se ha podido verificar el archivo guardado. Revisa la carpeta antes de repetir.")
+        return ruta
+    raise FileExistsError("Hay demasiadas revisiones con ese nombre. Elige otro nombre.")
+
+
+def _od_mostrar_buscador():
+    with st.expander("☁️ Buscar JSON en OneDrive", expanded=False):
+        st.caption("Biblioteca: ESCANDALLOS MAINSA · carpeta sincronizada de OneDrive")
+        aviso = st.session_state.pop("_od_apertura_ok", None)
+        if aviso:
+            st.success(aviso)
+        if st.button("🔄 Actualizar archivos", key="od_actualizar"):
+            _od_inventario.clear()
+        try:
+            archivos, carpetas, errores = _od_inventario(str(_OD_ROOT))
+        except (OSError, ValueError) as exc:
+            st.warning(f"La biblioteca no está disponible: {exc}")
+            st.caption(f"Carpeta esperada: {_OD_ROOT}")
+            return
+        consulta = st.text_input("Buscar referencia, cliente o descripción", key="od_busqueda",
+                                 placeholder="Ej.: 81225 Ferrero")
+        encontrados = _od_buscar(archivos, consulta)
+        st.caption(f"{len(encontrados)} JSON encontrados · ordenados del más reciente al más antiguo")
+        if errores:
+            st.warning("Algunos archivos o subcarpetas no se pudieron consultar. Comprueba el acceso a OneDrive.")
+        if not encontrados:
+            st.info("No hay JSON que coincidan con la búsqueda.")
+            return
+        consulta_clave = _od_normalizar(consulta)
+        paginas = max(1, math.ceil(len(encontrados) / 50))
+        if st.session_state.get("_od_ultima_busqueda") != consulta_clave or st.session_state.get("od_pagina", 1) > paginas:
+            st.session_state.od_pagina = 1
+        st.session_state._od_ultima_busqueda = consulta_clave
+        pagina = int(st.number_input("Página de resultados", min_value=1, max_value=paginas,
+                                     value=1, step=1, key="od_pagina")) if paginas > 1 else 1
+        tramo = encontrados[(pagina - 1) * 50:pagina * 50]
+        opciones = [a["ruta"] for a in tramo]
+        if st.session_state.get("od_seleccion") not in opciones:
+            st.session_state.od_seleccion = opciones[0]
+        elegido = st.selectbox("JSON encontrados", opciones, key="od_seleccion")
+        meta = next(a for a in tramo if a["ruta"] == elegido)
+        fecha = datetime.fromtimestamp(meta["modificado"]).strftime("%d/%m/%Y %H:%M")
+        st.caption(f"Modificado: {fecha} · {meta['bytes'] / 1024:.1f} KB")
+        st.caption("Abrir sustituye el proyecto en pantalla. Guarda antes los cambios que quieras conservar.")
+        if st.button("📂 Abrir JSON seleccionado", key="od_abrir"):
+            try:
+                with st.spinner("Abriendo el proyecto de OneDrive…"):
+                    datos, firma = _od_leer(_OD_ROOT, elegido)
+                    normalizar_import(datos)
+                st.session_state._last_import_hash = firma
+                st.session_state._od_origen = elegido
+                st.session_state._od_carpeta_abierta = str(Path(elegido).parent)
+                st.session_state._od_apertura_ok = f"Proyecto abierto: {Path(elegido).name}"
+                # Cambia la identidad del uploader para que un archivo local anterior no vuelva a importarse.
+                st.session_state._od_uploader_generacion = int(st.session_state.get("_od_uploader_generacion", 0)) + 1
+                for clave in ("od_guardar_carpeta", "od_guardar_nombre", "_od_nombre_sugerido"):
+                    st.session_state.pop(clave, None)
+                st.rerun()
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                st.error(f"No se pudo abrir el JSON: {exc}")
+                st.caption("Si el archivo está solo en la nube, comprueba que OneDrive esté conectado.")
+
+
+def _od_mostrar_guardado():
+    with st.sidebar.expander("☁️ Guardar JSON en OneDrive", expanded=True):
+        st.caption("Guarda directamente en la carpeta sincronizada. Si el nombre existe, se crea una revisión nueva.")
+        try:
+            _, carpetas, _ = _od_inventario(str(_OD_ROOT))
+        except (OSError, ValueError):
+            st.warning("Conecta la carpeta ESCANDALLOS MAINSA de OneDrive para guardar aquí.")
+            return
+        abierto = st.session_state.get("_od_carpeta_abierta", ".")
+        if st.session_state.get("od_guardar_carpeta") not in carpetas:
+            st.session_state.od_guardar_carpeta = abierto if abierto in carpetas else carpetas[0]
+        carpeta = st.selectbox("Carpeta de destino", carpetas, index=carpetas.index(abierto) if abierto in carpetas else 0,
+                               format_func=lambda x: "ESCANDALLOS MAINSA" if x == "." else x, key="od_guardar_carpeta")
+        sugerido = st.session_state.get("_export_filename") or "Escandallo.json"
+        anterior = st.session_state.get("_od_nombre_sugerido")
+        if anterior != sugerido:
+            if st.session_state.get("od_guardar_nombre") in (None, anterior):
+                st.session_state.od_guardar_nombre = sugerido
+            st.session_state._od_nombre_sugerido = sugerido
+        st.session_state.setdefault("od_guardar_nombre", sugerido)
+        nombre = st.text_input("Nombre del JSON", key="od_guardar_nombre")
+        cache = st.session_state.get("_calc_cache")
+        listo = bool(isinstance(cache, dict) and cache.get("res_final") and
+                     st.session_state.get("_calc_last_signature") == _calc_project_signature())
+        if not listo:
+            st.info("Pulsa 🧮 Calcular para guardar el proyecto con sus costes y auditoría actualizados.")
+        if st.button("💾 Guardar nueva versión", key="od_guardar", disabled=not listo):
+            try:
+                datos, firma = _compute_export_payload()
+                contenido = json.dumps(datos, indent=4, ensure_ascii=False)
+                ruta = _od_guardar(_OD_ROOT, carpeta, nombre, contenido)
+                _od_inventario.clear()
+                st.session_state._od_ultimo_guardado = str(ruta)
+                st.session_state._od_guardado_hash = firma
+            except (OSError, ValueError, TypeError) as exc:
+                st.error(f"No se pudo guardar el JSON: {exc}")
+        if st.session_state.get("_od_guardado_hash") == st.session_state.get("_export_hash") and st.session_state.get("_od_ultimo_guardado"):
+            st.success(f"Guardado y verificado en la carpeta OneDrive: {Path(st.session_state._od_ultimo_guardado).name}")
+        st.caption("La subida a la nube la realiza OneDrive. Si está pausado o sin conexión, sincronizará al reanudarse.")
+
+
 def _mark_json_download():
     """Marca en session_state que el JSON se ha descargado (para no olvidarse)."""
     st.session_state._json_downloaded = True
@@ -2170,6 +2500,8 @@ with st.sidebar:
     # =========================================================
     # Aviso + botón (sidebar) sobre materia prima importada vs tarifa actual
     # =========================================================
+    if st.session_state.get("_import_sin_tarifas", False):
+        st.warning("El JSON no incluye db_precios: se usa la tarifa V45. No se pueden recuperar sus costes históricos.")
     if bool(st.session_state.get("_tarifa_mp_mismatch", False)):
         st.warning(
             "⚠️ Materia prima del proyecto ≠ tarifa actual. "
@@ -2178,10 +2510,12 @@ with st.sidebar:
         if st.button("🔁 Actualizar materia prima a tarifa actual", use_container_width=True, key="btn_update_mp_sidebar"):
             _aplicar_tarifa_actual_materia_prima()
             st.success("Materia prima actualizada a tarifa actual.")
-        st.caption("Actualiza SOLO: Cartoncillo, Planchas, Rígidos y Peliculado.")
+        st.caption("Actualiza Cartoncillo, Planchas, Rígidos y Peliculado. Las familias históricas conservan su catálogo V44; para pasar a V45, elige expresamente una nueva familia y calidad. Después pulsa Calcular.")
+
+    _od_mostrar_buscador()
 
     with st.expander("📥 Importar JSON", expanded=False):
-        uploaded = st.file_uploader("Subir JSON", type=["json"], key="uploader_json")
+        uploaded = st.file_uploader("Subir JSON", type=["json"], key=f"uploader_json_{st.session_state.get('_od_uploader_generacion', 0)}")
         if uploaded is not None:
             try:
                 raw = uploaded.getvalue()
@@ -2204,12 +2538,152 @@ with st.sidebar:
 # =========================================================
 # PESTAÑAS (SIEMPRE ADMIN)
 # =========================================================
-tab_calculadora, tab_costes, tab_auditoria, tab_debug = st.tabs(["🧮 Calculadora", "💰 Base de Datos", "🧾 Auditoría cálculos", "🔍 Desglose"])
+def _aud_importe(valor, decimales=2):
+    return f"{float(valor):,.{decimales}f}".replace(",", "X").replace(".", ",").replace("X", ".") + " €"
+
+
+def _aud_linea(lineas, concepto, grupo, consumo, unidad, tarifa, descuento, coste, detalle=""):
+    """Registra operandos y resultado del motor en el momento del cálculo."""
+    linea = {"Concepto": str(concepto), "Grupo": grupo, "Consumo": float(consumo),
+             "Unidad": unidad, "Tarifa (€)": float(tarifa), "Descuento (%)": float(descuento),
+             "Coste neto (€)": float(coste), "Detalle": str(detalle)}
+    lineas.append(linea)
+    return linea
+
+
+def _aud_tabla(lineas, key, cantidad=None):
+    if not lineas:
+        st.caption("Sin partidas para este apartado.")
+        return
+    tabla = pd.DataFrame(lineas).drop(columns=["Grupo"], errors="ignore")
+    if cantidad:
+        tabla["€/expositor"] = tabla["Coste neto (€)"] / float(cantidad)
+    for col in ("Tarifa (€)", "Coste neto (€)", "€/expositor"):
+        if col in tabla:
+            tabla[col] = tabla[col].map(lambda x: _aud_importe(x, 4 if col != "Coste neto (€)" else 2))
+    if "Consumo" in tabla:
+        tabla["Consumo"] = tabla["Consumo"].map(lambda x: f"{x:,.4f}".replace(",", "X").replace(".", ",").replace("X", ".").rstrip("0").rstrip(","))
+    if "Descuento (%)" in tabla:
+        tabla["Descuento (%)"] = tabla["Descuento (%)"].map(lambda x: f"{x:g} %")
+    orden = [c for c in ("Concepto", "Consumo", "Unidad", "Tarifa (€)", "Descuento (%)", "Coste neto (€)", "€/expositor", "Detalle") if c in tabla]
+    st.dataframe(tabla[orden], hide_index=True, use_container_width=True,
+                 height=min(38 + 36 * len(tabla), 900), key=key)
+
+
+def _aud_por_cantidad(datos, cantidad):
+    if not isinstance(datos, dict):
+        return {}
+    return datos.get(cantidad, datos.get(str(cantidad), {})) or {}
+
+
+def _mostrar_auditoria_compras(compras, resumen):
+    st.subheader("🧾 Auditoría de compras")
+    st.caption("Costes internos del proyecto · importes netos de compra y producción · opcionales separados")
+    cache = st.session_state.get("_calc_cache")
+    es_calculo = isinstance(cache, dict) and bool(compras)
+    if not es_calculo:
+        compras = st.session_state.get("_imported_compras_legible") or {}
+        resumen = st.session_state.get("_imported_resumen_costes") or {}
+    cantidades = sorted({int(k) for k in compras if str(k).isdigit() and int(k) > 0})
+    if not cantidades:
+        st.info("Pulsa 🧮 Calcular para ver los costes por forma y las demás partidas del proyecto.")
+        return
+    # El selector utiliza las cantidades calculadas, nunca las entradas aún sin calcular.
+    if st.session_state.get("aud_compras_qty") not in cantidades:
+        st.session_state.pop("aud_compras_qty", None)
+    cantidad = st.selectbox("Cantidad de expositores a revisar", cantidades, key="aud_compras_qty")
+    comp = _aud_por_cantidad(compras, cantidad)
+    audit = comp.get("Auditoría compras") or {}
+    res = _aud_por_cantidad(resumen, cantidad)
+    firma = audit.get("firma") or (st.session_state.get("_calc_last_signature") if es_calculo else None)
+    pendiente = bool(firma and firma != _calc_project_signature())
+    if pendiente:
+        st.warning("Hay cambios pendientes de calcular. Esta auditoría conserva los costes, formas y tarifas del último cálculo. Pulsa 🧮 Calcular para actualizarla.")
+    if not es_calculo:
+        st.info("Se muestran los costes guardados en el JSON importado.")
+    if not audit:
+        st.warning("Este proyecto conserva un desglose antiguo sin consumos ni tarifas registrados. Puedes consultar sus costes guardados; pulsa 🧮 Calcular para generar la auditoría completa con las tarifas del proyecto.")
+        detalle = comp.get("Detalle piezas", [])
+        if detalle:
+            st.dataframe(pd.DataFrame(detalle), hide_index=True, use_container_width=True)
+        with st.expander("Materiales, procesos y partidas guardadas"):
+            st.json({k: v for k, v in comp.items() if k != "Detalle piezas"})
+        return
+    formas = audit.get("formas", [])
+    otras = audit.get("otras_partidas", [])
+    total_formas = sum(float(f["coste_total"]) for f in formas)
+    total_otras = sum(float(l["Coste neto (€)"]) for l in otras)
+    total = float(audit["coste_total"])
+    cabecera = audit.get("proyecto", {})
+    st.caption(f"Briefing: {cabecera.get('briefing') or '—'} · Cliente: {cabecera.get('cliente') or '—'} · {cabecera.get('descripcion') or 'Sin descripción'}")
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Coste total del proyecto", _aud_importe(total))
+    c2.metric("Coste por expositor", _aud_importe(total / cantidad, 4))
+    c3.metric("Costes de las formas", _aud_importe(total_formas))
+    st.markdown("### Costes por forma")
+    filas = []
+    avisos = list(audit.get("avisos", []))
+    for forma in formas:
+        materiales = sum(l["Coste neto (€)"] for l in forma["lineas"] if l["Grupo"] == "Material")
+        procesos = sum(l["Coste neto (€)"] for l in forma["lineas"] if l["Grupo"] == "Proceso")
+        filas.append({"Forma": f"{forma['id']} · {forma['nombre']}", "Formato (mm)": forma["formato"],
+                      "Materiales (€)": materiales, "Procesos (€)": procesos,
+                      "Total (€)": forma["coste_total"], "€/expositor": forma["coste_total"] / cantidad})
+        diferencia = sum(l["Coste neto (€)"] for l in forma["lineas"]) - forma["coste_total"]
+        if abs(diferencia) > 0.000001:
+            avisos.append(f"Forma {forma['id']}: el detalle no coincide con su coste ({_aud_importe(diferencia, 4)}).")
+        avisos.extend(f"Forma {forma['id']} · {x}" for x in forma.get("avisos", []))
+    if filas:
+        tabla = pd.DataFrame(filas)
+        for col in ("Materiales (€)", "Procesos (€)", "Total (€)", "€/expositor"):
+            tabla[col] = tabla[col].map(lambda x: _aud_importe(x, 4 if col == "€/expositor" else 2))
+        st.dataframe(tabla, hide_index=True, use_container_width=True, key="aud_compras_formas")
+    for forma in formas:
+        with st.expander(f"Forma {forma['id']} · {forma['nombre']} · {forma['formato']} mm · {_aud_importe(forma['coste_total'])}", expanded=len(formas) == 1):
+            st.caption(f"Pliegos/expositor: {forma['pliegos']:g} · Hojas netas: {forma['hojas_netas']} · Merma de proceso: {forma['merma_proceso']} · Hojas de producción: {forma['hojas_produccion']} · Tiradas: {forma['tiradas']}")
+            st.caption(f"Merma de impresión cara: {forma['merma_cara']} hojas/tirada · dorso: {forma['merma_dorso']} hojas/tirada · Pisadas de corte/stamping: {forma['pisadas']}")
+            _aud_tabla(forma["lineas"], f"aud_lineas_{cantidad}_{forma['id']}")
+            st.caption("Consumos con las mermas aplicadas. El coste neto ya incorpora el descuento mostrado. En offset, la tarifa es el importe por tinta calculado para las hojas de cada tirada.")
+    st.markdown("### Otros costes del proyecto")
+    _aud_tabla(otras, f"aud_otras_{cantidad}", cantidad)
+    st.markdown("### Comprobación del total")
+    diferencia = total_formas + total_otras - total
+    st.write(f"Formas {_aud_importe(total_formas)} + otras partidas {_aud_importe(total_otras)} = {_aud_importe(total_formas + total_otras)}")
+    if abs(diferencia) <= 0.000001:
+        st.success("El desglose coincide con el coste total del cálculo. Diferencia: 0,00 €.")
+    else:
+        st.error(f"El desglose no coincide con el motor. Diferencia: {_aud_importe(diferencia, 4)}.")
+    if res.get("totales"):
+        diferencia_resumen = float(res["totales"].get("coste_total_compra_estimado", total)) - total
+        if abs(diferencia_resumen) > 0.00011:
+            st.error(f"El resumen de costes guardado difiere de esta auditoría en {_aud_importe(diferencia_resumen, 4)}.")
+    if avisos:
+        with st.expander(f"⚠️ Revisar {len(avisos)} observaciones", expanded=True):
+            for aviso in dict.fromkeys(avisos):
+                st.warning(aviso)
+    opcionales = audit.get("opcionales", [])
+    if opcionales:
+        with st.expander("Opcionales separados · rellenado y armado"):
+            _aud_tabla(opcionales, f"aud_opcionales_{cantidad}", cantidad)
+            st.caption("Costes internos opcionales, fuera del total principal.")
+    venta = audit.get("referencias_venta", [])
+    if venta:
+        with st.expander("Referencias de venta · fuera del coste de compra"):
+            st.caption("Estos importes son de venta. No se suman al coste de esta auditoría.")
+            tabla_venta = pd.DataFrame(venta)
+            tabla_venta["Importe de venta (€)"] = tabla_venta["Importe de venta (€)"].map(_aud_importe)
+            st.dataframe(tabla_venta, hide_index=True, use_container_width=True)
+    with st.expander("Detalle técnico guardado del cálculo"):
+        st.json(audit)
+
+
+tab_calculadora, tab_costes, tab_auditoria = st.tabs(["🧮 Calculadora", "💰 Base de Datos", "🧾 Auditoría de compras"])
 
 # =========================================================
 # TAB COSTES (siempre visible)
 # =========================================================
 with tab_costes:
+    st.caption("Edita las tarifas del proyecto. Se conservan al descargar su JSON y volver a importarlo. Después de cambiarlas, pulsa 🧮 Calcular.")
     col_c1, col_c2 = st.columns(2)
     db = st.session_state.db_precios
 
@@ -2231,7 +2705,7 @@ with tab_costes:
             for k, v in db["cartoncillo"].items():
                 if k != "Ninguno":
                     db["cartoncillo"][k]["precio_kg"] = st.number_input(
-                        f"{k} (€/kg)", value=float(v["precio_kg"]), key=f"cost_cart_{k}"
+                        f"{k} (€/kg)", value=float(v["precio_kg"]), min_value=0.0, step=0.0001, format="%.4f", key=f"cost_cart_{k}"
                     )
 
         with st.expander("🧱 Ondulado (€/m²) y Rígidos (€/hoja)", expanded=True):
@@ -2251,7 +2725,7 @@ with tab_costes:
                     cols = st.columns(len(vv)) if vv else st.columns(1)
                     for idx, (sk, sv) in enumerate(vv.items()):
                         db["planchas"][k][sk] = cols[idx].number_input(
-                            sk, value=float(sv), key=f"cost_pl_{k}_{sk}"
+                            sk, value=float(sv), min_value=0.0, step=0.0001, format="%.4f", key=f"cost_pl_{k}_{sk}"
                         )
 
             st.markdown("---")
@@ -2260,7 +2734,7 @@ with tab_costes:
                 if k != "Ninguno":
                     c1, c2, c3 = st.columns([3, 1, 1])
                     db["rigidos"][k]["precio_ud"] = c1.number_input(
-                        f"{k} (€/hoja)", value=float(v["precio_ud"]), key=f"cost_rig_{k}"
+                        f"{k} (€/hoja)", value=float(v["precio_ud"]), min_value=0.0, step=0.0001, format="%.4f", key=f"cost_rig_{k}"
                     )
                     db["rigidos"][k]["w"] = int(c2.number_input("w", value=int(v["w"]), key=f"rigw_{k}"))
                     db["rigidos"][k]["h"] = int(c3.number_input("h", value=int(v["h"]), key=f"righ_{k}"))
@@ -2269,7 +2743,7 @@ with tab_costes:
         with st.expander("✨ Acabados (otros)", expanded=True):
             # Laminado digital se mantiene aquí (no NARBA)
             db["laminado_digital"] = st.number_input(
-                "Laminado Digital", value=float(db.get("laminado_digital", 3.5)), key="cost_lam_dig"
+                "Laminado Digital", value=float(db.get("laminado_digital", 3.5)), min_value=0.0, step=0.0001, format="%.4f", key="cost_lam_dig"
             )
 
         with st.expander("🧩 NARBA (Procesos: Contracolado · Peliculado · Troquelado)", expanded=True):
@@ -2300,7 +2774,7 @@ with tab_costes:
             st.markdown("##### Peliculado (€/m²)")
             for k, v in db["peliculado"].items():
                 if k != "Sin Peliculado":
-                    db["peliculado"][k] = st.number_input(f"{k}", value=float(v), key=f"cost_pel_{k}")
+                    db["peliculado"][k] = st.number_input(f"{k}", value=float(v), min_value=0.0, step=0.0001, format="%.4f", key=f"cost_pel_{k}")
 
             st.markdown("---")
             st.markdown("##### Troquelado")
@@ -2308,30 +2782,83 @@ with tab_costes:
                 st.markdown(f"**{k}**")
                 c_arr, c_tir = st.columns(2)
                 db["troquelado"][k]["arranque"] = c_arr.number_input(
-                    "Arranque (€)", value=float(v["arranque"]), key=f"trq_arr_{k}"
+                    "Arranque (€)", value=float(v["arranque"]), min_value=0.0, step=0.0001, format="%.4f", key=f"trq_arr_{k}"
                 )
                 db["troquelado"][k]["tiro"] = c_tir.number_input(
-                    "Tiro (€/h)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}"
+                    "Tiro (€/hoja)", value=float(v["tiro"]), format="%.4f", key=f"trq_tir_{k}"
                 )
 
         with st.expander("✂️ Plotter", expanded=True):
             db["plotter"]["precio_hoja"] = st.number_input(
-                "Corte Plotter (€/hoja)", value=float(db["plotter"]["precio_hoja"]), key="plotter_precio"
+                "Corte Plotter (€/hoja)", value=float(db["plotter"]["precio_hoja"]), min_value=0.0, step=0.0001, format="%.4f", key="plotter_precio"
             )
 
-        with st.expander("🖨️ Impresión Offset (info)", expanded=True):
-            st.markdown(
-                """
-<div class="warn">
-<b>Nueva regla Offset</b><br>
-• Mínimo: <b>85€ por tinta</b> (hasta 100 hojas)<br>
-• Hojas extra (101..500): <b>0,0875€ / hoja / tinta</b><br>
-• 501..2000: <b>120€ por tinta</b><br>
-• &gt;2000: <b>+0,015€ / hoja / tinta</b><br>
-</div>
-                """,
-                unsafe_allow_html=True
-            )
+        with st.expander("✨ Stamping", expanded=True):
+            for campo, etiqueta in (("pelicula_m2", "Película stamping (€/m²)"),
+                                    ("pisada", "Pisada stamping (€/pisada)"),
+                                    ("arreglo", "Arreglo stamping (€)")):
+                db["stamping"][campo] = st.number_input(etiqueta, min_value=0.0,
+                    value=float(db["stamping"][campo]), step=0.0001, format="%.4f", key=f"tarifa_stamping_{campo}")
+
+        with st.expander("🖨️ Impresión y flexografía", expanded=True):
+            campos = [
+                ("impresion_digital", "precio_m2", "Impresión digital (€/m²)"),
+                ("offset", "minimo_tinta", "Offset · mínimo hasta 100 hojas (€/tinta)"),
+                ("offset", "extra_101_500", "Offset · extra hojas 101–500 (€/hoja/tinta)"),
+                ("offset", "base_501_2000", "Offset · base 501–2000 hojas (€/tinta)"),
+                ("offset", "extra_2001", "Offset · extra desde hoja 2001 (€/hoja/tinta)"),
+                ("flexografia", "arreglo", "Arreglo flexografía (€/plancha)"),
+            ]
+            for categoria, campo, etiqueta in campos:
+                db[categoria][campo] = st.number_input(etiqueta, min_value=0.0,
+                    value=float(db[categoria][campo]), step=0.0001, format="%.4f", key=f"tarifa_{categoria}_{campo}")
+            st.markdown("##### Tinta especial FR24 por forma")
+            for pid, pieza in st.session_state.piezas_dict.items():
+                pieza["fr24_rate"] = st.number_input(f"{pieza.get('nombre', f'Forma {pid}')} · FR24 (€/m²)",
+                    min_value=0.0, value=float(pieza.get("fr24_rate", 0.05)),
+                    step=0.0001, format="%.4f", key=f"fr24r_{pid}")
+
+        with st.expander("👷 Mano de obra", expanded=True):
+            for campo, etiqueta in (("manipulado_hora", "Manipulado (€/hora)"),
+                                    ("rellenado_hora", "Rellenado (€/hora)"), ("armado_hora", "Armado (€/hora)")):
+                db["mano_obra"][campo] = st.number_input(etiqueta, min_value=0.0,
+                    value=float(db["mano_obra"][campo]), step=0.01, format="%.4f", key=f"tarifa_mano_obra_{campo}")
+
+        with st.expander("📦 Tarifas de embalajes automáticos"):
+            st.caption("Se mantienen las fórmulas de cada embalaje; puedes editar sus importes y coeficientes.")
+            db["embalajes"]["multiplicador_dd"] = st.number_input("Multiplicador D/D",
+                min_value=0.0, value=float(db["embalajes"]["multiplicador_dd"]),
+                step=0.01, format="%.4f", key="tarifa_embalajes_multiplicador_dd")
+            etiquetas = {"guaina": "Guaina", "plano": "En plano", "volumen": "En volumen", "aros": "Aros de refuerzo"}
+            campos = {"arreglo": "Arreglo / coeficiente fijo (€)", "arreglo_m2": "Arreglo por superficie (€/m²)",
+                      "precio_ud": "Importe por unidad (€/ud)", "precio_m2": "Importe por superficie (€/m²)",
+                      "exponente": "Exponente de cantidad"}
+            for bloque, titulo in etiquetas.items():
+                st.markdown(f"**{titulo}**")
+                for campo, valor in db["embalajes"][bloque].items():
+                    db["embalajes"][bloque][campo] = st.number_input(campos.get(campo, campo),
+                        min_value=0.0, value=float(valor), step=0.0001,
+                        format="%.9f" if bloque == "aros" else "%.4f", key=f"tarifa_embalajes_{bloque}_{campo}")
+
+    with col_c1:
+        with st.expander("🧰 Materiales extra MAINSA"):
+            st.caption("Tarifas para añadir nuevas partidas. Las partidas ya añadidas conservan su precio editable en Calculadora.")
+            for nombre, valor in db["extras_base"].items():
+                db["extras_base"][nombre] = st.number_input(f"{nombre} (€/ud compra)", min_value=0.0,
+                    value=float(valor), step=0.0001, format="%.4f", key=f"tarifa_extras_{nombre}")
+        with st.expander("🧩 Catálogo FLEXICO"):
+            st.caption("Tarifas para nuevas partidas FLEXICO. Las partidas existentes conservan su precio de proyecto.")
+            for codigo, valor in db["flexico"].items():
+                descripcion = PRODUCTOS_FLEXICO.get(codigo, {}).get("desc", codigo)
+                db["flexico"][codigo] = st.number_input(f"{codigo} · {descripcion} (€/ud compra)",
+                    min_value=0.0, value=float(valor), step=0.0001, format="%.4f", key=f"tarifa_flexico_{codigo}")
+        with st.expander("🗃️ Otras tarifas NARBA de referencia"):
+            st.caption("Importes de referencia conservados en el JSON. El cálculo actual no los aplica como partidas adicionales.")
+            for campo, etiqueta in (("peliculado_menor_50x70_hoja", "Peliculado menor de 50×70 (€/hoja)"),
+                                    ("guillotina_impresion_corte", "Guillotina impresión (€/corte)"),
+                                    ("guillotina_plancha_corte", "Guillotina plancha (€/corte)")):
+                db["narba"][campo] = st.number_input(etiqueta, min_value=0.0,
+                    value=float(db["narba"][campo]), step=0.0001, format="%.4f", key=f"tarifa_narba_{campo}")
 
 
 # =========================================================
@@ -2686,6 +3213,8 @@ with tab_calculadora:
         """
         for _field, _key in {
             "pf": f"pf_{pid}", "pd": f"pd_{pid}",
+            # Leer la selección nueva antes de validar el digital directo sobre rígido.
+            "im": f"im_{pid}",
             "ba": f"ba_{pid}", "ba_d": f"ba_d_{pid}",
             "tipo_base": f"tb_{pid}",
             "mat_rigido": f"mrig_{pid}",
@@ -2876,7 +3405,7 @@ with tab_calculadora:
                 f"Stamping {int(_p.get('stamping_w', 0) or 0)}×{int(_p.get('stamping_h', 0) or 0)} mm"
             )
         if bool(_p.get("fr24", False)):
-            _extras_tags.append(f"FR24 {float(_p.get('fr24_rate', 0.05) or 0.0):.4f} €/ud")
+            _extras_tags.append(f"FR24 {float(_p.get('fr24_rate', 0.05) or 0.0):.4f} €/m²")
         if bool(_p.get("contracolado_a_mano", False)):
             _extras_tags.append("Contracolado a mano")
         if _doble_impresion_activa:
@@ -2979,17 +3508,7 @@ with tab_calculadora:
             # -----------------------------------------------------
             p["fr24"] = st.checkbox("🧪 Tinta especial FR24 (extra €/m²)", value=bool(p.get("fr24", False)), key=f"fr24_{p_id}")
             if bool(p["fr24"]):
-                p["fr24_rate"] = float(st.number_input(
-                    "Coste extra FR24 (€/m²)",
-                    min_value=0.0,
-                    max_value=999.0,
-                    value=float(p.get("fr24_rate", 0.05)),
-                    step=0.01,
-                    key=f"fr24r_{p_id}",
-                ))
-            else:
-                # Mantener el último valor configurado (si existe) para no perderlo al desactivar.
-                p["fr24_rate"] = float(p.get("fr24_rate", 0.05))
+                st.caption(f"Tarifa FR24: {float(p.get('fr24_rate', 0.05)):.4f} €/m² · editable en Base de Datos → Impresión y flexografía.")
 
             # -----------------------------------------------------
             # STAMPING (película + calor) - proceso poco habitual
@@ -3003,7 +3522,7 @@ with tab_calculadora:
                     p["stamping_h"] = int(st.number_input("Alto stamping (mm)", min_value=0, max_value=5000, value=int(p.get("stamping_h", 0)), step=1, key=f"stamph_{p_id}"))
                 with col_s3:
                     p["stamping_cobrar_arreglo"] = bool(st.checkbox("Cobrar arreglo stamping", value=bool(p.get("stamping_cobrar_arreglo", True)), key=f"stamparr_{p_id}"))
-                st.caption("Tarifa: arreglo 168€ · pisada 0,21€/hoja · película 0,39€/m² (rectángulo) · hojas = hp_corte (ajustado por piezas por troquel).")
+                st.caption(f"Tarifa stamping: arreglo {_aud_importe(float(db.get('stamping', {}).get('arreglo', 168.0)))} · pisada {_aud_importe(float(db.get('stamping', {}).get('pisada', 0.21)), 4)}/pisada · película {_aud_importe(float(db.get('stamping', {}).get('pelicula_m2', 0.39)), 4)}/m². Pisadas ajustadas por piezas por troquel.")
             else:
                 p["stamping_w"] = int(p.get("stamping_w", 0))
                 p["stamping_h"] = int(p.get("stamping_h", 0))
@@ -3173,7 +3692,7 @@ with tab_calculadora:
                         st.caption("Los materiales rígidos se pueden imprimir en Digital desde el selector 'Impresión Cara'.")
 
             p["contracolado_a_mano"] = st.checkbox(
-                "🖐️ Contracolado a mano (NARBA 2026 · 0,6864 €/m²)",
+                f"🖐️ Contracolado a mano (NARBA · {_tarifa('narba', 'contracolado_a_mano_m2'):.4f} €/m²)",
                 value=bool(p.get("contracolado_a_mano", False)),
                 key=f"contramano_{p_id}",
                 help="Aplica la tarifa de contracolado a mano por m², independiente del material."
@@ -3293,7 +3812,7 @@ with tab_calculadora:
         if st.button("➕ Añadir Flexico", key="btn_add_flexico") and flx_sel != "---":
             cod = flx_sel.split(" - ")[0]
             prod = PRODUCTOS_FLEXICO[cod]
-            st.session_state.lista_extras_grabados.append({"nombre": f"FLEXICO: {prod['desc']}", "coste": float(prod["precio"]), "cantidad": 1.0, "tipo": "flexico"})
+            st.session_state.lista_extras_grabados.append({"nombre": f"FLEXICO: {prod['desc']}", "coste": float(db["flexico"][cod]), "cantidad": 1.0, "tipo": "flexico"})
             st.rerun()
 
     with c_add_manual:
@@ -3370,7 +3889,7 @@ with tab_calculadora:
                     elif emb["tipo"] == "Embalaje Guaina (Automático)":
                         L, W, H = emb["dims"]["L"], emb["dims"]["W"], emb["dims"]["H"]
                         sup_m2 = ((2*(L+W)*H) + (L*W)) / 1_000_000 if (L>0 and W>0 and H>0) else 0.0
-                        coste_auto = (sup_m2 * 0.70) + (30 / q_calc) if q_calc>0 else 0.0
+                        coste_auto = (sup_m2 * _tarifa("embalajes", "precio_m2", "guaina")) + (_tarifa("embalajes", "arreglo", "guaina") / q_calc) if q_calc>0 else 0.0
                         coste_auto *= mult
                         emb["costes"][q] = float(coste_auto)
                         cols[idx].metric(f"{q} uds", f"{coste_auto:.3f}€")
@@ -3445,7 +3964,7 @@ with tab_calculadora:
             st.session_state.mermas_imp_digital_manual[q] = int(
                 c2.number_input(
                     "Arranque impresión DIGITAL (hojas)",
-                    value=int(st.session_state.mermas_imp_digital_manual.get(q, 0)),
+                    value=_get_merma_impresion_digital_hojas(q),
                     key=f"mid_{q}",
                 )
             )
@@ -3574,6 +4093,9 @@ if lista_cants:
 # - Si NO se ha pulsado "🧮 Calcular", reutilizamos el último cálculo guardado en session_state._calc_cache.
 # - Esto evita recalcular en cada cambio de widget (especialmente en "Formas").
 # =========================================================
+if isinstance(st.session_state.get("_calc_cache"), dict) and st.session_state._calc_cache.get("_precios_venta_version") != 1:
+    st.session_state._calc_requested = True
+
 if isinstance(st.session_state.get("_calc_cache"), dict) and not bool(st.session_state.get("_calc_requested", False)):
     _c = st.session_state._calc_cache
     res_final = _c.get("res_final", []) or []
@@ -3601,6 +4123,10 @@ else:
 
                 coste_f = 0.0
                 det_f = []
+                aud_formas = []
+                aud_otras = []
+                aud_opcionales = []
+                aud_venta = []
                 debug_log = []
 
 
@@ -3641,6 +4167,9 @@ else:
                     c_troquel_taller = 0.0
                     c_plotter = 0.0
                     c_stamping = 0.0
+                    aud_lineas = []
+                    aud_avisos = []
+                    merma_cara = merma_d = 0
 
                     # Impresiones por cantidad (multi-tirada) - POR FORMATO:
                     # Solo afecta a coste de impresión y a la merma extra de cartoncillo por impresión.
@@ -3763,6 +4292,12 @@ else:
                             else:
                                 n_pl = math.ceil(n_net * 1.02)
                             c_rigido = n_pl * precio_hoja
+                            _aud_linea(aud_lineas, "Rígido manual" if rigido_manual_activo else p.get("mat_rigido", "Rígido"),
+                                "Material", n_pl, "hojas", float(p.get("rig_precio_ud", 0.0)) if rigido_manual_activo else float(info["precio_ud"]),
+                                0.0 if rigido_manual_activo else float(db_desc.get("ondulado_rigidos", 0.0)), c_rigido,
+                                f"Hoja {max(mw, mh):g} × {min(mw, mh):g} mm · {by} piezas/hoja · {n_net} hojas netas + {n_pl - n_net} de merma")
+                            if fallback_rigido_manual:
+                                aud_avisos.append(aviso_rigido_manual)
 
                             log_rigido = {
                                 "qty": q_n,
@@ -3785,18 +4320,36 @@ else:
                             else:
                                 m2_plancha = m2_papel
                             c_ondulado = hp_produccion * m2_plancha * float(db["planchas"][p["pl"]][p.get("ap","B/C")]) * f_or
+                            _aud_linea(aud_lineas, f"Ondulado · {p['pl']} · {p.get('ap', 'B/C')}", "Material",
+                                hp_produccion * m2_plancha, "m²", float(db["planchas"][p["pl"]][p.get("ap", "B/C")]),
+                                float(db_desc.get("ondulado_rigidos", 0.0)), c_ondulado,
+                                f"{hp_produccion} hojas × {m2_plancha:g} m²/hoja")
                             # Flexografía: coste fijo por plancha (no depende de cantidad)
                             if bool(p.get("flexografia", False)):
                                 c_ondulado += float(db.get("flexografia", {}).get("arreglo", 180.0))
+                                _aud_linea(aud_lineas, "Arreglo flexografía", "Proceso", 1, "arreglo",
+                                    float(db.get("flexografia", {}).get("arreglo", 180.0)), 0.0,
+                                    float(db.get("flexografia", {}).get("arreglo", 180.0)), "El motor lo incluye en el coste de ondulado; aquí se identifica como proceso.")
 
                     if p.get("pf", "Ninguno") != "Ninguno" and m2_papel > 0:
                         c_cart_cara = hp_papel_f * m2_papel * (float(p.get("gf", 0))/1000.0) * float(db["cartoncillo"][p["pf"]]["precio_kg"]) * f_cart
+                        _aud_linea(aud_lineas, f"Cartoncillo cara · {p['pf']}", "Material",
+                            hp_papel_f * m2_papel * (float(p.get("gf", 0)) / 1000.0), "kg",
+                            float(db["cartoncillo"][p["pf"]]["precio_kg"]), float(db_desc.get("cartoncillo", 0.0)), c_cart_cara,
+                            f"{hp_papel_f} hojas × {m2_papel:g} m² × {p.get('gf', 0)} g/m²")
                     if p.get("pd", "Ninguno") != "Ninguno" and m2_papel > 0:
                         c_cart_dorso = hp_papel_d * m2_papel * (float(p.get("gd", 0))/1000.0) * float(db["cartoncillo"][p["pd"]]["precio_kg"]) * f_cart
+                        _aud_linea(aud_lineas, f"Cartoncillo dorso · {p['pd']}", "Material",
+                            hp_papel_d * m2_papel * (float(p.get("gd", 0)) / 1000.0), "kg",
+                            float(db["cartoncillo"][p["pd"]]["precio_kg"]), float(db_desc.get("cartoncillo", 0.0)), c_cart_dorso,
+                            f"{hp_papel_d} hojas × {m2_papel:g} m² × {p.get('gd', 0)} g/m²")
 
                     peg_rate = _get_contracolado_rate_m2(p, db, f_narba)
                     if capas_contracolado > 0 and m2_papel > 0:
                         c_contracolado = hp_produccion * m2_papel * peg_rate * capas_contracolado
+                        _aud_linea(aud_lineas, "Contracolado a mano" if p.get("contracolado_a_mano") else "Contracolado", "Proceso",
+                            hp_produccion * m2_papel * capas_contracolado, "m²", _get_contracolado_rate_m2(p, db, 1.0),
+                            float(db_desc.get("narba", 0.0)), c_contracolado, f"{capas_contracolado} capas × {hp_produccion} hojas × {m2_papel:g} m²")
 
                     c_imp_cara = 0.0
                     c_imp_dorso = 0.0
@@ -3815,16 +4368,28 @@ else:
                         for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                             nb_run = int(q_run) * float(p.get("pliegos", 1.0))
                             hp_imp_run = nb_run + merma_imp_digital_hojas
-                            c_imp_cara += hp_imp_run * m2_papel * 6.5
+                            coste_tirada = hp_imp_run * m2_papel * _tarifa("impresion_digital", "precio_m2")
+                            c_imp_cara += coste_tirada
+                            _aud_linea(aud_lineas, "Impresión digital cara", "Proceso", hp_imp_run * m2_papel, "m²",
+                                _tarifa("impresion_digital", "precio_m2"), 0.0, coste_tirada,
+                                f"Tirada {q_run} expositores · {nb_run:g} hojas netas + {merma_imp_digital_hojas} de merma")
                             if fr24_enabled and m2_papel > 0:
                                 fr24_m2_total += hp_imp_run * m2_papel
                             if bool(p.get("ld", False)):
-                                c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
+                                coste_laminado = hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
+                                c_pel_total += coste_laminado
+                                _aud_linea(aud_lineas, "Laminado digital cara", "Proceso", hp_imp_run * m2_papel, "m²",
+                                    float(db.get("laminado_digital", 3.5)), 0.0, coste_laminado, f"Tirada {q_run} expositores · incluye merma digital")
                     elif p.get("im","No") == "Offset":
                         tintas_cara = int(p.get("nt",0)) + (1 if bool(p.get("ba",False)) else 0)
                         for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                             nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
-                            c_imp_cara += coste_offset_por_tinta(int(nb_run)) * tintas_cara
+                            coste_tinta = coste_offset_por_tinta(int(nb_run))
+                            coste_tirada = coste_tinta * tintas_cara
+                            c_imp_cara += coste_tirada
+                            _aud_linea(aud_lineas, "Impresión offset cara", "Proceso", tintas_cara, "tintas/barniz",
+                                coste_tinta, 0.0, coste_tirada,
+                                f"Tirada {q_run} expositores · {nb_run} hojas · coste por tinta según tramo offset")
                             if fr24_enabled and m2_papel > 0:
                                 fr24_m2_total += nb_run * m2_papel
 
@@ -3832,16 +4397,28 @@ else:
                         for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                             nb_run = int(q_run) * float(p.get("pliegos", 1.0))
                             hp_imp_run = nb_run + merma_imp_digital_hojas
-                            c_imp_dorso += hp_imp_run * m2_papel * 6.5
+                            coste_tirada = hp_imp_run * m2_papel * _tarifa("impresion_digital", "precio_m2")
+                            c_imp_dorso += coste_tirada
+                            _aud_linea(aud_lineas, "Impresión digital dorso", "Proceso", hp_imp_run * m2_papel, "m²",
+                                _tarifa("impresion_digital", "precio_m2"), 0.0, coste_tirada,
+                                f"Tirada {q_run} expositores · {nb_run:g} hojas netas + {merma_imp_digital_hojas} de merma")
                             if fr24_enabled and m2_papel > 0:
                                 fr24_m2_total += hp_imp_run * m2_papel
                             if bool(p.get("ld_d", False)):
-                                c_pel_total += hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
+                                coste_laminado = hp_imp_run * m2_papel * float(db.get("laminado_digital", 3.5))
+                                c_pel_total += coste_laminado
+                                _aud_linea(aud_lineas, "Laminado digital dorso", "Proceso", hp_imp_run * m2_papel, "m²",
+                                    float(db.get("laminado_digital", 3.5)), 0.0, coste_laminado, f"Tirada {q_run} expositores · incluye merma digital")
                     elif p.get("im_d","No") == "Offset":
                         tintas_dorso = int(p.get("nt_d",0)) + (1 if bool(p.get("ba_d",False)) else 0)
                         for q_run in (partes_imp_units if partes_imp_units else [int(q_n)]):
                             nb_run = int(round(int(q_run) * float(p.get("pliegos", 1.0))))
-                            c_imp_dorso += coste_offset_por_tinta(int(nb_run)) * tintas_dorso
+                            coste_tinta = coste_offset_por_tinta(int(nb_run))
+                            coste_tirada = coste_tinta * tintas_dorso
+                            c_imp_dorso += coste_tirada
+                            _aud_linea(aud_lineas, "Impresión offset dorso", "Proceso", tintas_dorso, "tintas/barniz",
+                                coste_tinta, 0.0, coste_tirada,
+                                f"Tirada {q_run} expositores · {nb_run} hojas · coste por tinta según tramo offset")
                             if fr24_enabled and m2_papel > 0:
                                 fr24_m2_total += nb_run * m2_papel
 
@@ -3851,13 +4428,18 @@ else:
                     if fr24_enabled and fr24_rate > 0 and fr24_m2_total > 0:
                         c_fr24 = fr24_m2_total * fr24_rate
                         c_imp_total += c_fr24
+                        _aud_linea(aud_lineas, "Tinta especial FR24", "Proceso", fr24_m2_total, "m²", fr24_rate, 0.0, c_fr24)
 
                     c_pel_cara = 0.0
                     c_pel_dorso = 0.0
                     if p.get("pel","Sin Peliculado") != "Sin Peliculado":
                         c_pel_cara = hp_produccion * m2_papel * float(db["peliculado"][p["pel"]]) * f_narba
+                        _aud_linea(aud_lineas, f"Peliculado cara · {p['pel']}", "Proceso", hp_produccion * m2_papel, "m²",
+                            float(db["peliculado"][p["pel"]]), float(db_desc.get("narba", 0.0)), c_pel_cara)
                     if p.get("pd","Ninguno") != "Ninguno" and p.get("pel_d","Sin Peliculado") != "Sin Peliculado":
                         c_pel_dorso = hp_produccion * m2_papel * float(db["peliculado"][p["pel_d"]]) * f_narba
+                        _aud_linea(aud_lineas, f"Peliculado dorso · {p['pel_d']}", "Proceso", hp_produccion * m2_papel, "m²",
+                            float(db["peliculado"][p["pel_d"]]), float(db_desc.get("narba", 0.0)), c_pel_dorso)
                     c_pel_total += (c_pel_cara + c_pel_dorso)
 
                     cor_sel = p.get("cor_default", "Troquelado")
@@ -3891,8 +4473,14 @@ else:
                         arr = float(db["troquelado"][cat]["arranque"]) * f_narba if bool(p.get("cobrar_arreglo", True)) else 0.0
                         tiro = float(db["troquelado"][cat]["tiro"]) * f_narba
                         c_troquel_taller = arr + (hp_corte * tiro)
+                        if bool(p.get("cobrar_arreglo", True)):
+                            _aud_linea(aud_lineas, "Troquelado · arranque", "Proceso", 1, "arranque",
+                                float(db["troquelado"][cat]["arranque"]), float(db_desc.get("narba", 0.0)), arr, cat)
+                        _aud_linea(aud_lineas, "Troquelado · tiro", "Proceso", hp_corte, "hojas",
+                            float(db["troquelado"][cat]["tiro"]), float(db_desc.get("narba", 0.0)), hp_corte * tiro, cat)
                     elif cor_sel == "Plotter":
                         c_plotter = hp_corte * float(db["plotter"]["precio_hoja"])
+                        _aud_linea(aud_lineas, "Corte plotter", "Proceso", hp_corte, "hojas", float(db["plotter"]["precio_hoja"]), 0.0, c_plotter)
                     else:
                         # "Sin corte": no suma coste de troquel ni plotter
                         pass
@@ -3909,9 +4497,41 @@ else:
                         pisada = float(db.get("stamping", {}).get("pisada", 0.21))
                         peli = float(db.get("stamping", {}).get("pelicula_m2", 0.39))
                         c_stamping = arr_s + (hp_corte * pisada) + (hp_corte * area_m2 * peli)
+                        if bool(p.get("stamping_cobrar_arreglo", True)):
+                            _aud_linea(aud_lineas, "Stamping · arreglo", "Proceso", 1, "arreglo", arr_s, 0.0, arr_s)
+                        _aud_linea(aud_lineas, "Stamping · pisadas", "Proceso", hp_corte, "pisadas", pisada, 0.0, hp_corte * pisada)
+                        _aud_linea(aud_lineas, "Stamping · película", "Proceso", hp_corte * area_m2, "m²", peli, 0.0,
+                            hp_corte * area_m2 * peli, f"{sw:g} × {sh:g} mm por pisada")
+                        if sw <= 0 or sh <= 0:
+                            aud_avisos.append("Stamping activo sin superficie completa: la película queda a cero.")
 
                     sub = c_cart_cara + c_cart_dorso + c_ondulado + c_rigido + c_contracolado + c_imp_total + c_pel_total + c_troquel_taller + c_plotter + c_stamping
                     coste_f += sub
+                    if w <= 0 or h <= 0:
+                        aud_avisos.append("Formato incompleto; revisar las medidas de la forma.")
+                    if has_cart_cara and float(p.get("gf", 0)) <= 0:
+                        aud_avisos.append("Cartoncillo cara seleccionado sin gramaje válido.")
+                    if has_cart_dorso and float(p.get("gd", 0)) <= 0:
+                        aud_avisos.append("Cartoncillo dorso seleccionado sin gramaje válido.")
+                    if im_cara == "Offset" and int(p.get("nt", 0)) <= 0 and not p.get("ba", False):
+                        aud_avisos.append("Impresión offset cara seleccionada sin tintas ni barniz.")
+                    if im_dorso == "Offset" and int(p.get("nt_d", 0)) <= 0 and not p.get("ba_d", False):
+                        aud_avisos.append("Impresión offset dorso seleccionada sin tintas ni barniz.")
+                    if fr24_enabled and fr24_rate <= 0:
+                        aud_avisos.append("FR24 activa con tarifa cero o negativa; confirmar que es intencionada.")
+                    if has_base_rigido and c_rigido == 0:
+                        aud_avisos.append("Rígido seleccionado sin coste: revisar hoja, encaje, tarifa y descuento.")
+                    for linea in aud_lineas:
+                        if linea["Consumo"] > 0 and linea["Tarifa (€)"] <= 0:
+                            aud_avisos.append(f"{linea['Concepto']}: tarifa cero o negativa; confirmar que es intencionada.")
+                    if float(p.get("pv_troquel", 0.0)) > 0:
+                        aud_venta.append({"Concepto": f"Troquel de venta · Forma {pid} · {p.get('nombre', '')}",
+                                          "Importe de venta (€)": float(p["pv_troquel"])})
+                    aud_formas.append({"id": int(pid), "nombre": p.get("nombre", ""),
+                        "formato": f"{max(h, w):g} × {min(h, w):g}", "pliegos": pl,
+                        "hojas_netas": nb, "merma_proceso": int(merma_proc_hojas), "hojas_produccion": hp_produccion,
+                        "merma_cara": merma_cara, "merma_dorso": merma_d, "tiradas": n_impresiones_qty,
+                        "pisadas": hp_corte, "lineas": aud_lineas, "avisos": aud_avisos, "coste_total": sub})
 
                     det_f.append({
                         "Pieza": p.get("nombre",""),
@@ -3940,20 +4560,37 @@ else:
 
                 c_ext = sum(float(e.get("coste",0.0)) * float(e.get("cantidad",1.0)) * q_n for e in st.session_state.lista_extras_grabados)
                 tot_cat["materiales"]["extras"] += c_ext
+                for extra in st.session_state.lista_extras_grabados:
+                    consumo_extra = float(extra.get("cantidad", 1.0)) * q_n
+                    precio_extra = float(extra.get("coste", 0.0))
+                    _aud_linea(aud_otras, f"Extra · {extra.get('nombre', '')}", "Material", consumo_extra,
+                        "ud", precio_extra, 0.0, precio_extra * float(extra.get("cantidad", 1.0)) * q_n)
 
-                c_mo_man = (seg_man_total/3600.0)*18.0*q_n
+                c_mo_man = (seg_man_total/3600.0)*_tarifa("mano_obra", "manipulado_hora")*q_n
                 c_mo_dif = (q_n * float(dif_ud))
                 c_mo = c_mo_man + c_mo_dif
                 tot_cat["procesos"]["manipulacion"] += c_mo_man
                 tot_cat["procesos"]["dificultad"] += c_mo_dif
+                if seg_man_total or c_mo_man:
+                    _aud_linea(aud_otras, "Manipulado", "Proceso", seg_man_total / 3600.0 * q_n,
+                        "horas", _tarifa("mano_obra", "manipulado_hora"), 0.0, c_mo_man)
+                if dif_ud or c_mo_dif:
+                    _aud_linea(aud_otras, "Dificultad", "Proceso", q_n, "expositores", float(dif_ud), 0.0, c_mo_dif)
 
                 # Opcionales (a parte): Rellenado + Armado (se muestran como opción al cliente)
                 # Se calcula un PVP opcional aplicando el mismo margen de trabajo (st.session_state.margen).
                 # Se guardan también los costes base sin margen para uso interno / compatibilidad.
                 margen_trabajo = float(st.session_state.margen) if "margen" in st.session_state else 1.0
 
-                c_opt_rell_coste = (seg_rell_total/3600.0)*18.0*q_n if bool(st.session_state.rell_enabled) else 0.0
-                c_opt_arm_coste = (seg_arm_total/3600.0)*18.0*q_n if bool(st.session_state.arm_enabled) else 0.0
+                c_opt_rell_coste = (seg_rell_total/3600.0)*_tarifa("mano_obra", "rellenado_hora")*q_n if bool(st.session_state.rell_enabled) else 0.0
+                c_opt_arm_coste = (seg_arm_total/3600.0)*_tarifa("mano_obra", "armado_hora")*q_n if bool(st.session_state.arm_enabled) else 0.0
+
+                if st.session_state.rell_enabled:
+                    _aud_linea(aud_opcionales, "Rellenado", "Opcional", seg_rell_total / 3600.0 * q_n,
+                        "horas", _tarifa("mano_obra", "rellenado_hora"), 0.0, c_opt_rell_coste)
+                if st.session_state.arm_enabled:
+                    _aud_linea(aud_opcionales, "Armado", "Opcional", seg_arm_total / 3600.0 * q_n,
+                        "horas", _tarifa("mano_obra", "armado_hora"), 0.0, c_opt_arm_coste)
 
                 c_opt_rell_pvp = c_opt_rell_coste * margen_trabajo
                 c_opt_arm_pvp = c_opt_arm_coste * margen_trabajo
@@ -3986,6 +4623,10 @@ else:
                     n_cajas = int(math.ceil(q_n / float(uds_por_caja))) if q_n > 0 else 0
 
                     emb_compra_total += cu_caja * n_cajas
+                    if cu_caja or emb.get("tipo", "Manual") != "Manual" or any(float(v or 0) > 0 for v in emb.get("dims", {}).values()):
+                        _aud_linea(aud_otras, f"Embalaje · {emb.get('nombre', '')}", "Material", n_cajas,
+                            "cajas", cu_caja, 0.0, cu_caja * n_cajas,
+                            f"{emb.get('tipo', '')} · {emb.get('material', '')} · {uds_por_caja} expositores/caja")
                     emb_det.append({
                         "nombre": emb.get("nombre",""),
                         "tipo": emb.get("tipo",""),
@@ -4036,6 +4677,9 @@ else:
                         coste = val
                         tipo = "total"
                     ext_total += coste
+                    if val or str(ext.get("concepto", "")).strip() not in ("", "Externo 1"):
+                        _aud_linea(aud_otras, f"Externo · {ext.get('concepto', '')}", "Proceso", q_n if tipo == "unitario" else 1,
+                            "expositores" if tipo == "unitario" else "trabajo", val, 0.0, coste)
                     ext_det.append({"concepto": ext.get("concepto",""), "modo": ext.get("modo",""), "tipo_aplicado": tipo, "valor_input": val, "coste_total": coste})
                 tot_cat["procesos"]["externos"] += ext_total
 
@@ -4088,13 +4732,13 @@ else:
 
                 res_final.append({
                     "Cantidad": q_n,
-                    "Precio venta material (unitario)": f"{pv_material_unit:.3f}€",
-                    "Precio venta extras (unitario)": f"{pv_extras_unit:.3f}€",
-                    "Precio venta embalaje (unitario)": f"{(pv_emb_total/q_n):.3f}€",
-                    "Precio venta troquel (TOTAL)": f"{tot_pv_trq:.2f}€",
-                    "Precio venta unitario (prod+emb+extras)": f"{unit_prod_emb_extras:.3f}€",
-                    "Precio venta unitario (todo)": f"{unit_todo:.3f}€",
-                    "Precio venta total": f"{pvp_total_todo:.2f}€"
+                    "Precio venta material (unitario)": f"{_formato_precio_venta(pv_material_unit)}",
+                    "Precio venta extras (unitario)": f"{_formato_precio_venta(pv_extras_unit)}",
+                    "Precio venta embalaje (unitario)": f"{_formato_precio_venta((pv_emb_total/q_n))}",
+                    "Precio venta troquel (TOTAL)": f"{_formato_precio_venta(tot_pv_trq)}",
+                    "Precio venta unitario (prod+emb+extras)": f"{_formato_precio_venta(unit_prod_emb_extras)}",
+                    "Precio venta unitario (todo)": f"{_formato_precio_venta(unit_todo)}",
+                    "Precio venta total": f"{_formato_precio_venta(pvp_total_todo)}"
                 })
 
                 desc_full[q_n] = {
@@ -4105,6 +4749,10 @@ else:
                     "debug": debug_log
                 }
 
+                if imp_fijo_pvp:
+                    aud_venta.append({"Concepto": "Desarrollo de proyecto (venta)", "Importe de venta (€)": float(imp_fijo_pvp)})
+                aud_avisos_generales = [f"{l['Concepto']}: tarifa cero o negativa; confirmar que es intencionada."
+                    for l in aud_otras + aud_opcionales if l["Consumo"] > 0 and l["Tarifa (€)"] <= 0]
                 compras_legible[q_n] = {
                     "Cantidad": q_n,
                     "Materiales": tot_cat["materiales"],
@@ -4113,7 +4761,15 @@ else:
                     "Detalle embalajes": emb_det,
                     "Detalle externos": ext_det,
                     "Extras (detalle)": st.session_state.lista_extras_grabados,
-                    "Opcionales (a parte)": opcionales_cost
+                    "Opcionales (a parte)": opcionales_cost,
+                    "Auditoría compras": {
+                        "version": 1, "cantidad": q_n, "formas": aud_formas, "otras_partidas": aud_otras,
+                        "opcionales": aud_opcionales, "referencias_venta": aud_venta,
+                        "avisos": aud_avisos_generales,
+                        "proyecto": {"briefing": st.session_state.brf, "cliente": st.session_state.cli,
+                                     "descripcion": st.session_state.desc},
+                        "coste_total": float(sum(tot_cat["materiales"].values()) + sum(tot_cat["procesos"].values()))
+                    }
                 }
 
                 resumen_costes_export[q_n] = {
@@ -4127,10 +4783,10 @@ else:
                     },
                     "opcionales_a_parte": {
                         # Valores mostrados al cliente (con margen)
-                        "rellenado_total": round(opcionales_cost.get("rellenado_total", 0.0), 4),
-                        "armado_total": round(opcionales_cost.get("armado_total", 0.0), 4),
-                        "rellenado_unit": round(opcionales_cost.get("rellenado_unit", 0.0), 6),
-                        "armado_unit": round(opcionales_cost.get("armado_unit", 0.0), 6),
+                        "rellenado_total": float(opcionales_cost.get("rellenado_total", 0.0)),
+                        "armado_total": float(opcionales_cost.get("armado_total", 0.0)),
+                        "rellenado_unit": float(opcionales_cost.get("rellenado_unit", 0.0)),
+                        "armado_unit": float(opcionales_cost.get("armado_unit", 0.0)),
                         # Costes internos sin margen
                         "rellenado_total_coste": round(opcionales_cost.get("rellenado_total_coste", 0.0), 4),
                         "armado_total_coste": round(opcionales_cost.get("armado_total_coste", 0.0), 4),
@@ -4141,15 +4797,19 @@ else:
                     "embalajes_venta_por_opcion": [
                         {
                             "nombre": e.get("nombre",""),
-                            "unit": round(float(e.get("unit", 0.0)), 6),
-                            "total": round(float(e.get("total", 0.0)), 4),
+                            "unit": float(e.get("unit", 0.0)),
+                            "total": float(e.get("total", 0.0)),
                         }
                         for e in (pv_emb_por_embalaje if isinstance(pv_emb_por_embalaje, list) else [])
                     ]
                 }
 
+        for _compra in compras_legible.values():
+            _compra["Auditoría compras"]["firma"] = _calc_project_signature()
+
         # --- Guardar caché del cálculo (para evitar recompute en cada rerun) ---
         st.session_state._calc_cache = {
+            "_precios_venta_version": 1,
             "res_final": res_final,
             "desc_full": desc_full,
             "compras_legible": compras_legible,
@@ -4211,999 +4871,366 @@ def build_comercial_html(res_final_rows, desc_html, extras_html, emb_html, ext_h
 </html>
 """
 
-if modo_comercial and res_final:
-    manip_unit_txt = f"{t_input:g} {('min' if unidad_t=='Minutos' else 'seg')}/ud"
-    manip_seg_txt = f"{seg_man_total:g} seg/ud"
+with tab_calculadora:
+    if modo_comercial and res_final:
+        manip_unit_txt = f"{t_input:g} {('min' if unidad_t=='Minutos' else 'seg')}/ud"
+        manip_seg_txt = f"{seg_man_total:g} seg/ud"
 
-    desc_html = "<div class='sec-title'>📋 Especificaciones del Proyecto</div>"
-    desc_html += "<div class='card'>"
-    desc_html += (
-        "<div style='margin-bottom:10px;'>"
-        "<span class='tag'>Manipulación</span>"
-        f"<span class='small muted'><b>Tiempo/ud:</b> {manip_unit_txt} &nbsp;|&nbsp; <b>Equivalente:</b> {manip_seg_txt}</span>"
-        "</div>"
-    )
+        desc_html = "<div class='sec-title'>📋 Especificaciones del Proyecto</div>"
+        desc_html += "<div class='card'>"
+        desc_html += (
+            "<div style='margin-bottom:10px;'>"
+            "<span class='tag'>Manipulación</span>"
+            f"<span class='small muted'><b>Tiempo/ud:</b> {manip_unit_txt} &nbsp;|&nbsp; <b>Equivalente:</b> {manip_seg_txt}</span>"
+            "</div>"
+        )
 
-    # Opcionales (a parte)
-    if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
-        opt_lines = []
-        if bool(st.session_state.rell_enabled):
-            opt_lines.append(f"<span class='tag'>Rellenado</span><span class='small muted'>+ {seg_rell_total:g} seg/ud</span>")
-        if bool(st.session_state.arm_enabled):
-            opt_lines.append(f"<span class='tag'>Armado</span><span class='small muted'>+ {seg_arm_total:g} seg/ud</span>")
-        desc_html += "<div style='margin-bottom:10px;'>"
-        desc_html += "<span class='tag'>Opcionales</span> "
-        desc_html += " &nbsp; ".join(opt_lines)
+        # Opcionales (a parte)
+        if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
+            opt_lines = []
+            if bool(st.session_state.rell_enabled):
+                opt_lines.append(f"<span class='tag'>Rellenado</span><span class='small muted'>+ {seg_rell_total:g} seg/ud</span>")
+            if bool(st.session_state.arm_enabled):
+                opt_lines.append(f"<span class='tag'>Armado</span><span class='small muted'>+ {seg_arm_total:g} seg/ud</span>")
+            desc_html += "<div style='margin-bottom:10px;'>"
+            desc_html += "<span class='tag'>Opcionales</span> "
+            desc_html += " &nbsp; ".join(opt_lines)
+            desc_html += "</div>"
+
+
+        # Notas / comentarios (solo si hay texto)
+        _notas_txt = (st.session_state.get("notas", "") or "").strip()
+        if _notas_txt:
+            _notas_html = html.escape(_notas_txt).replace("\n", "<br>")
+            desc_html += "<div style='margin-top:10px;'><span class='tag'>Notas</span></div>"
+            desc_html += f"<div class='small' style='margin-top:6px; line-height:1.35;'>{_notas_html}</div>"
+
+        for pid, p in st.session_state.piezas_dict.items():
+            base_info = ""
+            if p.get("tipo_base") == "Material Rígido":
+                if bool(p.get("rig_manual", False)):
+                    base_info = f"Rígido Manual: {int(p.get('rig_w',0))}×{int(p.get('rig_h',0))} mm"
+                else:
+                    base_info = f"Rígido: {p.get('mat_rigido','')}"
+            else:
+                base_info = f"Ondulado: {p.get('pl','')} ({p.get('ap','')})"
+
+            flexo_txt = " | Flexografía" if bool(p.get("flexografia", False)) else ""
+            cara = f"{p.get('pf','')} ({p.get('gf',0)}g)"
+            dorso = f"{p.get('pd','')} ({p.get('gd',0)}g)"
+            imp_c = f"{p.get('im','No')}"
+            imp_d = f"{p.get('im_d','No')}"
+            pel_c = f"{p.get('pel','Sin Peliculado')}"
+            pel_d = f"{p.get('pel_d','Sin Peliculado')}"
+
+            tintas_c = ""
+            if p.get("im","No") == "Offset":
+                tintas_c = f" | <b>Tintas:</b> {int(p.get('nt',0))}" + (" + Barniz" if bool(p.get("ba",False)) else "")
+            elif p.get("im","No") == "Digital":
+                tintas_c = " | <b>Laminado:</b> " + ("Sí" if bool(p.get("ld",False)) else "No")
+
+            tintas_d = ""
+            if p.get("im_d","No") == "Offset":
+                tintas_d = f" | <b>Tintas:</b> {int(p.get('nt_d',0))}" + (" + Barniz" if bool(p.get("ba_d",False)) else "")
+            elif p.get("im_d","No") == "Digital":
+                tintas_d = " | <b>Laminado:</b> " + ("Sí" if bool(p.get("ld_d",False)) else "No")
+
+            corte = p.get("cor_default","Troquelado")
+            trq = f"{_formato_precio_venta(float(p.get('pv_troquel',0.0)))}"
+
+            # Varias impresiones (solo si está activado para esta forma) -> mostrar en oferta
+            impresiones_info_html = ""
+            enabled_all = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
+            enabled_fmt = False
+            if isinstance(enabled_all, dict):
+                enabled_fmt = bool(enabled_all.get(str(int(pid)), False))
+            if enabled_fmt:
+                q_list = []
+                try:
+                    q_list = [int(r.get("Cantidad", 0)) for r in res_final if int(r.get("Cantidad", 0)) > 0]
+                except Exception:
+                    q_list = []
+                lines = []
+                for qv in q_list:
+                    partes = obtener_partes_impresion_por_formato(int(pid), int(qv))
+                    if isinstance(partes, list) and len(partes) > 1:
+                        try:
+                            parts_txt = "+".join(str(int(x)) for x in partes)
+                        except Exception:
+                            parts_txt = "+".join(str(x) for x in partes)
+                        lines.append(f"{int(qv)} uds → {parts_txt}")
+                if lines:
+                    impresiones_info_html = "<br><b>Varias impresiones:</b> " + " &nbsp;|&nbsp; ".join(lines)
+
+
+            desc_html += (
+                "<div style='margin-bottom:8px;'>"
+                f"<span class='tag'>{p.get('nombre','')}</span>"
+                f"<span class='small muted'>{int(p.get('h',0))}×{int(p.get('w',0))} mm | Pliegos/ud: {float(p.get('pliegos',1.0)):.4f}</span>"
+                "<div class='small'>"
+                f"<b>Soporte:</b> {base_info}{flexo_txt}<br>"
+                f"<b>Cara:</b> {cara} | <b>Imp:</b> {imp_c}{tintas_c} | <b>Pel:</b> {pel_c}<br>"
+                f"<b>Dorso:</b> {dorso} | <b>Imp:</b> {imp_d}{tintas_d} | <b>Pel:</b> {pel_d}<br>"
+                f"<b>Corte (def):</b> {corte} | <b>Troquel (venta):</b> {trq}" + impresiones_info_html + "</div></div>"
+            )
         desc_html += "</div>"
 
-
-    # Notas / comentarios (solo si hay texto)
-    _notas_txt = (st.session_state.get("notas", "") or "").strip()
-    if _notas_txt:
-        _notas_html = html.escape(_notas_txt).replace("\n", "<br>")
-        desc_html += "<div style='margin-top:10px;'><span class='tag'>Notas</span></div>"
-        desc_html += f"<div class='small' style='margin-top:6px; line-height:1.35;'>{_notas_html}</div>"
-
-    for pid, p in st.session_state.piezas_dict.items():
-        base_info = ""
-        if p.get("tipo_base") == "Material Rígido":
-            if bool(p.get("rig_manual", False)):
-                base_info = f"Rígido Manual: {int(p.get('rig_w',0))}×{int(p.get('rig_h',0))} mm | {float(p.get('rig_precio_ud',0.0)):.2f}€/hoja"
-            else:
-                base_info = f"Rígido: {p.get('mat_rigido','')}"
+        extras_html = "<div class='sec-title'>➕ Materiales extra</div><div class='card'>"
+        if st.session_state.lista_extras_grabados:
+            for e in st.session_state.lista_extras_grabados:
+                extras_html += f"<div class='small'>• <b>{e.get('nombre','')}</b> — {float(e.get('cantidad',1.0))} /ud</div>"
         else:
-            base_info = f"Ondulado: {p.get('pl','')} ({p.get('ap','')})"
+            extras_html += "<div class='small muted'>Sin extras.</div>"
+        extras_html += "</div>"
 
-        flexo_txt = " | Flexografía" if bool(p.get("flexografia", False)) else ""
-        cara = f"{p.get('pf','')} ({p.get('gf',0)}g)"
-        dorso = f"{p.get('pd','')} ({p.get('gd',0)}g)"
-        imp_c = f"{p.get('im','No')}"
-        imp_d = f"{p.get('im_d','No')}"
-        pel_c = f"{p.get('pel','Sin Peliculado')}"
-        pel_d = f"{p.get('pel_d','Sin Peliculado')}"
-
-        tintas_c = ""
-        if p.get("im","No") == "Offset":
-            tintas_c = f" | <b>Tintas:</b> {int(p.get('nt',0))}" + (" + Barniz" if bool(p.get("ba",False)) else "")
-        elif p.get("im","No") == "Digital":
-            tintas_c = " | <b>Laminado:</b> " + ("Sí" if bool(p.get("ld",False)) else "No")
-
-        tintas_d = ""
-        if p.get("im_d","No") == "Offset":
-            tintas_d = f" | <b>Tintas:</b> {int(p.get('nt_d',0))}" + (" + Barniz" if bool(p.get("ba_d",False)) else "")
-        elif p.get("im_d","No") == "Digital":
-            tintas_d = " | <b>Laminado:</b> " + ("Sí" if bool(p.get("ld_d",False)) else "No")
-
-        corte = p.get("cor_default","Troquelado")
-        trq = f"{float(p.get('pv_troquel',0.0)):.2f}€"
-
-        # Varias impresiones (solo si está activado para esta forma) -> mostrar en oferta
-        impresiones_info_html = ""
-        enabled_all = st.session_state.get("impresiones_by_qty_fmt_enabled", {})
-        enabled_fmt = False
-        if isinstance(enabled_all, dict):
-            enabled_fmt = bool(enabled_all.get(str(int(pid)), False))
-        if enabled_fmt:
-            q_list = []
+        emb_html = "<div class='sec-title'>📦 Embalajes</div><div class='card'>"
+        emb_html += "<div class='small muted'>El precio de embalaje mostrado en la tabla es <b>€/ud repercutido</b>. Si un embalaje es multipack (p.ej. 5 uds/caja), el <b>precio de venta por caja</b> es (€/ud × uds/caja).</div>"
+        for emb in st.session_state.embalajes:
+            L, W, H = emb["dims"].get("L",0), emb["dims"].get("W",0), emb["dims"].get("H",0)
             try:
-                q_list = [int(r.get("Cantidad", 0)) for r in res_final if int(r.get("Cantidad", 0)) > 0]
+                upc = int(emb.get("uds_por_caja", 1) or 1)
             except Exception:
-                q_list = []
-            lines = []
-            for qv in q_list:
-                partes = obtener_partes_impresion_por_formato(int(pid), int(qv))
-                if isinstance(partes, list) and len(partes) > 1:
-                    try:
-                        parts_txt = "+".join(str(int(x)) for x in partes)
-                    except Exception:
-                        parts_txt = "+".join(str(x) for x in partes)
-                    lines.append(f"{int(qv)} uds → {parts_txt}")
-            if lines:
-                impresiones_info_html = "<br><b>Varias impresiones:</b> " + " &nbsp;|&nbsp; ".join(lines)
+                upc = 1
+            upc = max(1, upc)
+            upc_txt = f" — <b>{upc} uds/caja</b>" if upc > 1 else ""
+            emb_html += (
+                f"<div class='small'>• <b>{emb.get('nombre','')}</b> — {emb.get('tipo','')} — {emb.get('material','')} — "
+                f"{L:.0f}×{W:.0f}×{H:.0f} mm{upc_txt}</div>"
+            )
+        emb_html += "</div>"
 
+        ext_html = "<div class='sec-title'>📌 Externos</div><div class='card'>"
+        if st.session_state.externos:
+            for ext in st.session_state.externos:
+                ext_html += f"<div class='small'>• <b>{ext.get('concepto','')}</b> — {ext.get('modo','')}</div>"
+        else:
+            ext_html += "<div class='small muted'>Sin externos.</div>"
+        ext_html += "</div>"
 
-        desc_html += (
-            "<div style='margin-bottom:8px;'>"
-            f"<span class='tag'>{p.get('nombre','')}</span>"
-            f"<span class='small muted'>{int(p.get('h',0))}×{int(p.get('w',0))} mm | Pliegos/ud: {float(p.get('pliegos',1.0)):.4f}</span>"
-            "<div class='small'>"
-            f"<b>Soporte:</b> {base_info}{flexo_txt}<br>"
-            f"<b>Cara:</b> {cara} | <b>Imp:</b> {imp_c}{tintas_c} | <b>Pel:</b> {pel_c}<br>"
-            f"<b>Dorso:</b> {dorso} | <b>Imp:</b> {imp_d}{tintas_d} | <b>Pel:</b> {pel_d}<br>"
-            f"<b>Corte (def):</b> {corte} | <b>Troquel (venta):</b> {trq}" + impresiones_info_html + "</div></div>"
-        )
-    desc_html += "</div>"
+        rows_list = []
+        for r in res_final:
+            rows_list.append(
+                "<tr>"
+                f"<td><b>{r['Cantidad']}</b></td>"
+                f"<td>{r['Precio venta material (unitario)']}</td>"
+                f"<td>{r.get('Precio venta extras (unitario)', '0.00€')}</td>"
+                f"<td>{r['Precio venta embalaje (unitario)']}</td>"
+                f"<td>{r['Precio venta troquel (TOTAL)']}</td>"
+                f"<td>{r.get('Precio venta unitario (prod+emb+extras)', '0.00€')}</td>"
+                f"<td><b style='color:#1E88E5;'>{r['Precio venta unitario (todo)']}</b></td>"
+                f"<td>{r['Precio venta total']}</td>"
+                "</tr>"
+            )
+        rows = "".join(rows_list)
 
-    extras_html = "<div class='sec-title'>➕ Materiales extra</div><div class='card'>"
-    if st.session_state.lista_extras_grabados:
-        for e in st.session_state.lista_extras_grabados:
-            extras_html += f"<div class='small'>• <b>{e.get('nombre','')}</b> — {float(e.get('cantidad',1.0))} /ud — {float(e.get('coste',0.0)):.4f}€ compra</div>"
-    else:
-        extras_html += "<div class='small muted'>Sin extras.</div>"
-    extras_html += "</div>"
-
-    emb_html = "<div class='sec-title'>📦 Embalajes</div><div class='card'>"
-    emb_html += "<div class='small muted'>El precio de embalaje mostrado en la tabla es <b>€/ud repercutido</b>. Si un embalaje es multipack (p.ej. 5 uds/caja), el <b>coste real por caja</b> es (€/ud × uds/caja).</div>"
-    for emb in st.session_state.embalajes:
-        L, W, H = emb["dims"].get("L",0), emb["dims"].get("W",0), emb["dims"].get("H",0)
-        try:
-            upc = int(emb.get("uds_por_caja", 1) or 1)
-        except Exception:
-            upc = 1
-        upc = max(1, upc)
-        upc_txt = f" — <b>{upc} uds/caja</b>" if upc > 1 else ""
-        emb_html += (
-            f"<div class='small'>• <b>{emb.get('nombre','')}</b> — {emb.get('tipo','')} — {emb.get('material','')} — "
-            f"{L:.0f}×{W:.0f}×{H:.0f} mm{upc_txt}</div>"
-        )
-    emb_html += "</div>"
-
-    ext_html = "<div class='sec-title'>📌 Externos</div><div class='card'>"
-    if st.session_state.externos:
-        for ext in st.session_state.externos:
-            ext_html += f"<div class='small'>• <b>{ext.get('concepto','')}</b> — {ext.get('modo','')}</div>"
-    else:
-        ext_html += "<div class='small muted'>Sin externos.</div>"
-    ext_html += "</div>"
-
-    rows_list = []
-    for r in res_final:
-        rows_list.append(
+        tabla = (
+            "<div class='sec-title'>€ Precios de venta</div>"
+            "<table class='comercial-table'>"
             "<tr>"
-            f"<td><b>{r['Cantidad']}</b></td>"
-            f"<td>{r['Precio venta material (unitario)']}</td>"
-            f"<td>{r.get('Precio venta extras (unitario)', '0.000€')}</td>"
-            f"<td>{r['Precio venta embalaje (unitario)']}</td>"
-            f"<td>{r['Precio venta troquel (TOTAL)']}</td>"
-            f"<td>{r.get('Precio venta unitario (prod+emb+extras)', '0.000€')}</td>"
-            f"<td><b style='color:#1E88E5;'>{r['Precio venta unitario (todo)']}</b></td>"
-            f"<td>{r['Precio venta total']}</td>"
+            "<th>Cantidad</th>"
+            "<th>Venta material (unit)</th>"
+            "<th>Venta extras+externos (unit)</th>"
+            "<th>Venta embalaje (unit)</th>"
+            "<th>Troquel (TOTAL)</th>"
+            "<th>Unitario (prod+emb+extras)</th>"
+            "<th>UNITARIO (TODO)</th>"
+            "<th>VENTA TOTAL</th>"
             "</tr>"
+            f"{rows}"
+            "</table>"
+            "<div class='small muted' style='margin-top:10px;'>"
+            "* &quot;Venta material&quot; incluye el producido (materiales + procesos internos) excluyendo extras, procesos externos, embalajes y troqueles. &quot;Extras+externos&quot; incluye extras grabados y procesos externos. IVA no incluido."
+            "</div>"
         )
-    rows = "".join(rows_list)
-
-    tabla = (
-        "<div class='sec-title'>€ Precios de venta</div>"
-        "<table class='comercial-table'>"
-        "<tr>"
-        "<th>Cantidad</th>"
-        "<th>Venta material (unit)</th>"
-        "<th>Venta extras+externos (unit)</th>"
-        "<th>Venta embalaje (unit)</th>"
-        "<th>Troquel (TOTAL)</th>"
-        "<th>Unitario (prod+emb+extras)</th>"
-        "<th>UNITARIO (TODO)</th>"
-        "<th>VENTA TOTAL</th>"
-        "</tr>"
-        f"{rows}"
-        "</table>"
-        "<div class='small muted' style='margin-top:10px;'>"
-        "* &quot;Venta material&quot; incluye el producido (materiales + procesos internos) excluyendo extras, procesos externos, embalajes y troqueles. &quot;Extras+externos&quot; incluye extras grabados y procesos externos. IVA no incluido."
-        "</div>"
-    )
 
 
-    # Opciones de embalaje (si hay más de 1)
-    emb_opts_html = ""
-    try:
-        if isinstance(st.session_state.embalajes, list) and len(st.session_state.embalajes) > 1:
-            # Mapa por nombre para encontrar uds/caja
-            _emb_by_name = {}
-            for _e in st.session_state.embalajes:
-                try:
-                    _emb_by_name[str(_e.get("nombre",""))] = _e
-                except Exception:
-                    pass
-
-            emb_opts_html += "<div class='sec-title'>📦 Opciones de embalaje</div>"
-            emb_opts_html += "<div class='card'>"
-            emb_opts_html += "<div class='small muted'>Precios de embalaje por opción. El valor mostrado es <b>€/ud repercutido</b>; si es multipack, también se indica el <b>€/caja</b> (€/ud × uds/caja).</div>"
-            for q in sorted(resumen_costes_export.keys()):
-                emb_opts_html += f"<div style='margin-top:10px; font-weight:700;'>Cantidad: {int(q)} uds</div>"
-                emb_opts_html += "<table class='comercial-table' style='margin-top:6px;'>"
-                emb_opts_html += "<tr><th>Embalaje</th><th>Uds/caja</th><th>€/ud (repercutido)</th><th>€/caja</th><th>Total</th></tr>"
-                opts = (resumen_costes_export.get(q, {}) or {}).get("embalajes_venta_por_opcion", [])
-                if isinstance(opts, list) and opts:
-                    for opt in opts:
-                        nom = str(opt.get("nombre",""))
-                        unit = float(opt.get("unit", 0.0) or 0.0)
-                        total = float(opt.get("total", 0.0) or 0.0)
-                        upc = 1
-                        try:
-                            e0 = _emb_by_name.get(nom, None)
-                            if isinstance(e0, dict):
-                                upc = int(e0.get("uds_por_caja", 1) or 1)
-                        except Exception:
-                            upc = 1
-                        upc = max(1, upc)
-                        caja = unit * upc
-                        emb_opts_html += (
-                            f"<tr><td>{html.escape(nom)}</td>"
-                            f"<td>{upc}</td>"
-                            f"<td>{unit:.3f}€</td>"
-                            f"<td>{caja:.3f}€</td>"
-                            f"<td>{total:.2f}€</td></tr>"
-                        )
-                emb_opts_html += "</table>"
-            emb_opts_html += "</div>"
-    except Exception:
+        # Opciones de embalaje (si hay más de 1)
         emb_opts_html = ""
-
-    # Opcionales (a parte) - tabla
-    opc_html = ""
-    if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
-        opc_html += "<div class='sec-title'>🧩 Opcionales (a parte)</div>"
-        opc_html += "<div class='card'>"
-        opc_html += f"<div class='small muted'>Precios opcionales NO incluidos en el precio mostrado.</div>"
-        opc_html += "<table class='comercial-table' style='margin-top:10px;'>" \
-                   "<tr><th>Cantidad</th><th>Rellenado (€/ud)</th><th>Rellenado (TOTAL)</th><th>Armado (€/ud)</th><th>Armado (TOTAL)</th></tr>"
-        for row in resumen_costes_export.values():
-            q = int(row.get("Cantidad", 0))
-            op = row.get("opcionales_a_parte", {}) or {}
-            opc_html += f"<tr><td>{q}</td><td>{float(op.get('rellenado_unit',0.0)):.3f}€</td><td>{float(op.get('rellenado_total',0.0)):.2f}€</td><td>{float(op.get('armado_unit',0.0)):.3f}€</td><td>{float(op.get('armado_total',0.0)):.2f}€</td></tr>"
-        opc_html += "</table></div>"
-
-    
-    # PERFORMANCE: reutilizar oferta HTML del último cálculo si existe
-    if isinstance(st.session_state.get("_calc_cache"), dict) and "oferta_html" in st.session_state._calc_cache and not bool(st.session_state.get("_calc_requested", False)):
-        oferta_html = st.session_state._calc_cache.get("oferta_html", "")
-        fname_html = st.session_state._calc_cache.get("fname_html", "oferta.html")
-    else:
-        oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, (ext_html + emb_opts_html + opc_html), tabla)
-        safe_desc = re.sub(r'[\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
-        safe_ver = re.sub(r'[\/*?:"<>|]', "", str(st.session_state.get("version_presupuesto", "") or "")).replace(" ", "_")
-        brf_tag = f"{safe_brf}_{safe_ver}" if safe_ver else safe_brf
-        # Incluir nº(s) de comercial en el nombre de archivo (si están informados)
-        c1_num = _parse_comercial_num(st.session_state.get('comercial_1', ''))
-        c2_num = _parse_comercial_num(st.session_state.get('comercial_2', ''))
-        com_parts = []
-        if c1_num is not None:
-            com_parts.append(f"C{c1_num}")
-        if c2_num is not None:
-            com_parts.append(f"C{c2_num}")
-        com_tag = "_".join(com_parts)
-        if com_tag:
-            fname_html = f"OFERTA_{brf_tag}_{com_tag}_{safe_cli}_{safe_desc}.html"
-        else:
-            fname_html = f"OFERTA_{brf_tag}_{safe_cli}_{safe_desc}.html"
-    # Guardar oferta HTML en caché
-    try:
-        if not isinstance(st.session_state._calc_cache, dict) or st.session_state._calc_cache is None:
-            st.session_state._calc_cache = {}
-        st.session_state._calc_cache["oferta_html"] = oferta_html
-        st.session_state._calc_cache["fname_html"] = fname_html
-    except Exception:
-        pass
-
-
-    # Acceso rápido también en el panel lateral (sin quitar el botón de arriba)
-    with st.sidebar:
-        st.divider()
-    
-
-    # =========================================================
-    # SIDEBAR: Descargas (OFERTA arriba, JSON abajo) - fiable 100%
-    # =========================================================
-    
-    # Guardamos el resumen de compras y el resumen de costes en session_state para export JSON.
-    # IMPORTANTE: esto debe ejecutarse en cada rerun después del cálculo, para que el JSON exportado
-    # incluya siempre "compras_legible" y "resumen_costes" actualizados.
-    try:
-        if isinstance(globals().get("compras_legible", None), dict):
-            st.session_state.compras_legible_export = deepcopy(globals().get("compras_legible", {}))
-        else:
-            st.session_state.compras_legible_export = {}
-    except Exception:
-        st.session_state.compras_legible_export = {}
-
-    try:
-        if isinstance(globals().get("resumen_costes_export", None), dict):
-            st.session_state.resumen_costes_export = deepcopy(globals().get("resumen_costes_export", {}))
-        else:
-            st.session_state.resumen_costes_export = {}
-    except Exception:
-        st.session_state.resumen_costes_export = {}
-# Refrescamos caché de export antes de mostrar botones
-    _refresh_export_cache_if_needed(force=False)
-
-    with st.sidebar.expander("📄 Descargar oferta", expanded=True):
-        st.download_button(
-            "⬇️ Descargar OFERTA (HTML)",
-            data=oferta_html.encode("utf-8"),
-            file_name=fname_html,
-            mime="text/html",
-            use_container_width=True,
-            key="dl_oferta_html_sidebar_top"
-        )
-
-    with st.sidebar.expander("📤 Exportar JSON", expanded=True):
-        if st.session_state.get("_export_blob"):
-            st.download_button(
-                "💾 Descargar JSON",
-                data=st.session_state._export_blob,
-                file_name=st.session_state._export_filename,
-                mime="application/json",
-                on_click=_mark_json_download,
-                use_container_width=True,
-                key="dl_json_sidebar_bottom"
-            )
-            if st.session_state.get("_json_downloaded", False):
-                st.success(f"✅ JSON descargado: {st.session_state.get('_json_downloaded_filename', '') or st.session_state._export_filename}")
-        else:
-            st.caption("Calcula una vez para habilitar la exportación.")
-
-    st.download_button(
-        "⬇️ Descargar VISTA OFERTA (HTML)",
-        data=oferta_html.encode("utf-8"),
-        file_name=fname_html,
-        mime="text/html",
-        use_container_width=True
-    )
-
-    st.markdown(
-        "<div class='comercial-box'>"
-        f"<div class='comercial-header'>OFERTA COMERCIAL - {st.session_state.cli or 'CLIENTE'}</div>"
-        f"<div class='comercial-ref'>Ref. Briefing: {st.session_state.brf or '-'}</div>"
-        f"{desc_html}{extras_html}{emb_html}{ext_html}{emb_opts_html}{opc_html}{tabla}"
-        "</div>",
-        unsafe_allow_html=True
-    )
-else:
-    if res_final:
-        st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
-        df = pd.DataFrame(res_final)[[
-            "Cantidad",
-            "Precio venta material (unitario)",
-            "Precio venta extras (unitario)",
-            "Precio venta embalaje (unitario)",
-            "Precio venta troquel (TOTAL)",
-            "Precio venta unitario (prod+emb+extras)",
-            "Precio venta unitario (todo)",
-            "Precio venta total"
-        ]]
-        st.dataframe(df, use_container_width=True)
-
-# =========================================================
-
-# =========================================================
-# TAB AUDITORÍA (SIEMPRE)
-# =========================================================
-with tab_auditoria:
-    st.subheader("🧾 Auditoría de cálculos (trazabilidad)")
-
-    lista_cants_aud = parse_cantidades(st.session_state.cants_str_saved)
-
-    if not lista_cants_aud:
-        st.info("No hay cantidades definidas para auditar.")
-    else:
-        q_sel = st.selectbox("Cantidad a auditar:", lista_cants_aud, key="aud_sel_qty")
-
-        # Resumen inputs principales
-        with st.expander("🔎 Entradas principales del proyecto", expanded=False):
-            st.write(
-                {
-                    "briefing": st.session_state.get("brief", ""),
-                    "comercial_1": st.session_state.get("comercial_1", ""),
-                    "comercial_2": st.session_state.get("comercial_2", ""),
-                    "cliente": st.session_state.get("cli", ""),
-                    "descripcion": st.session_state.get("desc", ""),
-                    "margen": st.session_state.get("margen", None),
-                }
-            )
-
-        piezas = st.session_state.get("piezas_dict", {}) or {}
-        if not isinstance(piezas, dict) or not piezas:
-            st.info("No hay formas definidas.")
-        else:
-            # Tabla: por forma, mostrar matemáticamente hojas netas, mermas y pasadas
-            rows = []
-            for pid, p in piezas.items():
-                try:
-                    pid_i = int(pid)
-                except Exception:
-                    pid_i = int(str(pid)) if str(pid).isdigit() else 0
-
-                nombre = p.get("nombre", f"Forma {pid}")
-
-                # Formato (pliegos por unidad)
-                try:
-                    pliegos_por_ud = float(p.get("pliegos", 1.0))
-                except Exception:
-                    pliegos_por_ud = 1.0
-
-                # Hojas netas reales (ajustadas por formato)
-                try:
-                    hojas_netas = int(math.ceil(float(q_sel) * float(pliegos_por_ud)))
-                except Exception:
-                    hojas_netas = int(q_sel)
-
-                # Merma procesos (tabla) y valor final (editable)
-                mp_tabla = int(_tabla_merma_procesos_offset(hojas_netas))
-                mp_final = int(_ss_get_merma_proc(int(pid_i), int(q_sel), int(mp_tabla)))
-
-                mp_manual = False
-                try:
-                    mp_manual = str(pid) in st.session_state.get("mermas_proc_manual", {}) and str(int(q_sel)) in st.session_state.mermas_proc_manual.get(str(pid), {})
-                except Exception:
-                    mp_manual = False
-
-                # Impresión (cara)
-                im_c = str(p.get("im", "No")).strip()
-                is_offset_c = im_c.lower() == "offset"
-                try:
-                    nt_c = int(p.get("nt", 4))
-                except Exception:
-                    nt_c = 0
-                ba_c = bool(p.get("ba", False))
-                apps_c = (max(1, max(0, nt_c)) + (1 if ba_c else 0)) if is_offset_c else 0
-                pasadas_c = int(math.ceil(apps_c / 4.0)) if is_offset_c else 0
-                mi_def_c = int(_merma_impresion_offset_por_pasadas(nt_c, ba_c)) if is_offset_c else 0
-                mi_final_c = int(_ss_get_merma_imp(int(pid_i), int(q_sel), "cara", int(mi_def_c))) if is_offset_c else 0
-
-                mi_manual_c = False
-                try:
-                    mi_manual_c = (
-                        str(pid) in st.session_state.get("mermas_imp_manual", {})
-                        and str(int(q_sel)) in st.session_state.mermas_imp_manual.get(str(pid), {})
-                        and isinstance(st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))], dict)
-                        and "cara" in st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))]
-                    )
-                except Exception:
-                    mi_manual_c = False
-
-                # Impresión (dorso)
-                im_d = str(p.get("im_d", "No")).strip()
-                is_offset_d = im_d.lower() == "offset"
-                try:
-                    nt_d = int(p.get("nt_d", 4))
-                except Exception:
-                    nt_d = 0
-                ba_d = bool(p.get("ba_d", False))
-                apps_d = (max(1, max(0, nt_d)) + (1 if ba_d else 0)) if is_offset_d else 0
-                pasadas_d = int(math.ceil(apps_d / 4.0)) if is_offset_d else 0
-                mi_def_d = int(_merma_impresion_offset_por_pasadas(nt_d, ba_d)) if is_offset_d else 0
-                mi_final_d = int(_ss_get_merma_imp(int(pid_i), int(q_sel), "dorso", int(mi_def_d))) if is_offset_d else 0
-
-                mi_manual_d = False
-                try:
-                    mi_manual_d = (
-                        str(pid) in st.session_state.get("mermas_imp_manual", {})
-                        and str(int(q_sel)) in st.session_state.mermas_imp_manual.get(str(pid), {})
-                        and isinstance(st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))], dict)
-                        and "dorso" in st.session_state.mermas_imp_manual[str(pid)][str(int(q_sel))]
-                    )
-                except Exception:
-                    mi_manual_d = False
-
-                # FR24 (si aplica)
-                fr24_on = bool(p.get("fr24_on", False))
-                try:
-                    fr24_eur_m2 = float(p.get("fr24_eur_m2", 0.05))
-                except Exception:
-                    fr24_eur_m2 = 0.05
-
-                rows.append(
-                    {
-                        "Forma": nombre,
-                        "Pliegos/Ud": pliegos_por_ud,
-                        "Uds": int(q_sel),
-                        "Hojas netas": hojas_netas,
-                        "Merma proceso (tabla)": mp_tabla,
-                        "Merma proceso (final)": mp_final,
-                        "Merma proc editada": "Sí" if mp_manual else "No",
-                        "Impr. cara": im_c,
-                        "Tintas cara": nt_c if is_offset_c else "",
-                        "Barniz cara": "Sí" if (is_offset_c and ba_c) else ("No" if is_offset_c else ""),
-                        "Apps cara": apps_c if is_offset_c else "",
-                        "Pasadas cara": pasadas_c if is_offset_c else "",
-                        "Merma imp cara (def)": mi_def_c if is_offset_c else "",
-                        "Merma imp cara (final)": mi_final_c if is_offset_c else "",
-                        "Merma imp cara editada": "Sí" if mi_manual_c else ("No" if is_offset_c else ""),
-                        "Impr. dorso": im_d,
-                        "Tintas dorso": nt_d if is_offset_d else "",
-                        "Barniz dorso": "Sí" if (is_offset_d and ba_d) else ("No" if is_offset_d else ""),
-                        "Apps dorso": apps_d if is_offset_d else "",
-                        "Pasadas dorso": pasadas_d if is_offset_d else "",
-                        "Merma imp dorso (def)": mi_def_d if is_offset_d else "",
-                        "Merma imp dorso (final)": mi_final_d if is_offset_d else "",
-                        "Merma imp dorso editada": "Sí" if mi_manual_d else ("No" if is_offset_d else ""),
-                        "FR24": "Sí" if fr24_on else "No",
-                        "FR24 €/m²": fr24_eur_m2 if fr24_on else "",
-                    }
-                )
-
-            df_aud = pd.DataFrame(rows)
-            st.dataframe(df_aud, use_container_width=True)
-
-            # Fórmulas (explicación matemática) para el usuario
-            with st.expander("📐 Fórmulas aplicadas (esta cantidad)", expanded=False):
-                st.markdown(
-                    "- **Hojas netas reales (por forma y cantidad)**  \n"
-                    "  `hojas_netas = ceil(uds * pliegos_por_ud)`\n\n"
-                    "- **Merma procesos (OFFSET)** (según tabla)  \n"
-                    "  Se evalúa la tabla con `hojas_netas` y devuelve la merma correspondiente (editable).\n\n"
-                    "- **Merma impresión OFFSET (por lado)**  \n"
-                    "  `apps = max(1, tintas) + (1 si barniz else 0)`  \n"
-                    "  `pasadas = ceil(apps / 4)`  \n"
-                    "  `merma_imp = 100 + 50 * (pasadas - 1)`  (editable)\n\n"
-                    "> Nota: si has editado manualmente una merma, la app ya no la sobreescribe automáticamente."
-                )
-
-        # =========================================================
-        # Costes de materiales y procesos (con fórmulas matemáticas)
-        # =========================================================
-        comp_aud = compras_legible.get(q_sel, {}) if isinstance(compras_legible, dict) else {}
-        if comp_aud:
-            with st.expander("💶 Costes de materiales y procesos (con fórmulas)", expanded=False):
-                # 1) Totales por categoría (lo que realmente se está usando en el cálculo)
-                st.markdown("### Totales por categoría (esta cantidad)")
-                materiales_tot = (resumen_costes_export.get(q_sel, {}).get("materiales", {}) if isinstance(resumen_costes_export, dict) else {}) or {}
-                procesos_tot = (resumen_costes_export.get(q_sel, {}).get("procesos", {}) if isinstance(resumen_costes_export, dict) else {}) or {}
-                c1, c2 = st.columns(2)
-                with c1:
-                    st.markdown("**Materiales**")
-                    if materiales_tot:
-                        st.dataframe(pd.DataFrame([materiales_tot]), use_container_width=True)
-                    else:
-                        st.caption("Sin materiales.")
-                with c2:
-                    st.markdown("**Procesos**")
-                    if procesos_tot:
-                        st.dataframe(pd.DataFrame([procesos_tot]), use_container_width=True)
-                    else:
-                        st.caption("Sin procesos.")
-
-                st.markdown("### Fórmulas aplicadas por proceso/material")
-                st.markdown("""- **Cartoncillo (cara/dorso)**:  
-  `coste = hp_papel * m2_papel * (gramaje_g_m2/1000) * precio_kg * f_cart`  
-  donde `hp_papel = hp_produccion + (merma_impresión * nº_impresiones)`
-
-- **Contracolado**:  
-  `coste = hp_produccion * m2_papel * tarifa_contracolado * capas_contracolado`
-
-- **Impresión DIGITAL** (por tirada):  
-  `coste = (nb_run + merma_digital) * m2_papel * 6.5`  
-  y si hay laminado digital: `+ (nb_run + merma_digital) * m2_papel * precio_laminado_digital`
-
-- **Impresión OFFSET** (por tirada):  
-  `coste = coste_offset_por_tinta(nb_run) * (tintas + barniz)`
-
-- **FR24** (si está activado):  
-  `extra_FR24 = (m2_impresos_totales) * eur_m2`
-
-- **Peliculado (OFFSET)**:  
-  `coste = hp_produccion * m2_papel * precio_peliculado * f_narba`
-
-- **Corte / Troquelado**:  
-  `coste = arranque + (hp_produccion * tiro)`  (si se cobra arreglo)
-
-- **Corte / Plotter**:  
-  `coste = hp_produccion * precio_hoja_plotter`
-
-> En Auditoría se muestran también las **sustituciones numéricas** para cada forma.
-""")
-                # 2) Detalle por forma con sustitución numérica (lo que ayuda a validar matemáticamente)
-                piezas_aud = st.session_state.get("piezas_dict", {}) or {}
-                lista_det = comp_aud.get("Detalle piezas", []) or []
-
-                # Mapear costes ya calculados por nombre de pieza (para comparar)
-                map_det = {}
-                for d in lista_det:
+        try:
+            if isinstance(st.session_state.embalajes, list) and len(st.session_state.embalajes) > 1:
+                # Mapa por nombre para encontrar uds/caja
+                _emb_by_name = {}
+                for _e in st.session_state.embalajes:
                     try:
-                        map_det[str(d.get("Pieza",""))] = d
+                        _emb_by_name[str(_e.get("nombre",""))] = _e
                     except Exception:
                         pass
 
-                def _ceil_int(x: float) -> int:
-                    try:
-                        return int(math.ceil(float(x)))
-                    except Exception:
-                        return int(x) if str(x).isdigit() else 0
-
-                for pid, p in piezas_aud.items():
-                    nombre = p.get("nombre", f"Forma {pid}")
-                    det_row = map_det.get(str(nombre), {})
-
-                    with st.expander(f"🧩 {nombre} · detalle matemático", expanded=False):
-                        # Datos base
-                        try:
-                            pl = float(p.get("pliegos", 1.0))
-                        except Exception:
-                            pl = 1.0
-                        uds = int(q_sel)
-                        nb = _ceil_int(uds * pl)  # pliegos netos reales
-
-                        # Mermas (proceso + impresión por lado) usando los mismos helpers que el motor
-                        merma_imp_digital_hojas = int(_get_merma_impresion_digital_hojas(q_sel))
-                        mp_def = int(_tabla_merma_procesos_offset(int(nb)))
-                        mp_final = int(_ss_get_merma_proc(int(pid), int(q_sel), int(mp_def)))
-                        hp_produccion = int(nb) + int(mp_final)
-
-                        # Ajuste por "piezas por troquel" manual (solo corte)
-                        troquel_piezas_manual = int(p.get("troquel_piezas", 0) or 0)
-                        auto_piezas = 1
-                        try:
-                            if pl > 0 and pl < 1.0:
-                                auto_piezas = max(1, int(round(1.0 / pl)))
-                        except Exception:
-                            auto_piezas = 1
-                        if troquel_piezas_manual <= 0:
-                            troquel_piezas_manual = auto_piezas
-                        troquel_factor = float(auto_piezas) / float(max(1, troquel_piezas_manual))
-                        hp_corte = int(math.ceil(float(hp_produccion) * troquel_factor))
-
-                        partes_imp_units = obtener_partes_impresion_por_formato(int(pid), int(q_sel))
-                        n_impresiones_qty = len(partes_imp_units) if partes_imp_units else 1
-
-                        im_c = str(p.get("im", "No"))
-                        im_d = str(p.get("im_d", "No"))
-
-                        # Merma impresión (cara)
-                        merma_cara = 0
-                        if im_c == "Digital":
-                            merma_cara = int(merma_imp_digital_hojas)
-                        elif im_c == "Offset":
-                            mi_def_c = int(_merma_impresion_offset_por_pasadas(int(p.get("nt", 0)), bool(p.get("ba", False))))
-                            mi_final_c = int(_ss_get_merma_imp(int(pid), int(q_sel), "cara", int(mi_def_c)))
-                            merma_cara = mi_final_c
-                        # Merma impresión (dorso)
-                        merma_dorso = 0
-                        if im_d == "Digital":
-                            merma_dorso = int(merma_imp_digital_hojas)
-                        elif im_d == "Offset":
-                            mi_def_d = int(_merma_impresion_offset_por_pasadas(int(p.get("nt_d", 0)), bool(p.get("ba_d", False))))
-                            mi_final_d = int(_ss_get_merma_imp(int(pid), int(q_sel), "dorso", int(mi_def_d)))
-                            merma_dorso = mi_final_d
-
-                        hp_papel_f = hp_produccion + int(merma_cara) * int(n_impresiones_qty)
-                        hp_papel_d = hp_produccion + int(merma_dorso) * int(n_impresiones_qty)
-
-                        # Superficie (m2) del papel
-                        try:
-                            w = float(p.get("w", 0.0))
-                            h = float(p.get("h", 0.0))
-                            m2_papel = (w * h) / 1_000_000.0 if (w > 0 and h > 0) else 0.0
-                        except Exception:
-                            m2_papel = 0.0
-
-                        st.markdown("**Pliegos netos reales**")
-                        st.code(f"nb = ceil(uds * pliegos_por_ud) = ceil({uds} * {pl}) = {nb}")
-
-                        st.markdown("**Merma de procesos (tabla + final editable)**")
-                        st.code(
-                            f"mp_def = tabla(nb={nb}) = {mp_def}\n"
-                            f"mp_final = {mp_final}\n"
-                            f"hp_produccion = nb + mp_final = {nb} + {mp_final} = {hp_produccion}\n"
-                            f"hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas) = ceil({hp_produccion} * {auto_piezas}/{troquel_piezas_manual}) = {hp_corte}"
-                        )
-
-                        st.markdown("**Mermas de impresión y papel (por lado)**")
-                        st.code(
-                            f"n_impresiones = {n_impresiones_qty}\n"
-                            f"hp_papel_cara = hp_produccion + merma_cara*n_impresiones = {hp_produccion} + {merma_cara}*{n_impresiones_qty} = {hp_papel_f}\n"
-                            f"hp_papel_dorso = hp_produccion + merma_dorso*n_impresiones = {hp_produccion} + {merma_dorso}*{n_impresiones_qty} = {hp_papel_d}"
-                        )
-
-                        st.markdown("**Costes (resultado + fórmula con sustitución)**")
-
-                        # Factores de descuento (compra) por bloque
-                        try:
-                            _dd = st.session_state.get("db_descuentos", {}) if isinstance(st.session_state.get("db_descuentos", {}), dict) else {}
-                            f_cart = 1.0 - (float(_dd.get("cartoncillo", 0.0)) / 100.0)
-                            f_or = 1.0 - (float(_dd.get("ondulado_rigidos", 0.0)) / 100.0)
-                            f_narba = 1.0 - (float(_dd.get("narba", 0.0)) / 100.0)
-                        except Exception:
-                            f_cart, f_or, f_narba = 1.0, 1.0, 1.0
-
-                        # Cartoncillo
-                        try:
-                            pf = p.get("pf", "Ninguno")
-                            gf = float(p.get("gf", 0.0))
-                            precio_pf = float(db["cartoncillo"][pf]["precio_kg"]) if (pf != "Ninguno") else 0.0
-                        except Exception:
-                            pf, gf, precio_pf = "Ninguno", 0.0, 0.0
-
-                        try:
-                            pd_ = p.get("pd", "Ninguno")
-                            gd = float(p.get("gd", 0.0))
-                            precio_pd = float(db["cartoncillo"][pd_]["precio_kg"]) if (pd_ != "Ninguno") else 0.0
-                        except Exception:
-                            pd_, gd, precio_pd = "Ninguno", 0.0, 0.0
-
-                        if pf != "Ninguno" and m2_papel > 0 and gf > 0 and precio_pf > 0:
-                            calc = hp_papel_f * m2_papel * (gf/1000.0) * precio_pf * f_cart
-                            st.write(f"Cartoncillo Cara: {float(det_row.get('Cartoncillo Cara', 0.0)):.4f} €")
-                            st.code(f"= {hp_papel_f} * {m2_papel:.6f} * ({gf}/1000) * {precio_pf} * {f_cart} = {calc:.4f}")
-                        if pd_ != "Ninguno" and m2_papel > 0 and gd > 0 and precio_pd > 0:
-                            calc = hp_papel_d * m2_papel * (gd/1000.0) * precio_pd * f_cart
-                            st.write(f"Cartoncillo Dorso: {float(det_row.get('Cartoncillo Dorso', 0.0)):.4f} €")
-                            st.code(f"= {hp_papel_d} * {m2_papel:.6f} * ({gd}/1000) * {precio_pd} * {f_cart} = {calc:.4f}")
-
-                        # Plancha Ondulado
-                        st.write(f"Plancha Ondulado: {float(det_row.get('Plancha Ondulado', 0.0)):.4f} €")
-                        try:
-                            if str(p.get("tipo_base","Ondulado/Cartón")) == "Ondulado/Cartón" and str(p.get("pl","Ninguna")) != "Ninguna" and m2_papel > 0:
-                                pl_name = str(p.get("pl","Ninguna"))
-                                ap = str(p.get("ap","B/C"))
-                                if bool(p.get("pl_dif", False)) and float(p.get("pl_h", 0)) > 0 and float(p.get("pl_w", 0)) > 0:
-                                    m2_plancha = (float(p.get("pl_w",0)) * float(p.get("pl_h",0))) / 1_000_000.0
-                                    st.code(f"m2_plancha = (pl_w*pl_h)/1e6 = ({float(p.get('pl_w',0))}*{float(p.get('pl_h',0))})/1e6 = {m2_plancha:.6f}")
-                                else:
-                                    m2_plancha = m2_papel
-                                    st.code(f"m2_plancha = m2_papel = {m2_plancha:.6f}")
-                                precio_m2 = float(db["planchas"][pl_name][ap])
-                                calc = hp_produccion * m2_plancha * precio_m2 * f_or
-                                st.code(f"= {hp_produccion} * {m2_plancha:.6f} * {precio_m2} * {f_or} = {calc:.4f}")
-                                if bool(p.get("flexografia", False)):
-                                    flexo = float(db.get("flexografia", {}).get("arreglo", 180.0))
-                                    st.code(f"Flexografía (fijo) = {flexo}")
-                                    st.code(f"Total plancha = {calc:.4f} + {flexo} = {(calc+flexo):.4f}")
-                            else:
-                                st.caption("— (No aplica: base no es ondulado o no hay plancha seleccionada)")
-                        except Exception:
-                            st.caption("— (No se ha podido desglosar la plancha ondulado)")
-
-                        # Material Rígido
-                        st.write(f"Material Rígido: {float(det_row.get('Material Rígido', 0.0)):.4f} €")
-                        try:
-                            if str(p.get("tipo_base","Ondulado/Cartón")) == "Material Rígido":
-                                if bool(p.get("rig_manual", False)):
-                                    mw, mh = float(p.get("rig_w", 0)), float(p.get("rig_h", 0))
-                                    precio_hoja = float(p.get("rig_precio_ud", 0.0))
-                                    st.code(f"hoja_rigida = {mw}x{mh} mm (manual) · precio_hoja = {precio_hoja}")
-                                else:
-                                    mat = str(p.get("mat_rigido","Ninguno"))
-                                    if mat != "Ninguno":
-                                        info = db["rigidos"][mat]
-                                        mw, mh = float(info.get("w",0)), float(info.get("h",0))
-                                        precio_hoja = float(info.get("precio_ud",0.0)) * f_or
-                                        st.code(f"hoja_rigida = {mw}x{mh} mm · precio_hoja = {float(info.get('precio_ud',0.0))} * {f_or} = {precio_hoja}")
-                                    else:
-                                        mw = mh = precio_hoja = 0.0
-                                by = 0
-                                if w > 0 and h > 0 and mw > 0 and mh > 0:
-                                    y1 = int(mw // w) * int(mh // h)
-                                    y2 = int(mw // h) * int(mh // w)
-                                    by = max(y1, y2)
-                                st.code(f"aprovechamiento_by = max(floor({mw}/{w})*floor({mh}/{h}), floor({mw}/{h})*floor({mh}/{w})) = {by}")
-                                if by > 0:
-                                    n_net = math.ceil(hp_produccion / by)
-                                    if capas_contracolado == 0:
-                                        merma_fija = merma_rigido_fija(int(n_net))
-                                        n_pl = int(n_net) + int(merma_fija)
-                                        st.code(f"hojas_netas = ceil({hp_produccion}/{by}) = {n_net} · merma_fija = {merma_fija} · hojas_total = {n_pl}")
-                                    else:
-                                        n_pl = int(math.ceil(float(n_net) * 1.02))
-                                        st.code(f"hojas_netas = ceil({hp_produccion}/{by}) = {n_net} · hojas_total = ceil({n_net}*1.02) = {n_pl}")
-                                    calc = float(n_pl) * float(precio_hoja)
-                                    st.code(f"= {n_pl} * {precio_hoja} = {calc:.4f}")
-                                else:
-                                    st.caption("— (No aplica: no se puede encajar la pieza en la hoja rígida)")
-                            else:
-                                st.caption("— (No aplica: la base no es material rígido)")
-                        except Exception:
-                            st.caption("— (No se ha podido desglosar el material rígido)")
-
-                        # Contracolado
-                        st.write(f"Contracolado: {float(det_row.get('Contracolado', 0.0)):.4f} €")
-                        try:
-                            peg_rate = _get_contracolado_rate_m2(p, db, f_narba)
-                        except Exception:
-                            peg_rate = 0.0
-                        if capas_contracolado > 0 and m2_papel > 0 and peg_rate > 0:
-                            calc = hp_produccion * m2_papel * peg_rate * capas_contracolado
-                            st.code(f"= {hp_produccion} * {m2_papel:.6f} * {peg_rate:.6f} * {capas_contracolado} = {calc:.4f}")
-                        else:
-                            st.caption("— (No aplica: capas_contracolado=0 o faltan datos)")
-
-                        # Impresión (incl. FR24 si aplica)
-                        st.write(f"Impresión: {float(det_row.get('Impresión', 0.0)):.4f} €")
-                        try:
-                            merma_imp_digital_hojas_local = int(_get_merma_impresion_digital_hojas(q_sel))
-                        except Exception:
-                            merma_imp_digital_hojas_local = 10
-                        fr24_enabled = bool(p.get("fr24", False))
-                        try:
-                            fr24_rate = float(p.get("fr24_rate", 0.05))
-                        except Exception:
-                            fr24_rate = 0.05
-                        fr24_m2_total = 0.0
-                        imp_total_calc = 0.0
-                        det_lines = []
-                        partes = partes_imp_units if partes_imp_units else [int(q_sel)]
-                        # Cara
-                        if im_c == "Digital":
-                            for q_run in partes:
-                                nb_run = float(int(q_run)) * float(pl)
-                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
-                                c = hp_run * m2_papel * 6.5
-                                imp_total_calc += c
-                                det_lines.append(f"cara DIGITAL: (nb_run+merma) * m2 * 6.5 = ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*6.5 = {c:.4f}")
-                                if fr24_enabled and m2_papel > 0:
-                                    fr24_m2_total += hp_run * m2_papel
-                        elif im_c == "Offset":
-                            tintas = int(p.get("nt", 0)) + (1 if bool(p.get("ba", False)) else 0)
-                            for q_run in partes:
-                                nb_run = int(round(int(q_run) * float(pl)))
-                                c_t = coste_offset_por_tinta(int(nb_run))
-                                c = c_t * int(tintas)
-                                imp_total_calc += c
-                                det_lines.append(f"cara OFFSET: coste_offset_por_tinta({nb_run})*tintas = {c_t:.4f}*{tintas} = {c:.4f}")
-                                if fr24_enabled and m2_papel > 0:
-                                    fr24_m2_total += float(nb_run) * m2_papel
-                        # Dorso
-                        if im_d == "Digital":
-                            for q_run in partes:
-                                nb_run = float(int(q_run)) * float(pl)
-                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
-                                c = hp_run * m2_papel * 6.5
-                                imp_total_calc += c
-                                det_lines.append(f"dorso DIGITAL: ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*6.5 = {c:.4f}")
-                                if fr24_enabled and m2_papel > 0:
-                                    fr24_m2_total += hp_run * m2_papel
-                        elif im_d == "Offset":
-                            tintas = int(p.get("nt_d", 0)) + (1 if bool(p.get("ba_d", False)) else 0)
-                            for q_run in partes:
-                                nb_run = int(round(int(q_run) * float(pl)))
-                                c_t = coste_offset_por_tinta(int(nb_run))
-                                c = c_t * int(tintas)
-                                imp_total_calc += c
-                                det_lines.append(f"dorso OFFSET: coste_offset_por_tinta({nb_run})*tintas = {c_t:.4f}*{tintas} = {c:.4f}")
-                                if fr24_enabled and m2_papel > 0:
-                                    fr24_m2_total += float(nb_run) * m2_papel
-                        c_fr24 = 0.0
-                        if fr24_enabled and fr24_rate > 0 and fr24_m2_total > 0:
-                            c_fr24 = fr24_m2_total * fr24_rate
-                            imp_total_calc += c_fr24
-                            det_lines.append(f"FR24: m2_total*rate = {fr24_m2_total:.6f}*{fr24_rate} = {c_fr24:.4f}")
-                        if det_lines:
-                            st.code("\n".join(det_lines))
-                        else:
-                            st.caption("— (No aplica: no hay impresión)")
-
-                        # Peliculado (incl. Laminado digital si aplica)
-                        st.write(f"Peliculado: {float(det_row.get('Peliculado', 0.0)):.4f} €")
-                        pel_lines = []
-                        pel_total_calc = 0.0
-                        # Peliculado offset (por lado)
-                        try:
-                            if str(p.get("pel","Sin Peliculado")) != "Sin Peliculado":
-                                precio_pel = float(db["peliculado"][str(p.get("pel"))])
-                                c = hp_produccion * m2_papel * precio_pel * f_narba
-                                pel_total_calc += c
-                                pel_lines.append(f"pel_cara OFFSET: {hp_produccion}*{m2_papel:.6f}*{precio_pel}*{f_narba} = {c:.4f}")
-                        except Exception:
-                            pass
-                        try:
-                            if str(p.get("pd","Ninguno")) != "Ninguno" and str(p.get("pel_d","Sin Peliculado")) != "Sin Peliculado":
-                                precio_pel = float(db["peliculado"][str(p.get("pel_d"))])
-                                c = hp_produccion * m2_papel * precio_pel * f_narba
-                                pel_total_calc += c
-                                pel_lines.append(f"pel_dorso OFFSET: {hp_produccion}*{m2_papel:.6f}*{precio_pel}*{f_narba} = {c:.4f}")
-                        except Exception:
-                            pass
-                        # Laminado digital (por tirada y lado)
-                        try:
-                            lam_rate = float(db.get("laminado_digital", 3.5))
-                        except Exception:
-                            lam_rate = 3.5
-                        if bool(p.get("ld", False)) and im_c == "Digital":
-                            for q_run in partes:
-                                nb_run = float(int(q_run)) * float(pl)
-                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
-                                c = hp_run * m2_papel * lam_rate
-                                pel_total_calc += c
-                                pel_lines.append(f"laminado_digital CARA: ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*{lam_rate} = {c:.4f}")
-                        if bool(p.get("ld_d", False)) and im_d == "Digital":
-                            for q_run in partes:
-                                nb_run = float(int(q_run)) * float(pl)
-                                hp_run = float(nb_run) + float(merma_imp_digital_hojas_local)
-                                c = hp_run * m2_papel * lam_rate
-                                pel_total_calc += c
-                                pel_lines.append(f"laminado_digital DORSO: ({nb_run:.0f}+{merma_imp_digital_hojas_local})*{m2_papel:.6f}*{lam_rate} = {c:.4f}")
-                        if pel_lines:
-                            st.code("\n".join(pel_lines))
-                        else:
-                            st.caption("— (No aplica: sin peliculado ni laminado digital)")
-
-                        # Corte
-                        st.write(f"Corte (Troquel/Plotter): {float(det_row.get('Corte (Troquel/Plotter)', 0.0)):.4f} €")
-                        st.code(
-                            f"hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas) = ceil({hp_produccion} * {auto_piezas}/{troquel_piezas_manual}) = {hp_corte}\n"
-                            f"Troquelado: arranque + hp_corte*tiro · Plotter: hp_corte*precio_hoja"
-                        )
-                        st.markdown("""**Troquelado**: `arranque + hp_corte * tiro`  (hp_corte = ceil(hp_produccion * auto_piezas/troquel_piezas)`
-**Plotter**: `hp_corte * precio_hoja_plotter`
-**Sin corte**: `0`""")
-
-
-                                                # Stamping
-                        st.write(f"Stamping: {float(det_row.get('Stamping', 0.0)):.4f} €")
-                        if bool(p.get("stamping", False)):
+                emb_opts_html += "<div class='sec-title'>📦 Opciones de embalaje</div>"
+                emb_opts_html += "<div class='card'>"
+                emb_opts_html += "<div class='small muted'>Precios de embalaje por opción. El valor mostrado es <b>€/ud repercutido</b>; si es multipack, también se indica el <b>€/caja</b> (€/ud × uds/caja).</div>"
+                for q in sorted(resumen_costes_export.keys()):
+                    emb_opts_html += f"<div style='margin-top:10px; font-weight:700;'>Cantidad: {int(q)} uds</div>"
+                    emb_opts_html += "<table class='comercial-table' style='margin-top:6px;'>"
+                    emb_opts_html += "<tr><th>Embalaje</th><th>Uds/caja</th><th>€/ud (repercutido)</th><th>€/caja</th><th>Total</th></tr>"
+                    opts = (resumen_costes_export.get(q, {}) or {}).get("embalajes_venta_por_opcion", [])
+                    if isinstance(opts, list) and opts:
+                        for opt in opts:
+                            nom = str(opt.get("nombre",""))
+                            unit = float(opt.get("unit", 0.0) or 0.0)
+                            total = float(opt.get("total", 0.0) or 0.0)
+                            upc = 1
                             try:
-                                sw = float(p.get("stamping_w", 0) or 0)
-                                sh = float(p.get("stamping_h", 0) or 0)
+                                e0 = _emb_by_name.get(nom, None)
+                                if isinstance(e0, dict):
+                                    upc = int(e0.get("uds_por_caja", 1) or 1)
                             except Exception:
-                                sw, sh = 0.0, 0.0
-                            area_m2 = max(0.0, (sw/1000.0) * (sh/1000.0))
-                            arr_s = float(db.get("stamping", {}).get("arreglo", 168.0)) if bool(p.get("stamping_cobrar_arreglo", True)) else 0.0
-                            pisada = float(db.get("stamping", {}).get("pisada", 0.21))
-                            peli = float(db.get("stamping", {}).get("pelicula_m2", 0.39))
-                            st.code(
-                                f"area_m2 = (w/1000)*(h/1000) = ({sw}/1000)*({sh}/1000) = {area_m2:.6f}\n"
-                                f"coste = arreglo + hp_corte*pisada + hp_corte*area_m2*pelicula\n"
-                                f"= {arr_s} + {hp_corte}*{pisada} + {hp_corte}*{area_m2:.6f}*{peli} = {(arr_s + hp_corte*pisada + hp_corte*area_m2*peli):.4f}"
+                                upc = 1
+                            upc = max(1, upc)
+                            caja = unit * upc
+                            emb_opts_html += (
+                                f"<tr><td>{html.escape(nom)}</td>"
+                                f"<td>{upc}</td>"
+                                f"<td>{_formato_precio_venta(unit)}</td>"
+                                f"<td>{_formato_precio_venta(caja)}</td>"
+                                f"<td>{_formato_precio_venta(total)}</td></tr>"
                             )
-                        else:
-                            st.caption("— (No aplica)")
+                    emb_opts_html += "</table>"
+                emb_opts_html += "</div>"
+        except Exception:
+            emb_opts_html = ""
 
-# Subtotal
-                        st.write(f"Subtotal Pieza: {float(det_row.get('Subtotal Pieza', 0.0)):.4f} €")
+        # Opcionales (a parte) - tabla
+        opc_html = ""
+        if bool(st.session_state.rell_enabled) or bool(st.session_state.arm_enabled):
+            opc_html += "<div class='sec-title'>🧩 Opcionales (a parte)</div>"
+            opc_html += "<div class='card'>"
+            opc_html += f"<div class='small muted'>Precios opcionales NO incluidos en el precio mostrado.</div>"
+            opc_html += "<table class='comercial-table' style='margin-top:10px;'>" \
+                       "<tr><th>Cantidad</th><th>Rellenado (€/ud)</th><th>Rellenado (TOTAL)</th><th>Armado (€/ud)</th><th>Armado (TOTAL)</th></tr>"
+            for row in resumen_costes_export.values():
+                q = int(row.get("Cantidad", 0))
+                op = row.get("opcionales_a_parte", {}) or {}
+                opc_html += f"<tr><td>{q}</td><td>{_formato_precio_venta(float(op.get('rellenado_unit',0.0)))}</td><td>{_formato_precio_venta(float(op.get('rellenado_total',0.0)))}</td><td>{_formato_precio_venta(float(op.get('armado_unit',0.0)))}</td><td>{_formato_precio_venta(float(op.get('armado_total',0.0)))}</td></tr>"
+            opc_html += "</table></div>"
 
-        # Mostrar (si existe) el desglose interno ya calculado para esta cantidad
-        if lista_cants_aud and desc_full:
-            with st.expander("🧩 Datos internos: desc_full / compras_legible / resumen_costes", expanded=False):
-                st.markdown("**desc_full (por cantidad)**")
-                st.json(desc_full.get(q_sel, {}))
-
-                st.markdown("**compras_legible (por cantidad)**")
-                st.json(compras_legible.get(q_sel, {}))
-
-                st.markdown("**resumen_costes (por cantidad)**")
-                resumen_costes_por_cantidad = st.session_state.get("resumen_costes", {})
-                # Compatibilidad hacia atrás: algunos JSON antiguos pueden guardarlo con otras claves
-                if not isinstance(resumen_costes_por_cantidad, dict):
-                    resumen_costes_por_cantidad = {}
-                st.json(resumen_costes_por_cantidad.get(q_sel, {}))
-
-
-# TAB DEBUG (SIEMPRE)
-# =========================================================
-with tab_debug:
-    lista_cants_dbg = parse_cantidades(st.session_state.cants_str_saved)
-
-    if lista_cants_dbg and desc_full:
-        sq = st.selectbox("Ver detalle por cantidad:", lista_cants_dbg, key="dbg_sel")
-
-        st.subheader("Desglose por pieza")
-        det = desc_full.get(sq, {}).get("det_piezas", [])
-        if det:
-            st.dataframe(pd.DataFrame(det), use_container_width=True)
+    
+        # PERFORMANCE: reutilizar oferta HTML del último cálculo si existe
+        if isinstance(st.session_state.get("_calc_cache"), dict) and st.session_state._calc_cache.get("_salida_comercial_version") == 2 and "oferta_html" in st.session_state._calc_cache and not bool(st.session_state.get("_calc_requested", False)):
+            oferta_html = st.session_state._calc_cache.get("oferta_html", "")
+            fname_html = st.session_state._calc_cache.get("fname_html", "oferta.html")
         else:
-            st.info("No hay detalle de piezas para esta cantidad.")
+            oferta_html = build_comercial_html(res_final, desc_html, extras_html, emb_html, (ext_html + emb_opts_html + opc_html), tabla)
+            safe_desc = re.sub(r'[\/*?:"<>|]', "", st.session_state.desc or "Oferta").replace(" ", "_")
+            safe_ver = re.sub(r'[\/*?:"<>|]', "", str(st.session_state.get("version_presupuesto", "") or "")).replace(" ", "_")
+            brf_tag = f"{safe_brf}_{safe_ver}" if safe_ver else safe_brf
+            # Incluir nº(s) de comercial en el nombre de archivo (si están informados)
+            c1_num = _parse_comercial_num(st.session_state.get('comercial_1', ''))
+            c2_num = _parse_comercial_num(st.session_state.get('comercial_2', ''))
+            com_parts = []
+            if c1_num is not None:
+                com_parts.append(f"C{c1_num}")
+            if c2_num is not None:
+                com_parts.append(f"C{c2_num}")
+            com_tag = "_".join(com_parts)
+            if com_tag:
+                fname_html = f"OFERTA_{brf_tag}_{com_tag}_{safe_cli}_{safe_desc}.html"
+            else:
+                fname_html = f"OFERTA_{brf_tag}_{safe_cli}_{safe_desc}.html"
+        # Guardar oferta HTML en caché
+        try:
+            if not isinstance(st.session_state._calc_cache, dict) or st.session_state._calc_cache is None:
+                st.session_state._calc_cache = {}
+            st.session_state._calc_cache["oferta_html"] = oferta_html
+            st.session_state._calc_cache["_salida_comercial_version"] = 2
+            st.session_state._calc_cache["fname_html"] = fname_html
+        except Exception:
+            pass
 
-        st.subheader("Resumen compras (materiales y procesos)")
-        comp = compras_legible.get(sq, {})
-        if comp:
-            materiales = comp.get("Materiales", {}) or {}
-            procesos = comp.get("Procesos", {}) or {}
 
-            c1, c2 = st.columns(2)
-            with c1:
-                st.markdown("**Materiales (compra estimada)**")
-                st.dataframe(pd.DataFrame([materiales]), use_container_width=True)
-            with c2:
-                st.markdown("**Procesos (coste estimado)**")
-                st.dataframe(pd.DataFrame([procesos]), use_container_width=True)
+        # Acceso rápido también en el panel lateral (sin quitar el botón de arriba)
+        with st.sidebar:
+            st.divider()
+    
 
-            total_materiales = sum(float(v or 0.0) for v in materiales.values())
-            total_procesos = sum(float(v or 0.0) for v in procesos.values())
-            total_compra = total_materiales + total_procesos
+        # =========================================================
+        # SIDEBAR: Descargas (OFERTA arriba, JSON abajo) - fiable 100%
+        # =========================================================
+    
+        # Guardamos el resumen de compras y el resumen de costes en session_state para export JSON.
+        # IMPORTANTE: esto debe ejecutarse en cada rerun después del cálculo, para que el JSON exportado
+        # incluya siempre "compras_legible" y "resumen_costes" actualizados.
+        try:
+            if isinstance(globals().get("compras_legible", None), dict):
+                st.session_state.compras_legible_export = deepcopy(globals().get("compras_legible", {}))
+            else:
+                st.session_state.compras_legible_export = {}
+        except Exception:
+            st.session_state.compras_legible_export = {}
 
-            st.metric("TOTAL COSTE (compra) · Materiales + Procesos", f"{total_compra:,.2f}€")
+        try:
+            if isinstance(globals().get("resumen_costes_export", None), dict):
+                st.session_state.resumen_costes_export = deepcopy(globals().get("resumen_costes_export", {}))
+            else:
+                st.session_state.resumen_costes_export = {}
+        except Exception:
+            st.session_state.resumen_costes_export = {}
+    # Refrescamos caché de export antes de mostrar botones
+        _refresh_export_cache_if_needed(force=False)
 
-        st.subheader("Externos (detalle)")
-        exd = desc_full.get(sq, {}).get("externos", [])
-        if exd:
-            st.dataframe(pd.DataFrame(exd), use_container_width=True)
-        else:
-            st.caption("Sin externos para esta cantidad.")
+        _od_mostrar_guardado()
 
-        st.subheader("Debug log (técnico)")
-        dbg = desc_full.get(sq, {}).get("debug", [])
-        if dbg:
-            st.dataframe(pd.DataFrame(dbg), use_container_width=True)
-        else:
-            st.caption("Sin entradas debug (solo se rellenan algunas líneas, p.ej. rígidos).")
+        with st.sidebar.expander("📄 Descargar oferta", expanded=True):
+            st.download_button(
+                "⬇️ Descargar OFERTA (HTML)",
+                data=oferta_html.encode("utf-8"),
+                file_name=fname_html,
+                mime="text/html",
+                use_container_width=True,
+                key="dl_oferta_html_sidebar_top"
+            )
+
+        with st.sidebar.expander("📤 Exportar JSON", expanded=True):
+            if st.session_state.get("_export_blob"):
+                st.download_button(
+                    "💾 Descargar JSON",
+                    data=st.session_state._export_blob,
+                    file_name=st.session_state._export_filename,
+                    mime="application/json",
+                    on_click=_mark_json_download,
+                    use_container_width=True,
+                    key="dl_json_sidebar_bottom"
+                )
+                if st.session_state.get("_json_downloaded", False):
+                    st.success(f"✅ JSON descargado: {st.session_state.get('_json_downloaded_filename', '') or st.session_state._export_filename}")
+            else:
+                st.caption("Calcula una vez para habilitar la exportación.")
+
+        st.download_button(
+            "⬇️ Descargar VISTA OFERTA (HTML)",
+            data=oferta_html.encode("utf-8"),
+            file_name=fname_html,
+            mime="text/html",
+            use_container_width=True
+        )
+
+        st.markdown(
+            "<div class='comercial-box'>"
+            f"<div class='comercial-header'>OFERTA COMERCIAL - {st.session_state.cli or 'CLIENTE'}</div>"
+            f"<div class='comercial-ref'>Ref. Briefing: {st.session_state.brf or '-'}</div>"
+            f"{desc_html}{extras_html}{emb_html}{ext_html}{emb_opts_html}{opc_html}{tabla}"
+            "</div>",
+            unsafe_allow_html=True
+        )
     else:
-        st.info("No hay desglose aún. Define cantidades y calcula.")
+        if res_final:
+            st.header(f"📊 Resumen de Venta: {st.session_state.cli}")
+            df = pd.DataFrame(res_final)[[
+                "Cantidad",
+                "Precio venta material (unitario)",
+                "Precio venta extras (unitario)",
+                "Precio venta embalaje (unitario)",
+                "Precio venta troquel (TOTAL)",
+                "Precio venta unitario (prod+emb+extras)",
+                "Precio venta unitario (todo)",
+                "Precio venta total"
+            ]]
+            st.dataframe(df, use_container_width=True)
+
+    # =========================================================
+
+    # =========================================================
+    # TAB AUDITORÍA (SIEMPRE)
+    # =========================================================
+with tab_auditoria:
+    _mostrar_auditoria_compras(compras_legible, resumen_costes_export)
